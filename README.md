@@ -1,12 +1,16 @@
 #更新
-支持群组上传图片，新加变量组
-`
-ENABLE_GROUP_UPLOAD=true              # 是否启用群组上传（默认启用）
-GROUP_UPLOAD_ADMIN_ONLY=false         # 是否仅管理员可上传（默认否）
-GROUP_ADMIN_IDS=123456789,987654321   # 管理员ID列表（逗号分隔）
-GROUP_UPLOAD_REPLY=true               # 是否自动回复CDN链接（默认是）
-GROUP_UPLOAD_DELETE_DELAY=0           # 回复消息删除延迟（秒），0表示不删除
-`
+
+```markdown
+## 群组上传功能配置一览
+
+| 变量名                  | 默认值   | 说明                          |
+|-------------------------|----------|-------------------------------|
+| `ENABLE_GROUP_UPLOAD`   | `true`   | 是否启用群组上传              |
+| `GROUP_UPLOAD_ADMIN_ONLY` | `false`  | 是否仅管理员可上传            |
+| `GROUP_ADMIN_IDS`       | -        | 管理员ID列表（逗号分隔）      |
+| `GROUP_UPLOAD_REPLY`    | `true`   | 是否自动回复CDN链接           |
+| `GROUP_UPLOAD_DELETE_DELAY` | `0`     | 回复消息删除延迟（秒），0表示不删除 |
+
 # Telegram Cloudflare ImageBed 设置教程
 
 ## 前端界面
