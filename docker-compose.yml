@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  telegram-imagebed:
+    build: .
+    image: tg-telegram-imagebed:latest
+    container_name: telegram-imagebed
+    ports:
+      - "18793:18793"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:18793/api/info')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

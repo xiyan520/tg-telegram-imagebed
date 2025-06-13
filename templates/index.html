@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram 云图床 - 免费图片托管服务</title>
+    
+    <!-- SEO优化 -->
+    <meta name="description" content="基于Telegram云存储的免费图床服务，支持Cloudflare CDN全球加速，永久保存">
+    <meta name="keywords" content="图床,免费图床,Telegram,云存储,CDN加速,图片托管">
+    
+    <!-- 元数据 -->
+    <meta name="base-url" content="{{ base_url if base_url else '' }}">
+    <meta name="cdn-domain" content="{{ cdn_domain if cdn_domain else '' }}">
+    <meta name="static-version" content="{{ static_version }}">
+    
+    <!-- DNS预解析 -->
+    <link rel="dns-prefetch" href="//api.telegram.org">
+    {% if cdn_domain %}
+    <link rel="dns-prefetch" href="{{ cdn_domain }}">
+    <link rel="preconnect" href="{{ cdn_domain }}" crossorigin>
+    {% endif %}
+    
+    <!-- 样式表 -->
+    <link rel="stylesheet" href="/static/css/styles.css?v={{ get_static_file_version('css/styles.css') }}">
+    
+    <!-- PWA支持 -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#6366f1">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- 导航栏 -->
+        <nav class="navbar">
+            <div class="navbar-content">
+                <a href="/" class="navbar-brand">
+                    <span class="navbar-logo">☁️</span>
+                    <span>Telegram 云图床</span>
+                    {% if cloudflare_cdn %}
+                    <span class="cdn-badge">Cloudflare</span>
+                    {% endif %}
+                </a>
+                <div class="navbar-actions">
+                    <!-- 管理员状态 -->
+                    <div class="admin-status" id="adminStatus" style="display: none;">
+                        <span class="admin-user" id="adminUserDisplay"></span>
+                        <button class="btn btn-secondary btn-sm" id="adminLogoutBtn">退出</button>
+                    </div>
+                    
+                    <!-- 管理入口 -->
+                    <a href="/admin" class="btn btn-secondary btn-sm">
+                        <span>🔧</span>
+                        <span>管理</span>
+                    </a>
+                    
+                    <!-- 主题切换 -->
+                    <button class="theme-toggle" id="themeToggle" aria-label="切换主题">
+                        <span class="theme-icon sun">☀️</span>
+                        <span class="theme-icon moon">🌙</span>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 主内容 -->
+        <main class="main-content">
+            <!-- Hero区域 -->
+            <section class="hero-section">
+                <h1 class="hero-title">极速图片托管服务</h1>
+                <p class="hero-subtitle">基于 Telegram 云存储，永久保存，全球加速</p>
+                {% if cloudflare_cdn %}
+                <div class="hero-badges">
+                    <span class="badge" style="background: linear-gradient(135deg, #f48120, #f97316); color: white;">
+                        Cloudflare CDN 加速
+                    </span>
+                    <span class="badge">自动缓存优化</span>
+                </div>
+                {% endif %}
+            </section>
+
+            <!-- 上传区域 -->
+            <div class="upload-container" id="uploadArea">
+                <div class="upload-icon">📤</div>
+                <h2 class="upload-title">拖拽或点击上传图片</h2>
+                <p class="upload-subtitle">支持 JPG、PNG、GIF、WEBP 等格式，单文件最大 20MB</p>
+                <button class="btn btn-primary" id="selectBtn">选择图片</button>
+                <input type="file" id="fileInput" class="file-input" accept="image/*" multiple>
+                {% if cloudflare_cdn %}
+                <p class="upload-note">🚀 自动通过 Cloudflare CDN 分发</p>
+                {% endif %}
+                
+                <!-- 进度条 -->
+                <div class="progress-container" id="progressContainer">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 上传结果 -->
+            <div class="results-container" id="resultsContainer"></div>
+        </main>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <div class="footer-content">
+                <!-- 统计信息 -->
+                <div class="footer-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">总文件数:</span>
+                        <span class="stat-value" id="totalFiles">--</span>
+                    </div>
+                    <span class="stat-divider">|</span>
+                    <div class="stat-item">
+                        <span class="stat-label">存储空间:</span>
+                        <span class="stat-value" id="totalSize">--</span>
+                    </div>
+                    <span class="stat-divider">|</span>
+                    <div class="stat-item">
+                        <span class="stat-label">运行时间:</span>
+                        <span class="stat-value" id="uptime">--</span>
+                    </div>
+                    <span class="stat-divider">|</span>
+                    <div class="stat-item">
+                        <span class="stat-label">今日上传:</span>
+                        <span class="stat-value" id="uploadSpeed">--</span>
+                    </div>
+                    {% if cloudflare_cdn %}
+                    <span class="stat-divider">|</span>
+                    <div class="stat-item">
+                        <span class="stat-label">CDN缓存:</span>
+                        <span class="stat-value" id="cdnCached">--</span>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <!-- CDN状态 -->
+                {% if cloudflare_cdn %}
+                <div class="footer-info">
+                    <p>
+                        <span class="status-indicator"></span>
+                        Cloudflare CDN 正常运行
+                    </p>
+                </div>
+                {% endif %}
+                
+                <!-- 版权信息 -->
+                <p class="footer-info">
+                    <a href="/admin" class="footer-link">管理后台</a>
+                    <span class="stat-divider">|</span>
+                    <a href="https://github.com" class="footer-link" target="_blank">GitHub</a>
+                </p>
+                <p class="footer-info">
+                    Powered by Telegram Cloud Storage 
+                    {% if cloudflare_cdn %}& Cloudflare CDN{% endif %}
+                </p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Toast容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- 全局配置 -->
+    <script>
+        window.APP_CONFIG = {
+            baseUrl: '{{ base_url if base_url else "" }}',
+            cdnDomain: '{{ cdn_domain if cdn_domain else "" }}',
+            cdnEnabled: {{ 'true' if cdn_enabled else 'false' }},
+            cloudflareCdn: {{ 'true' if cloudflare_cdn else 'false' }},
+            staticVersion: '{{ static_version }}'
+        };
+    </script>
+
+    <!-- Service Worker注册 -->
+    <script>
+        if ('serviceWorker' in navigator && location.protocol === 'https:') {
+            navigator.serviceWorker.register('/sw.js?v=' + window.APP_CONFIG.staticVersion)
+                .then(reg => console.log('Service Worker registered'))
+                .catch(err => console.error('Service Worker failed:', err));
+        }
+    </script>
+
+    <!-- 主脚本 -->
+    <script src="/static/js/main.js?v={{ get_static_file_version('js/main.js') }}" defer></script>
+</body>
+</html>

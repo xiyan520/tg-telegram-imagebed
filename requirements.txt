@@ -1,0 +1,13 @@
+# Telegram Bot
+python-telegram-bot==21.0.1
+
+# Web Framework
+Flask==3.0.0
+flask-cors==4.0.0
+
+# HTTP Client
+aiohttp==3.9.3
+requests==2.31.0
+
+# 其他依赖
+python-dotenv==1.0.0

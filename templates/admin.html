@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图床管理后台</title>
+    
+    <!-- 版本信息 -->
+    <meta name="static-version" content="{{ static_version }}">
+    
+    <!-- 样式表 -->
+    <link rel="stylesheet" href="/static/css/styles.css?v={{ get_static_file_version('css/styles.css') }}">
+    <link rel="stylesheet" href="/static/css/admin.css?v={{ get_static_file_version('css/admin.css') }}">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- 导航栏 -->
+        <nav class="navbar">
+            <div class="navbar-content">
+                <a href="/" class="navbar-brand">
+                    <span class="navbar-logo">☁️</span>
+                    <span>图床管理后台</span>
+                </a>
+                <div class="navbar-actions">
+                    <span class="admin-user" id="adminUser"></span>
+                    <button class="btn btn-secondary btn-sm" id="settingsBtn" style="display: none;">
+                        ⚙️ 设置
+                    </button>
+                    <button class="btn btn-secondary btn-sm" id="logoutBtn" style="display: none;">
+                        退出
+                    </button>
+                    <button class="theme-toggle" id="themeToggle">
+                        <span class="theme-icon sun">☀️</span>
+                        <span class="theme-icon moon">🌙</span>
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 主内容 -->
+        <main class="main-content">
+            <!-- 登录表单 -->
+            <div class="login-container" id="loginContainer">
+                <div class="login-box">
+                    <h2 class="login-title">🔐 管理员登录</h2>
+                    <form id="loginForm">
+                        <div class="form-group">
+                            <label for="username">用户名</label>
+                            <input type="text" id="username" name="username" required autofocus>
+                        </div>
+                        <div class="form-group">
+                            <label for="password">密码</label>
+                            <input type="password" id="password" name="password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block">登录</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- 管理面板 -->
+            <div class="admin-panel" id="adminPanel" style="display: none;">
+                <!-- 统计信息 -->
+                <div class="stats-overview">
+                    <div class="stat-box">
+                        <div class="stat-value" id="totalImages">--</div>
+                        <div class="stat-label">总图片数</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="totalSize">--</div>
+                        <div class="stat-label">总存储量</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="todayUploads">--</div>
+                        <div class="stat-label">今日上传</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="selectedCount">0</div>
+                        <div class="stat-label">已选择</div>
+                    </div>
+                </div>
+
+                <!-- 操作栏 -->
+                <div class="action-bar">
+                    <div class="action-left">
+                        <input type="checkbox" id="selectAll">
+                        <label for="selectAll">全选</label>
+                        <button class="btn btn-danger btn-sm" id="deleteSelectedBtn" disabled>
+                            删除选中 (<span id="deleteCount">0</span>)
+                        </button>
+                    </div>
+                    <div class="action-right">
+                        <input type="text" id="searchInput" placeholder="搜索文件名或用户..." class="search-input">
+                        <button class="btn btn-secondary btn-sm" id="refreshBtn">🔄 刷新</button>
+                        <button class="btn btn-warning btn-sm" id="clearCacheBtn">🧹 清理缓存</button>
+                    </div>
+                </div>
+
+                <!-- 图片列表 -->
+                <div class="image-list" id="imageList">
+                    <div class="loading-spinner">
+                        <div class="spinner"></div>
+                        <p>加载中...</p>
+                    </div>
+                </div>
+
+                <!-- 分页 -->
+                <div class="pagination" id="pagination"></div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 删除确认模态框 -->
+    <div class="modal" id="deleteModal">
+        <div class="modal-content">
+            <h3>⚠️ 确认删除</h3>
+            <p id="deleteMessage">确定要删除选中的图片吗？此操作不可恢复。</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelDeleteBtn">取消</button>
+                <button class="btn btn-danger" id="confirmDeleteBtn">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 设置模态框 -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <h3>⚙️ 修改管理员凭据</h3>
+            <form id="settingsForm">
+                <div class="form-group">
+                    <label for="newUsername">新用户名</label>
+                    <input type="text" id="newUsername" minlength="3" placeholder="留空则不修改">
+                    <div class="form-hint">至少3个字符</div>
+                </div>
+                <div class="form-group">
+                    <label for="newPassword">新密码</label>
+                    <input type="password" id="newPassword" minlength="6" placeholder="留空则不修改">
+                    <div class="form-hint">至少6个字符</div>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">确认密码</label>
+                    <input type="password" id="confirmPassword" placeholder="再次输入新密码">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="cancelSettingsBtn">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast容器 -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- 配置 -->
+    <script>
+        window.APP_CONFIG = {
+            staticVersion: '{{ static_version }}'
+        };
+    </script>
+
+    <!-- 管理脚本 -->
+    <script src="/static/js/admin.js?v={{ get_static_file_version('js/admin.js') }}"></script>
+</body>
+</html>
