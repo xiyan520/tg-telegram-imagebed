@@ -10,6 +10,7 @@
 | `GROUP_ADMIN_IDS`       | -        | 管理员ID列表（逗号分隔）      |
 | `GROUP_UPLOAD_REPLY`    | `true`   | 是否自动回复CDN链接           |
 | `GROUP_UPLOAD_DELETE_DELAY` | `0`     | 回复消息删除延迟（秒），0表示不删除 |
+```
 
 # Telegram Cloudflare ImageBed 设置教程
 
