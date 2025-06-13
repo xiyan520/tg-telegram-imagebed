@@ -1,7 +1,6 @@
 #更新
 支持群组上传图片，新加变量组
 `
-# 群组上传功能配置
 ENABLE_GROUP_UPLOAD=true              # 是否启用群组上传（默认启用）
 GROUP_UPLOAD_ADMIN_ONLY=false         # 是否仅管理员可上传（默认否）
 GROUP_ADMIN_IDS=123456789,987654321   # 管理员ID列表（逗号分隔）
