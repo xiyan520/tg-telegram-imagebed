@@ -4,6 +4,7 @@
 Telegram图床机器人 - 云存储版 (简化版，无统计系统)
 支持自定义CDN域名、智能路由、缓存预热等高级功能
 后端CDN缓存监控版本 - 修复重定向循环和文件路径过期问题
+新增群组图片监听功能
 """
 import logging
 import hashlib
@@ -37,6 +38,13 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 STORAGE_CHAT_ID = int(os.getenv("STORAGE_CHAT_ID", ""))
 SECRET_KEY = os.getenv("SECRET_KEY", "your_secret_key_2024")
 PORT = int(os.getenv("PORT", "18793"))
+
+# 群组上传功能配置
+ENABLE_GROUP_UPLOAD = os.getenv("ENABLE_GROUP_UPLOAD", "true").lower() == "true"
+GROUP_UPLOAD_ADMIN_ONLY = os.getenv("GROUP_UPLOAD_ADMIN_ONLY", "false").lower() == "true"
+GROUP_ADMIN_IDS = os.getenv("GROUP_ADMIN_IDS", "")  # 逗号分隔的管理员ID列表
+GROUP_UPLOAD_REPLY = os.getenv("GROUP_UPLOAD_REPLY", "true").lower() == "true"  # 是否回复消息
+GROUP_UPLOAD_DELETE_DELAY = int(os.getenv("GROUP_UPLOAD_DELETE_DELAY", "0"))  # 删除回复的延迟（秒），0表示不删除
 
 # CDN 相关配置
 CDN_ENABLED = os.getenv("CDN_ENABLED", "true").lower() == "true"
@@ -113,6 +121,11 @@ logger.info(f"STORAGE_CHAT_ID: {STORAGE_CHAT_ID}")
 logger.info(f"PORT: {PORT}")
 logger.info(f"DATABASE_PATH: {DATABASE_PATH}")
 logger.info(f"CDN_ENABLED: {CDN_ENABLED}")
+logger.info(f"群组上传功能: {ENABLE_GROUP_UPLOAD}")
+if ENABLE_GROUP_UPLOAD:
+    logger.info(f"仅管理员: {GROUP_UPLOAD_ADMIN_ONLY}")
+    logger.info(f"管理员ID: {GROUP_ADMIN_IDS or '未配置'}")
+    logger.info(f"回复消息: {GROUP_UPLOAD_REPLY}")
 if CDN_ENABLED:
     logger.info(f"CLOUDFLARE_CDN_DOMAIN: {CLOUDFLARE_CDN_DOMAIN or '未配置'}")
     logger.info(f"智能路由: {ENABLE_SMART_ROUTING}")
@@ -122,6 +135,15 @@ if CDN_ENABLED:
     logger.info(f"最大重定向次数: {CDN_REDIRECT_MAX_COUNT}")
     logger.info(f"新文件重定向延迟: {CDN_REDIRECT_DELAY}秒")
 logger.info("=" * 60)
+
+# 解析管理员ID列表
+GROUP_ADMIN_ID_LIST = []
+if GROUP_ADMIN_IDS:
+    try:
+        GROUP_ADMIN_ID_LIST = [int(id.strip()) for id in GROUP_ADMIN_IDS.split(',') if id.strip()]
+        logger.info(f"已配置 {len(GROUP_ADMIN_ID_LIST)} 个群组管理员ID")
+    except Exception as e:
+        logger.error(f"解析管理员ID列表失败: {e}")
 
 # ===================== 单实例锁 =====================
 def acquire_lock():
@@ -228,6 +250,7 @@ admin_module.configure_admin_session(app)
 # 全局变量
 start_time = time.time()
 telegram_app = None
+bot_info = None  # 存储机器人信息
 
 # CDN缓存监控队列
 cdn_monitor_queue = queue.Queue(maxsize=CDN_MONITOR_QUEUE_SIZE)
@@ -519,15 +542,63 @@ def init_database():
                 cdn_cache_time TIMESTAMP,
                 access_count INTEGER DEFAULT 0,
                 last_accessed TIMESTAMP,
-                last_file_path_update TIMESTAMP
+                last_file_path_update TIMESTAMP,
+                is_group_upload BOOLEAN DEFAULT 0,
+                group_message_id INTEGER
             )
         ''')
+        
+        # 检查并添加新列（用于升级现有数据库）
+        cursor.execute("PRAGMA table_info(file_storage)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        # 添加缺失的列
+        if 'is_group_upload' not in columns:
+            logger.info("添加 is_group_upload 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN is_group_upload BOOLEAN DEFAULT 0')
+        
+        if 'group_message_id' not in columns:
+            logger.info("添加 group_message_id 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN group_message_id INTEGER')
+        
+        if 'last_file_path_update' not in columns:
+            logger.info("添加 last_file_path_update 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN last_file_path_update TIMESTAMP')
+        
+        if 'etag' not in columns:
+            logger.info("添加 etag 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN etag TEXT')
+        
+        if 'file_hash' not in columns:
+            logger.info("添加 file_hash 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN file_hash TEXT')
+        
+        if 'cdn_url' not in columns:
+            logger.info("添加 cdn_url 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN cdn_url TEXT')
+        
+        if 'cdn_cached' not in columns:
+            logger.info("添加 cdn_cached 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN cdn_cached BOOLEAN DEFAULT 0')
+        
+        if 'cdn_cache_time' not in columns:
+            logger.info("添加 cdn_cache_time 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN cdn_cache_time TIMESTAMP')
+        
+        if 'access_count' not in columns:
+            logger.info("添加 access_count 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN access_count INTEGER DEFAULT 0')
+        
+        if 'last_accessed' not in columns:
+            logger.info("添加 last_accessed 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN last_accessed TIMESTAMP')
         
         # 创建索引
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_storage_created ON file_storage(created_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_original_filename ON file_storage(original_filename)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_file_size ON file_storage(file_size)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_cdn_cached ON file_storage(cdn_cached)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_group_upload ON file_storage(is_group_upload)')
         
         conn.commit()
         conn.close()
@@ -716,13 +787,15 @@ def save_file_info(encrypted_id: str, file_info: Dict[str, Any]):
         if CDN_ENABLED and CLOUDFLARE_CDN_DOMAIN:
             cdn_url = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{encrypted_id}"
         
-        cursor.execute('''
-            INSERT INTO file_storage (
-                encrypted_id, file_id, file_path, upload_time, user_id, 
-                username, file_size, source, original_filename, mime_type,
-                etag, file_hash, cdn_url, cdn_cached
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
+        # 检查表结构，动态构建INSERT语句
+        cursor.execute("PRAGMA table_info(file_storage)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        # 基础字段（所有版本都有的）
+        insert_columns = ['encrypted_id', 'file_id', 'file_path', 'upload_time', 
+                         'user_id', 'username', 'file_size', 'source', 
+                         'original_filename', 'mime_type']
+        insert_values = [
             encrypted_id,
             file_info['file_id'],
             file_info['file_path'],
@@ -732,12 +805,33 @@ def save_file_info(encrypted_id: str, file_info: Dict[str, Any]):
             file_info.get('file_size', 0),
             file_info.get('source', 'unknown'),
             file_info.get('original_filename', ''),
-            file_info.get('mime_type', 'image/jpeg'),
-            etag,
-            file_info.get('file_hash', ''),
-            cdn_url,
-            0
-        ))
+            file_info.get('mime_type', 'image/jpeg')
+        ]
+        
+        # 可选字段（新版本添加的）
+        optional_fields = {
+            'etag': etag,
+            'file_hash': file_info.get('file_hash', ''),
+            'cdn_url': cdn_url,
+            'cdn_cached': 0,
+            'is_group_upload': file_info.get('is_group_upload', 0),
+            'group_message_id': file_info.get('group_message_id', None)
+        }
+        
+        # 只添加存在的列
+        for col, val in optional_fields.items():
+            if col in columns:
+                insert_columns.append(col)
+                insert_values.append(val)
+        
+        # 构建SQL语句
+        placeholders = ','.join(['?' for _ in insert_columns])
+        columns_str = ','.join(insert_columns)
+        
+        cursor.execute(f'''
+            INSERT INTO file_storage ({columns_str}) 
+            VALUES ({placeholders})
+        ''', insert_values)
         
         conn.commit()
         logger.info(f"文件信息已保存: {encrypted_id}")
@@ -783,10 +877,20 @@ def get_stats() -> Dict[str, Any]:
         cursor.execute('SELECT COUNT(*) FROM file_storage WHERE cdn_cached = 0 AND cdn_url IS NOT NULL')
         pending_cache = cursor.fetchone()[0]
         
+        # 获取群组上传数（检查列是否存在）
+        group_uploads = 0
+        cursor.execute("PRAGMA table_info(file_storage)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'is_group_upload' in columns:
+            cursor.execute('SELECT COUNT(*) FROM file_storage WHERE is_group_upload = 1')
+            group_uploads = cursor.fetchone()[0]
+        
         return {
             'total_files': total_files,
             'total_size': total_size,
             'today_uploads': today_uploads,
+            'group_uploads': group_uploads,
             'cdn_stats': {
                 'cached_files': cached_files,
                 'pending_cache': pending_cache,
@@ -800,6 +904,7 @@ def get_stats() -> Dict[str, Any]:
             'total_files': 0,
             'total_size': 0,
             'today_uploads': 0,
+            'group_uploads': 0,
             'cdn_stats': {
                 'cached_files': 0,
                 'pending_cache': 0,
@@ -817,14 +922,36 @@ def get_recent_uploads(limit: int = 10, page: int = 1) -> list:
     
     try:
         offset = (page - 1) * limit
-        cursor.execute('''
-            SELECT encrypted_id, original_filename, file_size, created_at, username, cdn_cached
+        
+        # 检查列是否存在
+        cursor.execute("PRAGMA table_info(file_storage)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        # 构建SELECT语句
+        select_columns = ['encrypted_id', 'original_filename', 'file_size', 
+                         'created_at', 'username', 'cdn_cached']
+        
+        if 'is_group_upload' in columns:
+            select_columns.append('is_group_upload')
+        
+        columns_str = ', '.join(select_columns)
+        
+        cursor.execute(f'''
+            SELECT {columns_str}
             FROM file_storage
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
         ''', (limit, offset))
         
-        return [dict(row) for row in cursor.fetchall()]
+        results = []
+        for row in cursor.fetchall():
+            row_dict = dict(row)
+            # 如果没有 is_group_upload 列，默认为 0
+            if 'is_group_upload' not in row_dict:
+                row_dict['is_group_upload'] = 0
+            results.append(row_dict)
+        
+        return results
     except:
         return []
     finally:
@@ -1253,7 +1380,8 @@ def upload_file():
             'source': 'web_upload',
             'original_filename': file.filename,
             'mime_type': mime_type,
-            'file_hash': file_hash
+            'file_hash': file_hash,
+            'is_group_upload': 0
         }
         save_file_info(encrypted_id, file_data)
         
@@ -1299,11 +1427,13 @@ def get_stats_api():
         'cdn_domain': f"https://{CLOUDFLARE_CDN_DOMAIN}" if CLOUDFLARE_CDN_DOMAIN else None,
         'storage_type': 'telegram_cloud',
         'web_files': stats['today_uploads'],
+        'group_uploads': stats['group_uploads'],
         'cdn_enabled': CDN_ENABLED,
         'cdn_cache_ttl': CDN_CACHE_TTL if CDN_ENABLED else 0,
         'cdn_stats': stats['cdn_stats'],
         'cdn_monitor_enabled': CDN_MONITOR_ENABLED,
-        'cdn_redirect_enabled': CDN_REDIRECT_ENABLED
+        'cdn_redirect_enabled': CDN_REDIRECT_ENABLED,
+        'group_upload_enabled': ENABLE_GROUP_UPLOAD
     })
     
     response.headers['Access-Control-Allow-Origin'] = '*'
@@ -1330,6 +1460,7 @@ def get_recent_api():
             file['image_url'] = f"{base_url}/image/{file['encrypted_id']}"
             file['cdn_url'] = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{file['encrypted_id']}" if CLOUDFLARE_CDN_DOMAIN else None
             file['cdn_cached'] = file.get('cdn_cached', 0)
+            file['is_group_upload'] = file.get('is_group_upload', 0)
         
         response = jsonify({
             'success': True,
@@ -1371,6 +1502,7 @@ def get_info():
         'storage_chat_configured': STORAGE_CHAT_ID != 0,
         'uptime': int(time.time() - start_time),
         'total_files': stats['total_files'],
+        'group_uploads': stats['group_uploads'],
         'cdn_enabled': CDN_ENABLED,
         'cloudflare_cdn': bool(CLOUDFLARE_CDN_DOMAIN),
         'cdn_cache_ttl': CDN_CACHE_TTL if CDN_ENABLED else 0,
@@ -1382,6 +1514,9 @@ def get_info():
         'cdn_redirect_enabled': CDN_REDIRECT_ENABLED,
         'cdn_redirect_max_count': CDN_REDIRECT_MAX_COUNT,
         'cdn_redirect_delay': CDN_REDIRECT_DELAY,
+        'group_upload_enabled': ENABLE_GROUP_UPLOAD,
+        'group_upload_admin_only': GROUP_UPLOAD_ADMIN_ONLY,
+        'group_upload_reply': GROUP_UPLOAD_REPLY,
         'max_file_size': 20 * 1024 * 1024,
         'static_version': STATIC_VERSION,
         'features': [
@@ -1411,7 +1546,10 @@ def get_info():
             'automatic_file_path_refresh',
             'telegram_file_expiry_handling',
             'new_file_redirect_delay',
-            'improved_cors_support'
+            'improved_cors_support',
+            'group_upload_support',
+            'group_admin_control',
+            'auto_reply_with_cdn_link'
         ]
     })
     
@@ -1429,6 +1567,7 @@ def health_check():
         'cloudflare_cdn': bool(CLOUDFLARE_CDN_DOMAIN),
         'cdn_monitor_active': cdn_monitor_thread and cdn_monitor_thread.is_alive() if CDN_MONITOR_ENABLED else False,
         'cdn_redirect_enabled': CDN_REDIRECT_ENABLED,
+        'group_upload_enabled': ENABLE_GROUP_UPLOAD,
         'version': STATIC_VERSION
     })
     response.headers['Access-Control-Allow-Origin'] = '*'
@@ -1632,6 +1771,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if CDN_REDIRECT_ENABLED:
         redirect_info = f"\n🔄 *智能重定向:* 已启用 (最大{CDN_REDIRECT_MAX_COUNT}次)"
     
+    group_upload_info = ""
+    if ENABLE_GROUP_UPLOAD:
+        group_upload_info = f"\n📸 *群组上传:* 已启用 (已上传: {stats['group_uploads']}张)"
+        if GROUP_UPLOAD_ADMIN_ONLY:
+            group_upload_info += f"\n👮 *权限控制:* 仅管理员"
+    
     await update.message.reply_text(
         "☁️ *Telegram 云图床机器人*\n\n"
         "✨ *功能特点:*\n"
@@ -1646,13 +1791,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• 智能CDN重定向优化\n"
         "• 重定向循环保护\n"
         "• 自动刷新过期文件路径\n"
-        "• 新文件延迟重定向保护\n\n"
+        "• 新文件延迟重定向保护\n"
+        "• 群组图片自动收录\n\n"
         f"🌐 *Web界面:* {get_domain(None)}\n"
         f"🔧 *管理后台:* {get_domain(None)}/admin\n"
         f"📡 *服务器IP:* {LOCAL_IP}:{PORT}\n"
         f"{cdn_info}\n"
         f"{monitor_info}\n"
         f"{redirect_info}\n"
+        f"{group_upload_info}\n"
         f"📊 *已存储:* {stats['total_files']} 个文件\n"
         f"💾 *总大小:* {stats['total_size'] / 1024 / 1024:.1f} MB\n"
         f"🚀 *CDN状态:* {'Cloudflare已启用' if CLOUDFLARE_CDN_DOMAIN else ('已启用' if CDN_ENABLED else '未启用')}\n"
@@ -1698,7 +1845,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'file_size': document.file_size,
                 'source': 'telegram_bot',
                 'original_filename': document.file_name or 'large_image.jpg',
-                'mime_type': document.mime_type or 'image/jpeg'
+                'mime_type': document.mime_type or 'image/jpeg',
+                'is_group_upload': 0
             }
             save_file_info(encrypted_id, file_data)
             
@@ -1753,7 +1901,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'username': username,
                 'file_size': file_info.file_size,
                 'source': 'telegram_bot',
-                'mime_type': get_mime_type(file_info.file_path)
+                'mime_type': get_mime_type(file_info.file_path),
+                'is_group_upload': 0
             }
             save_file_info(encrypted_id, file_data)
             
@@ -1789,6 +1938,323 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error processing photo: {e}")
         await msg.edit_text("❌ 处理失败，请重试")
 
+async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理群组中的图片（非机器人发送）"""
+    if not ENABLE_GROUP_UPLOAD:
+        return
+    
+    # 检查是否在存储群组中
+    if update.effective_chat.id != STORAGE_CHAT_ID:
+        return
+    
+    # 检查是否是机器人自己发的消息（避免处理自己发送的备份图片）
+    if update.effective_user.is_bot:
+        return
+    
+    # 检查是否是机器人自己
+    global bot_info
+    if bot_info and update.effective_user.id == bot_info.id:
+        return
+    
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name or "未知用户"
+    
+    # 检查权限
+    if GROUP_UPLOAD_ADMIN_ONLY and GROUP_ADMIN_ID_LIST:
+        if user_id not in GROUP_ADMIN_ID_LIST:
+            logger.info(f"非管理员用户 {username}({user_id}) 在群组中发送图片，跳过处理")
+            return
+    
+    try:
+        # 检查是否是文档（大图片）
+        if update.message.document and update.message.document.mime_type.startswith('image/'):
+            # 处理作为文档发送的大图片
+            document = update.message.document
+            file_info = await context.bot.get_file(document.file_id)
+            
+            logger.info(f"群组用户 {username}({user_id}) 上传大图片: file_id={document.file_id}, size={document.file_size}")
+            
+            encrypted_id = encrypt_file_id(document.file_id, file_info.file_path)
+            
+            file_data = {
+                'file_id': document.file_id,
+                'file_path': file_info.file_path,
+                'upload_time': int(time.time()),
+                'user_id': user_id,
+                'username': username,
+                'file_size': document.file_size,
+                'source': 'telegram_group',
+                'original_filename': document.file_name or f'group_image_{int(time.time())}.jpg',
+                'mime_type': document.mime_type or 'image/jpeg',
+                'is_group_upload': 1,
+                'group_message_id': update.message.message_id
+            }
+            save_file_info(encrypted_id, file_data)
+            
+            # 生成链接
+            permanent_url = f"{get_domain(None)}/image/{encrypted_id}"
+            cdn_url = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{encrypted_id}" if CLOUDFLARE_CDN_DOMAIN else None
+            
+            # 如果启用了回复
+            if GROUP_UPLOAD_REPLY:
+                reply_text = f"✅ *图片已收录*\n\n"
+                
+                if cdn_url and file_data.get('cdn_cached'):
+                    reply_text += f"🌐 *CDN链接:*\n`{cdn_url}`\n"
+                else:
+                    reply_text += f"🔗 *直链:*\n`{permanent_url}`\n"
+                    if cdn_url:
+                        reply_text += f"\n⏳ *CDN缓存中...*"
+                
+                reply_text += (
+                    f"\n📊 *文件信息:*\n"
+                    f"• 大小: {document.file_size / 1024 / 1024:.1f} MB\n"
+                    f"• ID: `{encrypted_id[:12]}...`\n"
+                )
+                
+                reply_msg = await update.message.reply_text(
+                    reply_text,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
+                
+                # 如果设置了删除延迟
+                if GROUP_UPLOAD_DELETE_DELAY > 0:
+                    await asyncio.sleep(GROUP_UPLOAD_DELETE_DELAY)
+                    try:
+                        await reply_msg.delete()
+                    except:
+                        pass
+            
+            logger.info(f"群组大图片处理完成: {encrypted_id}")
+            
+        elif update.message.photo:
+            # 处理普通图片
+            photo = update.message.photo[-1]
+            file_info = await context.bot.get_file(photo.file_id)
+            
+            logger.info(f"群组用户 {username}({user_id}) 上传图片: file_id={photo.file_id}")
+            
+            encrypted_id = encrypt_file_id(photo.file_id, file_info.file_path)
+            
+            file_data = {
+                'file_id': photo.file_id,
+                'file_path': file_info.file_path,
+                'upload_time': int(time.time()),
+                'user_id': user_id,
+                'username': username,
+                'file_size': file_info.file_size,
+                'source': 'telegram_group',
+                'original_filename': f'group_image_{int(time.time())}.jpg',
+                'mime_type': get_mime_type(file_info.file_path),
+                'is_group_upload': 1,
+                'group_message_id': update.message.message_id
+            }
+            save_file_info(encrypted_id, file_data)
+            
+            # 生成链接
+            permanent_url = f"{get_domain(None)}/image/{encrypted_id}"
+            cdn_url = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{encrypted_id}" if CLOUDFLARE_CDN_DOMAIN else None
+            
+            # 如果启用了回复
+            if GROUP_UPLOAD_REPLY:
+                reply_text = f"✅ *图片已收录*\n\n"
+                
+                if cdn_url and file_data.get('cdn_cached'):
+                    reply_text += f"🌐 *CDN链接:*\n`{cdn_url}`\n"
+                else:
+                    reply_text += f"🔗 *直链:*\n`{permanent_url}`\n"
+                    if cdn_url:
+                        reply_text += f"\n⏳ *CDN缓存中...*"
+                
+                reply_text += (
+                    f"\n📊 *文件信息:*\n"
+                    f"• 大小: {file_info.file_size / 1024:.1f} KB\n"
+                    f"• ID: `{encrypted_id[:12]}...`\n"
+                )
+                
+                reply_msg = await update.message.reply_text(
+                    reply_text,
+                    parse_mode='Markdown',
+                    disable_web_page_preview=True
+                )
+                
+                # 如果设置了删除延迟
+                if GROUP_UPLOAD_DELETE_DELAY > 0:
+                    await asyncio.sleep(GROUP_UPLOAD_DELETE_DELAY)
+                    try:
+                        await reply_msg.delete()
+                    except:
+                        pass
+            
+            logger.info(f"群组图片处理完成: {encrypted_id}")
+            
+    except Exception as e:
+        logger.error(f"处理群组图片失败: {e}")
+        import traceback
+        traceback.print_exc()
+
+async def wait_for_cdn_cache(encrypted_id: str, cdn_url: str, timeout: int = 30) -> bool:
+    """等待CDN缓存完成"""
+    if not CLOUDFLARE_CDN_DOMAIN:
+        return False
+    
+    # 触发CDN预热
+    if ENABLE_CACHE_WARMING:
+        logger.info(f"开始CDN预热: {encrypted_id}")
+        await asyncio.sleep(CACHE_WARMING_DELAY)
+        await cloudflare_cdn.warm_cache(cdn_url, encrypted_id)
+        await asyncio.sleep(3)  # 给CDN一点时间处理
+    
+    # 等待缓存完成
+    start_time = time.time()
+    check_interval = 2
+    check_count = 0
+    
+    while time.time() - start_time < timeout:
+        if cloudflare_cdn.check_cdn_status(encrypted_id):
+            update_cdn_cache_status(encrypted_id, True)
+            logger.info(f"CDN缓存成功: {encrypted_id} (第{check_count + 1}次检查)")
+            return True
+        
+        check_count += 1
+        await asyncio.sleep(check_interval)
+        logger.debug(f"等待CDN缓存: {encrypted_id} (第{check_count}次检查)")
+    
+    logger.warning(f"CDN缓存超时: {encrypted_id} (共检查{check_count}次)")
+    return False
+
+async def handle_group_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理群组中的图片（非机器人发送）"""
+    if not ENABLE_GROUP_UPLOAD:
+        return
+    
+    # 检查是否在存储群组中
+    if update.effective_chat.id != STORAGE_CHAT_ID:
+        return
+    
+    # 检查是否是机器人自己发的消息（避免处理自己发送的备份图片）
+    if update.effective_user.is_bot:
+        return
+    
+    # 检查是否是机器人自己
+    global bot_info
+    if bot_info and update.effective_user.id == bot_info.id:
+        return
+    
+    user_id = update.effective_user.id
+    username = update.effective_user.username or update.effective_user.first_name or "未知用户"
+    
+    # 检查权限
+    if GROUP_UPLOAD_ADMIN_ONLY and GROUP_ADMIN_ID_LIST:
+        if user_id not in GROUP_ADMIN_ID_LIST:
+            logger.info(f"非管理员用户 {username}({user_id}) 在群组中发送图片，跳过处理")
+            return
+    
+    try:
+        file_id = None
+        file_path = None
+        file_size = 0
+        file_name = None
+        mime_type = None
+        is_document = False
+        
+        # 判断是文档还是图片
+        if update.message.document and update.message.document.mime_type.startswith('image/'):
+            # 处理作为文档发送的大图片
+            document = update.message.document
+            file_info = await context.bot.get_file(document.file_id)
+            file_id = document.file_id
+            file_path = file_info.file_path
+            file_size = document.file_size
+            file_name = document.file_name
+            mime_type = document.mime_type
+            is_document = True
+            logger.info(f"群组用户 {username}({user_id}) 上传大图片: file_id={file_id}, size={file_size}")
+        elif update.message.photo:
+            # 处理普通图片
+            photo = update.message.photo[-1]
+            file_info = await context.bot.get_file(photo.file_id)
+            file_id = photo.file_id
+            file_path = file_info.file_path
+            file_size = file_info.file_size
+            mime_type = get_mime_type(file_path)
+            logger.info(f"群组用户 {username}({user_id}) 上传图片: file_id={file_id}")
+        else:
+            return
+        
+        # 生成加密ID
+        encrypted_id = encrypt_file_id(file_id, file_path)
+        
+        # 保存文件信息
+        file_data = {
+            'file_id': file_id,
+            'file_path': file_path,
+            'upload_time': int(time.time()),
+            'user_id': user_id,
+            'username': username,
+            'file_size': file_size,
+            'source': 'telegram_group',
+            'original_filename': file_name or f'group_image_{int(time.time())}.jpg',
+            'mime_type': mime_type or 'image/jpeg',
+            'is_group_upload': 1,
+            'group_message_id': update.message.message_id
+        }
+        save_file_info(encrypted_id, file_data)
+        
+        # 生成链接
+        cdn_url = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{encrypted_id}" if CLOUDFLARE_CDN_DOMAIN else None
+        
+        # 如果启用了回复且有CDN
+        if GROUP_UPLOAD_REPLY and cdn_url:
+            # 等待CDN缓存完成
+            is_cached = await wait_for_cdn_cache(encrypted_id, cdn_url, timeout=30)
+            
+            # 只有在CDN缓存成功后才发送回复
+            if is_cached:
+                # 构建回复文本
+                reply_text = f"✅ 图片已收录\n\n🌐 {cdn_url}"
+                
+                # 发送回复
+                reply_msg = await update.message.reply_text(
+                    reply_text,
+                    disable_web_page_preview=False  # 显示链接预览
+                )
+                
+                # 如果设置了删除延迟
+                if GROUP_UPLOAD_DELETE_DELAY > 0:
+                    await asyncio.sleep(GROUP_UPLOAD_DELETE_DELAY)
+                    try:
+                        await reply_msg.delete()
+                    except Exception as e:
+                        logger.debug(f"删除回复消息失败: {e}")
+                
+                # 记录成功信息
+                file_type = "大图片" if is_document else "图片"
+                logger.info(f"群组{file_type}处理完成并已缓存: {encrypted_id}")
+            else:
+                # CDN预热失败
+                logger.warning(f"CDN预热失败，不发送回复: {encrypted_id}")
+                # 如果CDN预热失败，仍然将任务加入监控队列
+                if CDN_MONITOR_ENABLED:
+                    add_to_cdn_monitor(encrypted_id, file_data['upload_time'])
+                    logger.info(f"已将 {encrypted_id} 加入CDN监控队列")
+        else:
+            # 没有启用回复或没有CDN
+            if not GROUP_UPLOAD_REPLY:
+                logger.info(f"群组图片处理完成(未启用回复): {encrypted_id}")
+            elif not cdn_url:
+                logger.info(f"群组图片处理完成(无CDN配置): {encrypted_id}")
+            
+            # 即使不回复，也要加入CDN监控
+            if CDN_MONITOR_ENABLED and CLOUDFLARE_CDN_DOMAIN:
+                add_to_cdn_monitor(encrypted_id, file_data['upload_time'])
+            
+    except Exception as e:
+        logger.error(f"处理群组图片失败: {e}")
+        import traceback
+        traceback.print_exc()
+        
 # ===================== 主函数 =====================
 def run_flask():
     """运行Flask应用"""
@@ -1797,24 +2263,68 @@ def run_flask():
 
 def run_telegram_bot():
     """运行Telegram机器人"""
-    global telegram_app
+    global telegram_app, bot_info
     
     if not BOT_TOKEN:
         logger.error("请先配置BOT_TOKEN！")
         return
     
+    async def start_bot():
+        """异步启动机器人"""
+        global telegram_app, bot_info
+        
+        try:
+            telegram_app = Application.builder().token(BOT_TOKEN).build()
+            
+            # 添加处理器
+            telegram_app.add_handler(CommandHandler("start", start))
+            telegram_app.add_handler(MessageHandler(filters.PHOTO & ~filters.ChatType.GROUP, handle_photo))
+            telegram_app.add_handler(MessageHandler(filters.Document.IMAGE & ~filters.ChatType.GROUP, handle_photo))
+            
+            # 群组图片处理器（仅在存储群组中生效）
+            if ENABLE_GROUP_UPLOAD:
+                # 群组中的图片
+                telegram_app.add_handler(MessageHandler(
+                    filters.PHOTO & filters.Chat(STORAGE_CHAT_ID),
+                    handle_group_photo
+                ))
+                # 群组中的图片文档
+                telegram_app.add_handler(MessageHandler(
+                    filters.Document.IMAGE & filters.Chat(STORAGE_CHAT_ID),
+                    handle_group_photo
+                ))
+            
+            logger.info("Telegram机器人启动中...")
+            
+            # 获取机器人信息
+            bot_info = await telegram_app.bot.get_me()
+            logger.info(f"机器人信息: @{bot_info.username} (ID: {bot_info.id})")
+            
+            # 启动机器人
+            await telegram_app.initialize()
+            await telegram_app.start()
+            await telegram_app.updater.start_polling(drop_pending_updates=True)
+            
+            logger.info("Telegram机器人已成功启动")
+            
+            # 保持运行
+            await asyncio.Event().wait()
+            
+        except Exception as e:
+            logger.error(f"Telegram机器人启动失败: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            if telegram_app:
+                await telegram_app.stop()
+    
+    # 使用 asyncio.run 运行异步函数
     try:
-        telegram_app = Application.builder().token(BOT_TOKEN).build()
-        
-        telegram_app.add_handler(CommandHandler("start", start))
-        telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-        telegram_app.add_handler(MessageHandler(filters.Document.IMAGE, handle_photo))
-        
-        logger.info("Telegram机器人启动中...")
-        telegram_app.run_polling(drop_pending_updates=True)
-        
+        asyncio.run(start_bot())
+    except KeyboardInterrupt:
+        logger.info("Telegram机器人收到停止信号")
     except Exception as e:
-        logger.error(f"Telegram机器人启动失败: {e}")
+        logger.error(f"运行Telegram机器人时发生错误: {e}")
 
 def main():
     """主函数"""
@@ -1824,7 +2334,7 @@ def main():
         sys.exit(1)
     
     print("=" * 60)
-    print("☁️  Telegram云图床机器人 - 简化版")
+    print("☁️  Telegram云图床机器人 - 简化版（支持群组上传）")
     print("=" * 60)
     print(f"📡 服务器IP: {LOCAL_IP}")
     print(f"🌐 访问地址: http://{LOCAL_IP}:{PORT}")
@@ -1838,6 +2348,14 @@ def main():
     print(f"🚀 CDN支持: {'Cloudflare已启用' if CLOUDFLARE_CDN_DOMAIN else ('已启用' if CDN_ENABLED else '未启用')}")
     print(f"🔄 CDN重定向: {'已启用' if CDN_REDIRECT_ENABLED else '已禁用'}")
     print(f"⏱️  新文件重定向延迟: {CDN_REDIRECT_DELAY}秒")
+    print(f"📸 群组上传: {'已启用' if ENABLE_GROUP_UPLOAD else '已禁用'}")
+    if ENABLE_GROUP_UPLOAD:
+        print(f"👮 群组上传权限: {'仅管理员' if GROUP_UPLOAD_ADMIN_ONLY else '所有用户'}")
+        if GROUP_ADMIN_ID_LIST:
+            print(f"👥 管理员ID: {', '.join(map(str, GROUP_ADMIN_ID_LIST))}")
+        print(f"💬 自动回复: {'是' if GROUP_UPLOAD_REPLY else '否'}")
+        if GROUP_UPLOAD_REPLY and GROUP_UPLOAD_DELETE_DELAY > 0:
+            print(f"⏰ 回复删除延迟: {GROUP_UPLOAD_DELETE_DELAY}秒")
     print("=" * 60)
     
     # 获取管理员配置
@@ -1866,6 +2384,7 @@ def main():
     if stats['total_files'] > 0:
         print(f"📊 数据库中已有: {stats['total_files']} 个文件, 总大小: {stats['total_size'] / 1024 / 1024:.1f} MB")
         print(f"💿 CDN缓存: {stats['cdn_stats']['cached_files']} 个文件")
+        print(f"📸 群组上传: {stats['group_uploads']} 个文件")
     
     logger.info("启动Telegram云图床服务...")
     
@@ -1889,6 +2408,7 @@ def main():
     print(f"🔐 自动刷新过期的Telegram文件路径")
     print(f"📦 10MB以下使用图片模式，10-20MB使用文档模式")
     print(f"⏱️  新上传文件{CDN_REDIRECT_DELAY}秒内不重定向，确保加载成功")
+    print(f"📸 群组图片自动收录并返回CDN链接")
     print(f"📝 日志文件: {LOG_FILE}")
     print("🚀 按 Ctrl+C 停止服务")
     print()

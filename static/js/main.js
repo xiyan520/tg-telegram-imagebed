@@ -299,6 +299,14 @@ class TelegramImageBed {
             errorEl.style.display = 'none';
             img.style.display = 'none';
             
+            // 对于新上传的图片，使用源站地址并禁用重定向
+            let imageUrl = url;
+            if (!result.cdn_cached && !isRetry) {
+                // 如果URL不包含参数，添加no_redirect参数
+                const separator = imageUrl.includes('?') ? '&' : '?';
+                imageUrl = `${imageUrl}${separator}no_redirect=1`;
+            }
+            
             // 设置超时
             const timeout = setTimeout(() => {
                 loadingEl.style.display = 'none';
@@ -312,7 +320,7 @@ class TelegramImageBed {
             
             testImg.onload = () => {
                 clearTimeout(timeout);
-                img.src = url;
+                img.src = imageUrl;
                 loadingEl.style.display = 'none';
                 errorEl.style.display = 'none';
                 img.style.display = 'block';
@@ -328,17 +336,14 @@ class TelegramImageBed {
                 errorEl.style.display = 'flex';
                 img.style.display = 'none';
                 
-                // 如果是新上传的图片，可能需要等待一下再试
-                if (!isRetry && result.cdn_url && !result.cdn_cached) {
-                    console.log('新上传的图片可能还未缓存，5秒后自动重试...');
-                    setTimeout(() => {
-                        loadImage(url, true);
-                    }, 5000);
+                // 如果是新上传的图片加载失败，不再自动重试
+                if (!isRetry) {
+                    console.error('图片加载失败:', imageUrl);
                 }
             };
             
             // 开始加载
-            testImg.src = url;
+            testImg.src = imageUrl;
         };
         
         // 立即加载图片
@@ -346,6 +351,7 @@ class TelegramImageBed {
         
         // 重试按钮
         retryBtn?.addEventListener('click', () => {
+            // 重试时也使用no_redirect参数
             loadImage(result.url, true);
         });
         
@@ -368,11 +374,14 @@ class TelegramImageBed {
     }
 
     createCopyFormat(label, value) {
+        // 对HTML进行转义以正确显示
+        const displayValue = value.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        
         return `
             <div class="copy-format">
                 <span class="format-label">${label}:</span>
                 <div class="format-value-container">
-                    <span class="format-value" title="${value}">${value}</span>
+                    <span class="format-value" title="${value.replace(/"/g, '&quot;')}">${displayValue}</span>
                     <button class="btn-copy" type="button">复制</button>
                 </div>
             </div>

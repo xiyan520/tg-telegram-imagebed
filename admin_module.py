@@ -150,6 +150,19 @@ def init_database_admin_update(DATABASE_PATH):
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         
+        # 检查并添加新列
+        cursor.execute("PRAGMA table_info(file_storage)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        # 添加缺失的列
+        if 'is_group_upload' not in columns:
+            logger.info("管理模块：添加 is_group_upload 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN is_group_upload BOOLEAN DEFAULT 0')
+        
+        if 'group_message_id' not in columns:
+            logger.info("管理模块：添加 group_message_id 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN group_message_id INTEGER')
+        
         # 添加文件名索引以加速搜索
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_original_filename 
@@ -163,6 +176,10 @@ def init_database_admin_update(DATABASE_PATH):
         
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_file_size ON file_storage(file_size)
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_group_upload ON file_storage(is_group_upload)
         ''')
         
         conn.commit()
@@ -324,25 +341,27 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         cursor = conn.cursor()
         
         try:
+            # 检查列是否存在
+            cursor.execute("PRAGMA table_info(file_storage)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
             # 构建查询
             offset = (page - 1) * limit
             
-            # 简化查询，只包含基本字段
-            query = '''
-                SELECT 
-                    fs.encrypted_id, 
-                    fs.file_id, 
-                    fs.original_filename, 
-                    fs.file_size, 
-                    fs.source, 
-                    fs.created_at, 
-                    fs.username, 
-                    fs.access_count, 
-                    fs.last_accessed,
-                    fs.upload_time,
-                    fs.cdn_cached,
-                    fs.cdn_cache_time,
-                    fs.mime_type
+            # 构建SELECT语句，只选择存在的列
+            select_columns = [
+                'fs.encrypted_id', 'fs.file_id', 'fs.original_filename', 
+                'fs.file_size', 'fs.source', 'fs.created_at', 'fs.username', 
+                'fs.access_count', 'fs.last_accessed', 'fs.upload_time',
+                'fs.cdn_cached', 'fs.cdn_cache_time', 'fs.mime_type'
+            ]
+            
+            # 可选列
+            if 'is_group_upload' in columns:
+                select_columns.append('fs.is_group_upload')
+            
+            query = f'''
+                SELECT {', '.join(select_columns)}
                 FROM file_storage fs
             '''
             params = []
@@ -372,6 +391,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             
             for row in cursor.fetchall():
                 image_data = dict(row)
+                
+                # 如果没有 is_group_upload 列，默认为 0
+                if 'is_group_upload' not in image_data:
+                    image_data['is_group_upload'] = 0
                 
                 # 处理时间格式
                 if image_data.get('upload_time'):
