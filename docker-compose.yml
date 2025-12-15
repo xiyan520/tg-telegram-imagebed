@@ -1,0 +1,24 @@
+services:
+  telegram-imagebed:
+    build: .
+    image: telegram-imagebed:latest
+    container_name: telegram-imagebed
+    ports:
+      - "18793:18793"
+    env_file: .env
+    environment:
+      # 确保数据库和日志在挂载的 data 目录下
+      - DATABASE_PATH=/app/data/telegram_imagebed.db
+      - LOG_FILE=/app/data/telegram_imagebed.log
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:18793/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# 项目名称（避免中文路径问题）
+name: telegram-imagebed

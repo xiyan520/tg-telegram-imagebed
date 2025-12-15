@@ -1,0 +1,153 @@
+// 全局样式
+
+// 自定义滚动条
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100 dark:bg-gray-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 dark:bg-gray-600 rounded-full;
+
+  &:hover {
+    @apply bg-gray-400 dark:bg-gray-500;
+  }
+}
+
+// 平滑滚动
+html {
+  scroll-behavior: smooth;
+}
+
+// 全局字体
+body {
+  @apply font-sans antialiased;
+}
+
+// 渐变文字
+.gradient-text {
+  @apply bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent;
+}
+
+// 卡片悬停效果
+.card-hover {
+  @apply transition-all duration-300 hover:shadow-xl hover:-translate-y-1;
+}
+
+// 按钮动画
+.btn-animate {
+  @apply transition-all duration-200 active:scale-95;
+}
+
+// 加载动画
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-spinner {
+  @apply w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full;
+  animation: spin 1s linear infinite;
+}
+
+// 淡入动画
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+// 图片网格
+.image-grid {
+  @apply grid gap-4;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+// 响应式容器
+.container {
+  @apply mx-auto px-4;
+  max-width: 1280px;
+}
+
+// 代码块样式
+pre code {
+  @apply block p-4 bg-gray-900 text-gray-100 rounded-lg overflow-x-auto text-sm;
+}
+
+// 表格样式
+table {
+  @apply w-full text-sm;
+
+  thead {
+    @apply bg-gray-50 dark:bg-gray-800;
+  }
+
+  th {
+    @apply px-4 py-2 text-left font-semibold;
+  }
+
+  td {
+    @apply px-4 py-2;
+  }
+
+  tbody tr {
+    @apply border-b border-gray-200 dark:border-gray-700;
+
+    &:hover {
+      @apply bg-gray-50 dark:bg-gray-800;
+    }
+  }
+}
+
+// 徽章样式
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+}
+
+// 工具提示
+.tooltip {
+  @apply absolute z-50 px-2 py-1 text-xs text-white bg-gray-900 rounded shadow-lg;
+}
+
+// 模态框遮罩
+.modal-overlay {
+  @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-40;
+}
+
+// 过渡效果
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: transform 0.3s ease;
+}
+
+.slide-enter-from {
+  transform: translateX(-100%);
+}
+
+.slide-leave-to {
+  transform: translateX(100%);
+}

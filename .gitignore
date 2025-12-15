@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+eggs/
+*.egg
+
+# 环境配置（敏感信息）
+.env
+.env.local
+.env.*.local
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 日志
+*.log
+logs/
+
+# 数据目录
+data/
+
+# 前端
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 锁文件
+*.lock
+!package-lock.json
+!pnpm-lock.yaml
+
+# Claude Code
+.claude/
+
+# 临时文件
+tmp/
+temp/
+*.tmp

@@ -1,0 +1,864 @@
+<template>
+  <div>
+    <div class="h-full flex flex-col max-w-5xl mx-auto">
+      <div class="flex-1 space-y-8">
+        <!-- Token管理卡片 - 仅在有Token时显示 -->
+        <UCard v-if="guestStore.hasToken" class="shadow-lg bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20 border border-emerald-200 dark:border-emerald-700">
+          <div class="flex items-start gap-4">
+            <div class="flex-shrink-0">
+              <div class="w-12 h-12 bg-gradient-to-br from-emerald-600 to-teal-600 rounded-lg flex items-center justify-center shadow-md">
+                <UIcon name="heroicons:check-circle" class="w-6 h-6 text-white" />
+              </div>
+            </div>
+            <div class="flex-1">
+              <h3 class="text-lg font-bold text-stone-900 dark:text-white mb-2">
+                Token已激活
+              </h3>
+              <p class="text-stone-700 dark:text-stone-300 mb-3">
+                已上传 {{ guestStore.uploadCount }} 张图片，无上传数量和时间限制。
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <UButton color="amber" variant="soft" @click="showTokenInfo = true">
+                  <template #leading>
+                    <UIcon name="heroicons:information-circle" />
+                  </template>
+                  Token详情
+                </UButton>
+                <UButton color="stone" variant="soft" @click="showTokenGenerator = true">
+                  生成新Token
+                </UButton>
+              </div>
+            </div>
+          </div>
+        </UCard>
+
+        <!-- 上传区域 -->
+        <UCard class="shadow-lg border border-stone-200 dark:border-neutral-700">
+          <div
+        class="relative border-2 border-dashed rounded-xl p-12 text-center transition-all"
+        :class="[
+          isDragging ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20' : 'border-stone-300 dark:border-neutral-600',
+          uploading ? 'pointer-events-none opacity-50' : 'hover:border-amber-400 cursor-pointer'
+        ]"
+        @dragover.prevent="isDragging = true"
+        @dragleave.prevent="isDragging = false"
+        @drop.prevent="handleDrop"
+        @click="triggerFileInput"
+      >
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/*"
+          multiple
+          class="hidden"
+          @change="handleFileSelect"
+        />
+
+        <!-- 上传图标和文字 -->
+        <div v-if="!uploading" class="space-y-4">
+          <div class="flex justify-center">
+            <div class="w-20 h-20 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center transform hover:scale-105 transition-transform shadow-lg">
+              <UIcon name="heroicons:cloud-arrow-up" class="w-12 h-12 text-white" />
+            </div>
+          </div>
+          <div>
+            <h2 class="text-2xl font-bold text-stone-900 dark:text-white mb-2">
+              拖拽图片到这里
+            </h2>
+            <p class="text-stone-600 dark:text-stone-400 mb-4">
+              或点击选择文件 / 粘贴剪贴板图片 (Ctrl+V)
+            </p>
+            <UButton size="lg" color="amber">
+              选择图片
+            </UButton>
+            <p class="text-sm text-gray-500 dark:text-gray-500 mt-4">
+              支持 JPG、PNG、GIF、WEBP，单个文件最大 20MB
+            </p>
+          </div>
+        </div>
+
+        <!-- 上传进度 -->
+        <div v-else class="space-y-4">
+          <div class="flex justify-center">
+            <div class="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+          <div>
+            <p class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ uploadProgress.label }}
+            </p>
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              {{ uploadProgress.percent }}%
+            </p>
+          </div>
+          <UProgress :value="uploadProgress.percent" color="primary" />
+          <UButton color="red" variant="soft" @click="cancelUpload">
+            取消上传
+          </UButton>
+            </div>
+          </div>
+        </UCard>
+
+        <!-- 上传结果 -->
+        <UCard v-if="uploadedImages.length > 0" class="shadow-xl">
+          <template #header>
+        <div class="flex items-center justify-between">
+          <h3 class="text-xl font-bold text-gray-900 dark:text-white">
+            上传成功 ({{ uploadedImages.length }}张)
+          </h3>
+          <UButton color="gray" variant="ghost" @click="clearResults">
+            清空
+          </UButton>
+        </div>
+      </template>
+
+      <!-- 缩略图网格 -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div
+          v-for="(image, index) in uploadedImages"
+          :key="index"
+          class="relative group aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 hover:shadow-lg transition-shadow"
+        >
+          <img
+            :src="image.url"
+            :alt="image.filename"
+            class="w-full h-full object-cover"
+          />
+          <div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+            <UButton
+              icon="heroicons:eye"
+              color="white"
+              size="sm"
+              @click="previewImage(image)"
+            />
+            <UButton
+              icon="heroicons:clipboard-document"
+              color="white"
+              size="sm"
+              @click="copyImageUrl(image.url)"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- 链接格式标签页 -->
+      <div class="mt-6">
+        <div class="flex gap-2 mb-4 border-b border-gray-200 dark:border-gray-700">
+          <button
+            v-for="(tab, index) in formatTabs"
+            :key="index"
+            @click="selectedFormat = index"
+            :class="[
+              'px-4 py-2 font-medium text-sm transition-colors',
+              selectedFormat === index
+                ? 'text-cyan-600 dark:text-cyan-400 border-b-2 border-cyan-600 dark:border-cyan-400'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+            ]"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+        <div class="space-y-4 py-4">
+          <UTextarea
+            :model-value="getFormattedLinks(formatTabs[selectedFormat].value)"
+            readonly
+            :rows="6"
+            class="font-mono text-sm"
+          />
+          <UButton
+            icon="heroicons:clipboard-document"
+            color="primary"
+            block
+            @click="copyAllLinks(formatTabs[selectedFormat].value)"
+          >
+            复制全部链接
+              </UButton>
+            </div>
+          </div>
+        </UCard>
+      </div>
+
+      <!-- 统计信息 - 固定在底部 -->
+      <div class="mt-8 space-y-4">
+        <h2 class="text-xl font-bold text-gray-900 dark:text-white">实时统计</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <UCard>
+        <div class="text-center">
+          <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">总文件</p>
+          <p class="text-2xl font-bold text-gray-900 dark:text-white">
+            {{ stats.totalFiles || '--' }}
+          </p>
+        </div>
+      </UCard>
+      <UCard>
+        <div class="text-center">
+          <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">存储空间</p>
+          <p class="text-2xl font-bold text-gray-900 dark:text-white">
+            {{ stats.totalSize || '--' }}
+          </p>
+        </div>
+      </UCard>
+      <UCard>
+        <div class="text-center">
+          <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">今日上传</p>
+          <p class="text-2xl font-bold text-gray-900 dark:text-white">
+            {{ stats.todayUploads || '--' }}
+          </p>
+        </div>
+      </UCard>
+      <UCard>
+        <div class="text-center">
+          <p class="text-sm text-gray-600 dark:text-gray-400 mb-1">运行时间</p>
+          <p class="text-2xl font-bold text-gray-900 dark:text-white">
+            {{ stats.uptime || '--' }}
+          </p>
+        </div>
+      </UCard>
+      </div>
+    </div>
+
+    <!-- Token生成器模态框 -->
+    <UModal v-model="showTokenGenerator">
+    <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">生成Token</h3>
+            <UButton
+              icon="heroicons:x-mark"
+              color="gray"
+              variant="ghost"
+              @click="showTokenGenerator = false"
+            />
+          </div>
+        </template>
+        <div class="space-y-4">
+          <p class="text-sm text-gray-600 dark:text-gray-400">
+            生成专属Token后即可开始上传图片。Token会自动保存，下次访问时自动恢复。
+          </p>
+          <div class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+            <div class="flex items-start gap-3">
+              <UIcon name="heroicons:check-circle" class="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" />
+              <div class="flex-1">
+                <p class="text-sm font-medium text-green-900 dark:text-green-100 mb-1">无限制使用</p>
+                <ul class="text-xs text-green-700 dark:text-green-300 space-y-1">
+                  <li>• 无上传数量限制</li>
+                  <li>• 无时间限制，永久有效</li>
+                  <li>• 可随时查看上传历史</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <UButton
+            color="primary"
+            block
+            :loading="generatingToken"
+            @click="handleGenerateToken"
+          >
+            生成Token
+          </UButton>
+        </div>
+      </UCard>
+    </UModal>
+
+    <!-- Token信息模态框 -->
+    <UModal v-model="showTokenInfo">
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">Token管理</h3>
+            <UButton
+              icon="heroicons:x-mark"
+              color="gray"
+              variant="ghost"
+              @click="showTokenInfo = false"
+            />
+          </div>
+        </template>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              您的Token
+            </label>
+            <div class="flex gap-2">
+              <UInput
+                :model-value="guestStore.token"
+                readonly
+                class="flex-1 font-mono text-xs"
+              />
+              <UButton
+                icon="heroicons:clipboard-document"
+                color="gray"
+                @click="copyToken"
+              />
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              请妥善保管您的Token
+            </p>
+          </div>
+          <div class="p-4 bg-gradient-to-br from-cyan-50 to-blue-50 dark:from-cyan-900/20 dark:to-blue-900/20 rounded-lg border border-cyan-200 dark:border-cyan-800">
+            <div class="text-center">
+              <p class="text-sm text-gray-600 dark:text-gray-400 mb-2">已上传图片</p>
+              <p class="text-3xl font-bold text-cyan-600 dark:text-cyan-400">
+                {{ guestStore.uploadCount }}
+              </p>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">无数量限制 · 永久有效</p>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <UButton color="cyan" variant="soft" block @click="() => { showTokenInfo = false; showTokenHistory = true }">
+              <template #leading>
+                <UIcon name="heroicons:clock" />
+              </template>
+              查看上传历史
+            </UButton>
+            <UButton color="gray" variant="outline" block @click="handleRefreshToken">
+              <template #leading>
+                <UIcon name="heroicons:arrow-path" />
+              </template>
+              刷新Token
+            </UButton>
+          </div>
+        </div>
+      </UCard>
+    </UModal>
+
+    <!-- Token说明模态框 -->
+    <UModal v-model="showGuestInfo">
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">Token功能说明</h3>
+            <UButton
+              icon="heroicons:x-mark"
+              color="gray"
+              variant="ghost"
+              @click="showGuestInfo = false"
+            />
+          </div>
+        </template>
+        <div class="space-y-4">
+          <div>
+            <h4 class="font-semibold text-gray-900 dark:text-white mb-2">✨ 什么是Token？</h4>
+            <p class="text-gray-600 dark:text-gray-400 text-sm">
+              Token是您的专属凭证，用于管理和追踪您上传的图片。生成Token后，您可以查看上传历史、管理图片。
+            </p>
+          </div>
+          <div>
+            <h4 class="font-semibold text-gray-900 dark:text-white mb-2">🎯 主要功能</h4>
+            <ul class="list-disc list-inside text-gray-600 dark:text-gray-400 text-sm space-y-1">
+              <li>查看上传历史记录</li>
+              <li>无上传数量限制</li>
+              <li>永久有效，无时间限制</li>
+              <li>随时刷新获取新Token</li>
+              <li>Token自动保存，下次访问自动恢复</li>
+            </ul>
+          </div>
+          <div>
+            <h4 class="font-semibold text-gray-900 dark:text-white mb-2">🔒 安全提示</h4>
+            <ul class="list-disc list-inside text-gray-600 dark:text-gray-400 text-sm space-y-1">
+              <li>Token会自动保存在浏览器中</li>
+              <li>Token丢失后无法找回，但可重新生成</li>
+              <li>刷新Token会清除旧Token并生成新的</li>
+              <li>请妥善保管您的Token</li>
+            </ul>
+          </div>
+          <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+            <UButton color="primary" block @click="() => { showGuestInfo = false; showTokenGenerator = true }">
+              生成Token
+            </UButton>
+          </div>
+        </div>
+      </UCard>
+    </UModal>
+
+    <!-- 上传历史模态框 -->
+    <UModal v-model="showTokenHistory">
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">上传历史</h3>
+            <UButton
+              icon="heroicons:x-mark"
+              color="gray"
+              variant="ghost"
+              @click="showTokenHistory = false"
+            />
+          </div>
+        </template>
+        <div class="space-y-4">
+          <div v-if="tokenHistory.length > 0" class="space-y-3 max-h-96 overflow-y-auto">
+            <div
+              v-for="(item, index) in tokenHistory"
+              :key="index"
+              class="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg hover:shadow-md transition-shadow"
+            >
+              <img
+                :src="item.image_url"
+                :alt="item.original_filename"
+                class="w-12 h-12 object-cover rounded"
+              />
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-gray-900 dark:text-white truncate">
+                  {{ item.original_filename }}
+                </p>
+                <p class="text-xs text-gray-600 dark:text-gray-400">
+                  {{ item.created_at }}
+                </p>
+              </div>
+              <UButton
+                icon="heroicons:clipboard-document"
+                color="gray"
+                variant="ghost"
+                size="sm"
+                @click="copyImageUrl(item.image_url)"
+              />
+            </div>
+          </div>
+          <div v-else-if="!loadingHistory" class="text-center py-8 text-gray-500 dark:text-gray-400">
+            暂无上传记录
+          </div>
+          <div v-else class="text-center py-8">
+            <div class="inline-block w-8 h-8 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        </div>
+      </UCard>
+    </UModal>
+
+    <!-- 图片预览模态框 -->
+    <UModal v-model="previewOpen">
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">图片预览</h3>
+            <UButton
+              icon="heroicons:x-mark"
+              color="gray"
+              variant="ghost"
+              @click="previewOpen = false"
+            />
+          </div>
+        </template>
+        <div v-if="previewingImage">
+          <img
+            :src="previewingImage.url"
+            :alt="previewingImage.filename"
+            class="w-full rounded-lg"
+          />
+          <div class="mt-4 space-y-2">
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              <strong>文件名:</strong> {{ previewingImage.filename }}
+            </p>
+            <p class="text-sm text-gray-600 dark:text-gray-400">
+              <strong>URL:</strong>
+              <code class="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                {{ previewingImage.url }}
+              </code>
+            </p>
+          </div>
+        </div>
+      </UCard>
+    </UModal>
+  </div>
+</template>
+
+<script setup lang="ts">
+const toast = useToast()
+const { uploadImages, getStats } = useImageApi()
+const guestStore = useGuestTokenStore()
+const config = useRuntimeConfig()
+
+// 状态
+const isDragging = ref(false)
+const uploading = ref(false)
+const uploadProgress = ref({ label: '上传中...', percent: 0 })
+const uploadedImages = ref<any[]>([])
+const stats = ref<any>({})
+const fileInput = ref<HTMLInputElement>()
+const selectedFormat = ref(0)
+const previewOpen = ref(false)
+const previewingImage = ref<any>(null)
+const showGuestInfo = ref(false)
+const showTokenGenerator = ref(false)
+const showTokenInfo = ref(false)
+const showTokenHistory = ref(false)
+const tokenConfig = ref({
+  upload_limit: 100,
+  expires_days: 30
+})
+const generatingToken = ref(false)
+const tokenHistory = ref<any[]>([])
+const loadingHistory = ref(false)
+
+// 格式标签
+const formatTabs = [
+  { label: 'URL', value: 'url' },
+  { label: 'Markdown', value: 'markdown' },
+  { label: 'HTML', value: 'html' },
+  { label: 'BBCode', value: 'bbcode' }
+]
+
+// 触发文件选择
+const triggerFileInput = () => {
+  fileInput.value?.click()
+}
+
+// 处理文件选择
+const handleFileSelect = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  if (target.files) {
+    handleFiles(Array.from(target.files))
+  }
+}
+
+// 处理拖放
+const handleDrop = (event: DragEvent) => {
+  isDragging.value = false
+  if (event.dataTransfer?.files) {
+    handleFiles(Array.from(event.dataTransfer.files))
+  }
+}
+
+// 生成Token
+const handleGenerateToken = async () => {
+  generatingToken.value = true
+  try {
+    await guestStore.generateToken(tokenConfig.value)
+    showTokenGenerator.value = false
+    toast.add({
+      title: '成功',
+      description: 'Token已生成',
+      color: 'green'
+    })
+  } catch (error: any) {
+    toast.add({
+      title: '生成失败',
+      description: error.message,
+      color: 'red'
+    })
+  } finally {
+    generatingToken.value = false
+  }
+}
+
+// 刷新Token
+const handleRefreshToken = async () => {
+  if (!confirm('刷新Token将清除当前Token并生成新的Token，确定继续吗？')) {
+    return
+  }
+  try {
+    showTokenInfo.value = false
+    await guestStore.refreshToken(tokenConfig.value)
+    toast.add({
+      title: '成功',
+      description: 'Token已刷新',
+      color: 'green'
+    })
+  } catch (error: any) {
+    toast.add({
+      title: '刷新失败',
+      description: error.message,
+      color: 'red'
+    })
+  }
+}
+
+// 清除Token
+const handleClearToken = () => {
+  if (confirm('确定要清除Token吗？清除后将无法查看上传历史。')) {
+    guestStore.clearToken()
+    tokenHistory.value = []
+    toast.add({
+      title: '已清除',
+      description: 'Token已清除',
+      color: 'green'
+    })
+  }
+}
+
+// 复制Token
+const copyToken = async () => {
+  try {
+    // 优先使用现代剪贴板API
+    await navigator.clipboard.writeText(guestStore.token)
+    toast.add({
+      title: '已复制',
+      description: 'Token已复制到剪贴板',
+      color: 'green'
+    })
+  } catch (err) {
+    // 回退方案：使用传统方法
+    try {
+      const textArea = document.createElement('textarea')
+      textArea.value = guestStore.token
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-999999px'
+      textArea.style.top = '-999999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+
+      if (successful) {
+        toast.add({
+          title: '已复制',
+          description: 'Token已复制到剪贴板',
+          color: 'green'
+        })
+      } else {
+        throw new Error('复制失败')
+      }
+    } catch (fallbackErr) {
+      toast.add({
+        title: '复制失败',
+        description: '请手动复制Token',
+        color: 'red'
+      })
+      console.error('复制Token失败:', fallbackErr)
+    }
+  }
+}
+
+// 加载上传历史
+const loadTokenHistory = async () => {
+  if (!guestStore.hasToken) return
+
+  loadingHistory.value = true
+  try {
+    const data = await guestStore.getUploads(1, 20)
+    tokenHistory.value = data.uploads
+  } catch (error: any) {
+    toast.add({
+      title: '加载失败',
+      description: error.message,
+      color: 'red'
+    })
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
+// 监听历史模态框打开
+watch(showTokenHistory, (newVal) => {
+  if (newVal) {
+    loadTokenHistory()
+  }
+})
+
+// 复制图片URL
+const copyImageUrl = async (url: string) => {
+  await navigator.clipboard.writeText(url)
+  toast.add({
+    title: '已复制',
+    description: 'URL已复制到剪贴板',
+    color: 'green'
+  })
+}
+
+// 处理文件上传
+const handleFiles = async (files: File[]) => {
+  if (files.length === 0) return
+
+  // Token检查（如果有Token则使用Token上传）
+  // 已移除上传次数限制检查
+  // if (guestStore.hasToken) {
+  //   if (guestStore.remainingUploads <= 0) {
+  //     toast.add({
+  //       title: '上传次数已用完',
+  //       description: '请刷新Token以获取新的上传次数',
+  //       color: 'red'
+  //     })
+  //     return
+  //   }
+
+  //   // 限制上传数量
+  //   const maxFiles = Math.min(files.length, guestStore.remainingUploads)
+  //   if (files.length > maxFiles) {
+  //     toast.add({
+  //       title: '提示',
+  //       description: `剩余上传次数不足，只能上传${maxFiles}张图片`,
+  //       color: 'orange'
+  //     })
+  //     files = files.slice(0, maxFiles)
+  //   }
+  // }
+
+  // 验证文件
+  const validFiles = files.filter(file => {
+    if (!file.type.startsWith('image/')) {
+      toast.add({ title: '错误', description: `${file.name} 不是图片文件`, color: 'red' })
+      return false
+    }
+    if (file.size > 20 * 1024 * 1024) {
+      toast.add({ title: '错误', description: `${file.name} 超过 20MB`, color: 'red' })
+      return false
+    }
+    return true
+  })
+
+  if (validFiles.length === 0) return
+
+  uploading.value = true
+  uploadProgress.value = { label: '上传中...', percent: 0 }
+
+  try {
+    let results = []
+
+    if (guestStore.hasToken) {
+      // 使用Token上传
+      for (let i = 0; i < validFiles.length; i++) {
+        const file = validFiles[i]
+        uploadProgress.value = {
+          label: `上传中 (${i + 1}/${validFiles.length})`,
+          percent: Math.round((i / validFiles.length) * 100)
+        }
+
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const response = await $fetch<any>(`${config.public.apiBase}/api/auth/upload`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${guestStore.token}`
+          },
+          body: formData
+        })
+
+        if (response.success) {
+          results.push(response.data)
+        }
+      }
+
+      // 刷新token信息
+      await guestStore.verifyToken()
+    } else {
+      // 普通上传（无Token）
+      results = await uploadImages(validFiles, (progress) => {
+        uploadProgress.value = progress
+      })
+    }
+
+    uploadProgress.value = { label: '完成', percent: 100 }
+    uploadedImages.value = results
+
+    toast.add({
+      title: '成功',
+      description: `成功上传 ${results.length} 张图片`,
+      color: 'green'
+    })
+
+    // 刷新统计
+    await loadStats()
+  } catch (error: any) {
+    toast.add({
+      title: '上传失败',
+      description: error.data?.error || error.message || '未知错误',
+      color: 'red'
+    })
+  } finally {
+    uploading.value = false
+  }
+}
+
+// 取消上传
+const cancelUpload = () => {
+  uploading.value = false
+  uploadProgress.value = { label: '上传中...', percent: 0 }
+}
+
+// 清空结果
+const clearResults = () => {
+  uploadedImages.value = []
+}
+
+// 获取格式化链接
+const getFormattedLinks = (format: string) => {
+  return uploadedImages.value.map(img => {
+    switch (format) {
+      case 'url':
+        return img.url
+      case 'markdown':
+        return `![${img.filename}](${img.url})`
+      case 'html':
+        return `<img src="${img.url}" alt="${img.filename}" />`
+      case 'bbcode':
+        return `[img]${img.url}[/img]`
+      default:
+        return img.url
+    }
+  }).join('\n')
+}
+
+// 复制所有链接
+const copyAllLinks = async (format: string) => {
+  const text = getFormattedLinks(format)
+  await navigator.clipboard.writeText(text)
+  toast.add({
+    title: '已复制',
+    description: '链接已复制到剪贴板',
+    color: 'green'
+  })
+}
+
+// 预览图片
+const previewImage = (image: any) => {
+  previewingImage.value = image
+  previewOpen.value = true
+}
+
+// 加载统计信息
+const loadStats = async () => {
+  try {
+    stats.value = await getStats()
+  } catch (error) {
+    console.error('加载统计信息失败:', error)
+  }
+}
+
+// 定时刷新统计数据
+let statsRefreshInterval: NodeJS.Timeout | null = null
+
+// 处理剪贴板粘贴
+const handlePaste = (event: ClipboardEvent) => {
+  const items = event.clipboardData?.items
+  if (!items) return
+
+  const files: File[] = []
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) {
+        files.push(file)
+      }
+    }
+  }
+
+  if (files.length > 0) {
+    event.preventDefault()
+    handleFiles(files)
+  }
+}
+
+// 页面加载时获取统计和恢复token
+onMounted(async () => {
+  await loadStats()
+  await guestStore.restoreToken()
+
+  // 添加全局粘贴事件监听
+  window.addEventListener('paste', handlePaste)
+
+  // 每30秒自动刷新统计数据
+  statsRefreshInterval = setInterval(() => {
+    loadStats()
+  }, 30000)
+})
+
+// 页面卸载时清除定时器和事件监听
+onUnmounted(() => {
+  if (statsRefreshInterval) {
+    clearInterval(statsRefreshInterval)
+  }
+  // 移除粘贴事件监听
+  window.removeEventListener('paste', handlePaste)
+})
+</script>
