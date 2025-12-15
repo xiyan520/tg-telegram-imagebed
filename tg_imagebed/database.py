@@ -71,6 +71,8 @@ def init_database() -> None:
                     cdn_cached BOOLEAN DEFAULT 0,
                     cdn_cache_time TIMESTAMP,
                     access_count INTEGER DEFAULT 0,
+                    cdn_hit_count INTEGER DEFAULT 0,
+                    direct_hit_count INTEGER DEFAULT 0,
                     last_accessed TIMESTAMP,
                     last_file_path_update TIMESTAMP,
                     is_group_upload BOOLEAN DEFAULT 0,
@@ -159,6 +161,8 @@ def init_database() -> None:
                 ('cdn_cached', 'BOOLEAN DEFAULT 0'),
                 ('cdn_cache_time', 'TIMESTAMP'),
                 ('access_count', 'INTEGER DEFAULT 0'),
+                ('cdn_hit_count', 'INTEGER DEFAULT 0'),
+                ('direct_hit_count', 'INTEGER DEFAULT 0'),
                 ('last_accessed', 'TIMESTAMP'),
                 ('auth_token', 'TEXT'),
                 ('storage_backend', 'TEXT'),
@@ -197,7 +201,13 @@ def init_database() -> None:
             cursor.execute("PRAGMA table_info(auth_tokens)")
             auth_columns = [column[1] for column in cursor.fetchall()]
 
+            # 兼容历史数据库：老版本的 auth_tokens 可能缺少这些列
             auth_new_columns = [
+                ('created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+                ('expires_at', 'TIMESTAMP'),
+                ('last_used', 'TIMESTAMP'),
+                ('upload_count', 'INTEGER DEFAULT 0'),
+                ('upload_limit', 'INTEGER DEFAULT 100'),
                 ('is_active', 'BOOLEAN DEFAULT 1'),
                 ('ip_address', 'TEXT'),
                 ('user_agent', 'TEXT'),
@@ -208,6 +218,16 @@ def init_database() -> None:
                 if col_name not in auth_columns:
                     logger.info(f"添加 {col_name} 列到 auth_tokens")
                     cursor.execute(f'ALTER TABLE auth_tokens ADD COLUMN {col_name} {col_type}')
+                    auth_columns.append(col_name)
+
+            # 为历史记录回填默认值，避免 NULL 导致排序/展示异常
+            try:
+                cursor.execute("UPDATE auth_tokens SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+                cursor.execute("UPDATE auth_tokens SET upload_count = 0 WHERE upload_count IS NULL")
+                cursor.execute("UPDATE auth_tokens SET upload_limit = 100 WHERE upload_limit IS NULL")
+                cursor.execute("UPDATE auth_tokens SET is_active = 1 WHERE is_active IS NULL")
+            except Exception as e:
+                logger.debug(f"回填 auth_tokens 字段失败（可忽略）: {e}")
 
             # 创建索引
             indexes = [
@@ -328,16 +348,37 @@ def update_cdn_cache_status(encrypted_id: str, cached: bool) -> None:
         logger.info(f"更新CDN缓存状态: {encrypted_id} -> {'已缓存' if cached else '未缓存'}")
 
 
-def update_access_count(encrypted_id: str) -> None:
-    """更新访问计数"""
+def update_access_count(encrypted_id: str, access_type: str = 'direct_access') -> None:
+    """更新访问计数
+
+    Args:
+        encrypted_id: 加密的文件ID
+        access_type: 访问类型 ('cdn_pull' 或 'direct_access')
+    """
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE file_storage
-            SET access_count = access_count + 1,
-                last_accessed = CURRENT_TIMESTAMP
-            WHERE encrypted_id = ?
-        ''', (encrypted_id,))
+        cdn_inc = 1 if access_type == 'cdn_pull' else 0
+        direct_inc = 1 if access_type == 'direct_access' else 0
+        try:
+            cursor.execute('''
+                UPDATE file_storage
+                SET access_count = access_count + 1,
+                    cdn_hit_count = cdn_hit_count + ?,
+                    direct_hit_count = direct_hit_count + ?,
+                    last_accessed = CURRENT_TIMESTAMP
+                WHERE encrypted_id = ?
+            ''', (cdn_inc, direct_inc, encrypted_id))
+        except sqlite3.OperationalError as e:
+            # 仅在列不存在时回退到旧逻辑（兼容旧数据库结构）
+            if 'no such column' in str(e).lower():
+                cursor.execute('''
+                    UPDATE file_storage
+                    SET access_count = access_count + 1,
+                        last_accessed = CURRENT_TIMESTAMP
+                    WHERE encrypted_id = ?
+                ''', (encrypted_id,))
+            else:
+                raise
 
 
 def delete_files_by_ids(encrypted_ids: List[str]) -> tuple:
@@ -456,6 +497,72 @@ def get_uncached_files(since_timestamp: int, limit: int = 100) -> List[Dict[str,
             LIMIT ?
         ''', (since_timestamp, limit))
         return [dict(row) for row in cursor.fetchall()]
+
+
+def get_cdn_dashboard_stats(window_hours: Optional[int] = None) -> Dict[str, Any]:
+    """
+    CDN 仪表盘统计
+    注意：无法从源站精确推断 Cloudflare 边缘 HIT 率，边缘命中不会到达源站
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # 文件缓存统计
+        cursor.execute("SELECT COUNT(*) FROM file_storage")
+        total_files = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM file_storage WHERE cdn_cached = 1")
+        cached_files = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM file_storage WHERE cdn_cached = 0 OR cdn_cached IS NULL")
+        uncached_files = cursor.fetchone()[0]
+
+        # 访问统计（可选时间窗口）
+        where = ""
+        params: List[Any] = []
+        if window_hours is not None:
+            hours = int(window_hours)
+            where = "WHERE last_accessed IS NOT NULL AND last_accessed >= datetime('now', ?)"
+            params = [f"-{hours} hours"]
+
+        cursor.execute(
+            f"""
+            SELECT
+              COALESCE(SUM(access_count), 0),
+              COALESCE(SUM(cdn_hit_count), 0),
+              COALESCE(SUM(direct_hit_count), 0)
+            FROM file_storage
+            {where}
+            """,
+            params
+        )
+        row = cursor.fetchone()
+        access_total = int(row[0] or 0)
+        cdn_origin_requests = int(row[1] or 0)
+        direct_origin_requests = int(row[2] or 0)
+
+        origin_total = cdn_origin_requests + direct_origin_requests
+        direct_share = (direct_origin_requests / origin_total) if origin_total else 0.0
+        cdn_origin_share = (cdn_origin_requests / origin_total) if origin_total else 0.0
+
+        return {
+            "files": {
+                "total": total_files,
+                "cached": cached_files,
+                "uncached": uncached_files,
+                "cache_rate": (cached_files / total_files) if total_files else 0.0,
+            },
+            "origin_requests": {
+                "window_hours": window_hours,
+                "total_access_count": access_total,
+                "origin_total": origin_total,
+                "cdn_origin_requests": cdn_origin_requests,
+                "direct_origin_requests": direct_origin_requests,
+                "cdn_origin_share": cdn_origin_share,
+                "direct_origin_share": direct_share,
+                "note": "Edge HITs do not reach origin; use Cloudflare analytics for real hit rate.",
+            },
+        }
 
 
 # ===================== Token 管理 =====================

@@ -64,9 +64,9 @@ def serve_image(encrypted_id):
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache')
 
-    # 检查是否是 CDN 回源请求
-    cf_headers = {k: v for k, v in request.headers.items() if k.startswith('CF-')}
-    is_cdn_request = bool(cf_headers.get('CF-Connecting-IP'))
+    # 检查是否是 CDN 回源请求（使用 request.headers.get 自动处理大小写）
+    is_cdn_request = bool(request.headers.get('CF-Connecting-IP'))
+    access_type = 'cdn_pull' if is_cdn_request else 'direct_access'
 
     # 检查是否来自 CDN 域名
     host = request.headers.get('Host', '')
@@ -104,7 +104,7 @@ def serve_image(encrypted_id):
             request_url = request.url
             if cdn_url not in request_url:
                 logger.info(f"图片已缓存，重定向到CDN: {encrypted_id} -> {cdn_url}")
-                update_access_count(encrypted_id)
+                update_access_count(encrypted_id, access_type)
                 response = redirect(cdn_url, code=302)
                 response.headers['Cache-Control'] = f'public, max-age={CDN_REDIRECT_CACHE_TIME}'
                 response.headers['X-CDN-Redirect'] = 'true'
@@ -116,7 +116,7 @@ def serve_image(encrypted_id):
                 logger.info(f"更新CDN缓存状态并直接提供图片: {encrypted_id}")
 
     # 更新访问计数
-    update_access_count(encrypted_id)
+    update_access_count(encrypted_id, access_type)
 
     # 生成 ETag
     etag = file_info.get('etag') or f'W/"{encrypted_id}-{file_info.get("file_size", 0)}"'
@@ -132,7 +132,6 @@ def serve_image(encrypted_id):
 
     # 从存储后端下载图片
     try:
-        access_type = 'cdn_pull' if is_cdn_request else 'direct_access'
         router = get_storage_router()
         backend = router.get_backend_for_record(file_info)
         range_header = request.headers.get('Range')
@@ -183,7 +182,7 @@ def serve_image(encrypted_id):
             else:
                 resp.headers['Cache-Control'] = 'public, max-age=31536000, s-maxage=2592000, immutable'
             resp.headers['Vary'] = 'Accept-Encoding'
-            resp.headers['CF-Cache-Tag'] = f'image-{encrypted_id[:8]},imagebed,static'
+            resp.headers['Cache-Tag'] = f'image-{encrypted_id[:8]},imagebed,static'
         else:
             resp.headers['Cache-Control'] = 'public, max-age=3600'
 

@@ -31,6 +31,8 @@ class TelegramBackend(StorageBackend):
         self.name = name
         self._bot_token = bot_token
         self._chat_id = chat_id
+        self._session = requests.Session()
+        self._session.trust_env = True
         logger.info(f"Telegram 存储后端初始化: chat_id={chat_id}")
 
     def _get_file_path(self, file_id: str) -> Optional[str]:
@@ -38,7 +40,7 @@ class TelegramBackend(StorageBackend):
         if not self._bot_token or not file_id:
             return None
         try:
-            resp = requests.get(
+            resp = self._session.get(
                 f"https://api.telegram.org/bot{self._bot_token}/getFile",
                 params={'file_id': file_id},
                 timeout=15,
@@ -76,7 +78,7 @@ class TelegramBackend(StorageBackend):
             if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
                 files = {'photo': (filename, file_content, content_type)}
                 data = {'chat_id': self._chat_id, 'caption': caption or ''}
-                resp = requests.post(
+                resp = self._session.post(
                     f"https://api.telegram.org/bot{self._bot_token}/sendPhoto",
                     files=files,
                     data=data,
@@ -85,7 +87,7 @@ class TelegramBackend(StorageBackend):
             else:
                 files = {'document': (filename, file_content, content_type)}
                 data = {'chat_id': self._chat_id, 'caption': caption or ''}
-                resp = requests.post(
+                resp = self._session.post(
                     f"https://api.telegram.org/bot{self._bot_token}/sendDocument",
                     files=files,
                     data=data,
@@ -188,7 +190,7 @@ class TelegramBackend(StorageBackend):
             headers['Range'] = range_header
 
         try:
-            resp = requests.get(file_url, stream=True, timeout=60, headers=headers)
+            resp = self._session.get(file_url, stream=True, timeout=60, headers=headers)
         except Exception as e:
             logger.error(f"Telegram 下载失败: {e}")
             return DownloadResult(
@@ -235,7 +237,7 @@ class TelegramBackend(StorageBackend):
         if not self._bot_token:
             return False
         try:
-            resp = requests.get(
+            resp = self._session.get(
                 f"https://api.telegram.org/bot{self._bot_token}/getMe",
                 timeout=10
             )

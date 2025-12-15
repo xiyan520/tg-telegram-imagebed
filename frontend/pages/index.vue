@@ -508,6 +508,7 @@
 const toast = useNotification();
 const { uploadImages, getStats } = useImageApi();
 const guestStore = useGuestTokenStore();
+const authStore = useAuthStore();
 const config = useRuntimeConfig();
 const { triggerStatsRefresh } = useStatsRefresh();
 
@@ -680,7 +681,57 @@ const handleFiles = async (files: File[]) => {
   try {
     let results = [];
 
-    if (guestStore.hasToken) {
+    if (authStore.isAuthenticated) {
+      // 管理员上传（优先级最高，不受游客上传限制）
+      for (let i = 0; i < validFiles.length; i++) {
+        const file = validFiles[i];
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await new Promise<any>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable) {
+              const fileProgress = (event.loaded / event.total) * 100;
+              const totalProgress = ((i + (event.loaded / event.total)) / validFiles.length) * 100;
+              uploadProgress.value = {
+                label: `上传中 (${i + 1}/${validFiles.length}) - ${Math.round(fileProgress)}%`,
+                percent: Math.round(totalProgress),
+              };
+            }
+          });
+
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                resolve(JSON.parse(xhr.responseText));
+              } catch (error) {
+                reject(new Error('解析响应失败'));
+              }
+            } else {
+              try {
+                const errData = JSON.parse(xhr.responseText);
+                reject(new Error(errData.error || `上传失败: ${xhr.status}`));
+              } catch {
+                reject(new Error(`上传失败: ${xhr.status}`));
+              }
+            }
+          });
+
+          xhr.addEventListener('error', () => reject(new Error('网络错误')));
+          xhr.addEventListener('abort', () => reject(new Error('上传已取消')));
+
+          xhr.open('POST', `${config.public.apiBase}/api/admin/upload`);
+          xhr.withCredentials = true;
+          xhr.send(formData);
+        });
+
+        if (response.success) {
+          results.push(response.data);
+        }
+      }
+    } else if (guestStore.hasToken) {
       // 使用Token上传（支持实时进度）
       for (let i = 0; i < validFiles.length; i++) {
         const file = validFiles[i];
@@ -886,9 +937,10 @@ const handlePaste = (event: ClipboardEvent) => {
   }
 };
 
-// 页面加载时获取统计和恢复token
+// 页面加载时获取统计和恢复认证状态
 onMounted(async () => {
   await loadStats();
+  authStore.restoreAuth();
   await guestStore.restoreToken();
 
   // 添加全局粘贴事件监听

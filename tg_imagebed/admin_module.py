@@ -247,31 +247,10 @@ def get_static_file_version(filename):
 
 def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_size, add_cache_headers):
     """注册管理员路由"""
-    
-    # 添加管理页面路由
-    @app.route('/admin')
-    def admin_page():
-        """管理后台首页"""
-        static_version = os.getenv("STATIC_VERSION", str(int(time.time())))
-        force_refresh = os.getenv("FORCE_REFRESH", "false").lower() == "true"
-        response = make_response(render_template('admin.html',
-                                              static_version=static_version,
-                                              force_refresh=force_refresh,
-                                              get_static_file_version=get_static_file_version))
-        return add_cache_headers(response, 'no-cache')
-    
-    @app.route('/admin/login')
-    def admin_login():
-        """管理员登录页面"""
-        if session.get('admin_logged_in'):
-            return redirect(url_for('admin_page'))
-        static_version = os.getenv("STATIC_VERSION", str(int(time.time())))
-        force_refresh = os.getenv("FORCE_REFRESH", "false").lower() == "true"
-        response = make_response(render_template('admin.html',
-                                              static_version=static_version,
-                                              force_refresh=force_refresh,
-                                              get_static_file_version=get_static_file_version))
-        return add_cache_headers(response, 'no-cache')
+
+    # 注意：/admin 和 /admin/login 页面路由已移除
+    # 这些路由由前端 SPA (frontend/.output/public/admin/) 处理
+    # Flask 通过 serve_frontend() 提供静态文件
 
     # 添加管理相关API路由
     @app.route('/api/admin/check')
@@ -515,7 +494,11 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             # 可选列
             if 'is_group_upload' in columns:
                 select_columns.append('fs.is_group_upload')
-            
+            if 'cdn_hit_count' in columns:
+                select_columns.append('fs.cdn_hit_count')
+            if 'direct_hit_count' in columns:
+                select_columns.append('fs.direct_hit_count')
+
             query = f'''
                 SELECT {', '.join(select_columns)}
                 FROM file_storage fs
@@ -575,7 +558,12 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                 # 如果没有 is_group_upload 列，默认为 0
                 if 'is_group_upload' not in image_data:
                     image_data['is_group_upload'] = 0
-                
+                # 如果没有访问统计列，默认为 0
+                if 'cdn_hit_count' not in image_data:
+                    image_data['cdn_hit_count'] = 0
+                if 'direct_hit_count' not in image_data:
+                    image_data['direct_hit_count'] = 0
+
                 # 处理时间格式
                 if image_data.get('upload_time'):
                     try:

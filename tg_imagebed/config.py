@@ -116,6 +116,11 @@ if db_dir and not os.path.exists(db_dir):
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = os.getenv("LOG_FILE", "telegram_imagebed.log")
 
+# 确保日志文件目录存在
+log_dir = os.path.dirname(LOG_FILE)
+if log_dir and not os.path.exists(log_dir):
+    os.makedirs(log_dir, exist_ok=True)
+
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=getattr(logging, LOG_LEVEL.upper()),

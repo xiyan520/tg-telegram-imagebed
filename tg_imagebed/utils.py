@@ -271,6 +271,11 @@ def get_domain(request) -> str:
 
         return base_url
 
+    # 当 request 为 None 时（如 Telegram Bot 场景），优先使用 CDN 域名
+    if CDN_ENABLED and CLOUDFLARE_CDN_DOMAIN:
+        return f"https://{CLOUDFLARE_CDN_DOMAIN}"
+
+    # 回退到本地地址（仅用于开发环境）
     return f"http://{LOCAL_IP}:{PORT}"
 
 

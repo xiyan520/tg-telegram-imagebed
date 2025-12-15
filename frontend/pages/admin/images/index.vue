@@ -136,6 +136,14 @@
             </UBadge>
           </div>
 
+          <!-- 访问次数 -->
+          <div class="absolute bottom-2 right-2 z-10">
+            <div class="bg-black/50 backdrop-blur-sm rounded-md px-1.5 py-0.5 flex items-center gap-1">
+              <UIcon name="heroicons:eye" class="w-3 h-3 text-stone-200" />
+              <span class="text-xs font-medium text-white">{{ image.access_count || 0 }}</span>
+            </div>
+          </div>
+
           <!-- 操作按钮 -->
           <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
             <UButton
@@ -221,6 +229,32 @@
                 {{ selectedImage.cached ? '已缓存' : '未缓存' }}
               </UBadge>
             </div>
+
+            <!-- 访问统计 -->
+            <div class="pt-4 mt-4 border-t border-stone-100 dark:border-stone-800">
+              <h4 class="text-sm font-medium text-stone-900 dark:text-stone-200 mb-3">访问统计</h4>
+              <div class="grid grid-cols-3 gap-3">
+                <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 text-center border border-amber-100 dark:border-amber-800/30">
+                  <div class="text-xs text-stone-500 dark:text-stone-400 mb-1">总访问量</div>
+                  <div class="text-lg font-bold text-amber-600 dark:text-amber-500">
+                    {{ selectedImage.access_count || 0 }}
+                  </div>
+                </div>
+                <div class="bg-stone-50 dark:bg-stone-800 rounded-lg p-3 text-center border border-stone-100 dark:border-stone-700">
+                  <div class="text-xs text-stone-500 dark:text-stone-400 mb-1">CDN 回源</div>
+                  <div class="text-lg font-bold text-stone-700 dark:text-stone-300">
+                    {{ selectedImage.cdn_hit_count || 0 }}
+                  </div>
+                </div>
+                <div class="bg-stone-50 dark:bg-stone-800 rounded-lg p-3 text-center border border-stone-100 dark:border-stone-700">
+                  <div class="text-xs text-stone-500 dark:text-stone-400 mb-1">直连访问</div>
+                  <div class="text-lg font-bold text-stone-700 dark:text-stone-300">
+                    {{ selectedImage.direct_hit_count || 0 }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div>
               <span class="text-stone-600 dark:text-stone-400">URL:</span>
               <code class="block mt-1 p-2 bg-stone-100 dark:bg-neutral-800 rounded text-xs break-all">

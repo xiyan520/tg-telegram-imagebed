@@ -15,7 +15,8 @@ export const useAuthStore = defineStore('auth', {
       try {
         const response = await $fetch<any>(`${config.public.apiBase}/api/admin/login`, {
           method: 'POST',
-          body: { username, password }
+          body: { username, password },
+          credentials: 'include'
         })
 
         if (response.success) {
