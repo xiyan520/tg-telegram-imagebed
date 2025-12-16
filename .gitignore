@@ -25,7 +25,7 @@ eggs/
 logs/
 
 # 数据目录
-data/
+/data/
 
 # 前端
 frontend/node_modules/
