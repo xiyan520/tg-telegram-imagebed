@@ -4,7 +4,7 @@
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold text-stone-900 dark:text-white">系统设置</h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">配置游客模式、上传限制和 Token 管理</p>
+        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">配置上传策略、CDN 加速和群组上传功能</p>
       </div>
       <UButton
         icon="heroicons:arrow-path"
@@ -18,17 +18,283 @@
     </div>
 
     <!-- 加载状态 -->
-    <div v-if="loading && !settings" class="flex justify-center py-12">
+    <div v-if="loading && !settingsLoaded" class="flex justify-center py-12">
       <div class="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
     </div>
 
     <template v-else>
+      <!-- 域名配置 -->
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-stone-500 to-stone-600 rounded-lg flex items-center justify-center">
+                <UIcon name="heroicons:globe-alt" class="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">域名配置</h3>
+                <p class="text-xs text-stone-500 dark:text-stone-400">配置图床访问域名</p>
+              </div>
+            </div>
+            <!-- 当前模式标签 -->
+            <div
+              class="px-3 py-1.5 rounded-full text-xs font-medium"
+              :class="currentModeClass"
+            >
+              {{ currentModeLabel }}
+            </div>
+          </div>
+        </template>
+
+        <div class="space-y-4">
+          <UFormGroup label="图床域名">
+            <UInput v-model="settings.cloudflare_cdn_domain" placeholder="例如: img.example.com" />
+            <template #hint>
+              <span class="text-xs text-stone-500">用于生成图片链接的域名，留空则使用当前访问域名</span>
+            </template>
+          </UFormGroup>
+
+          <!-- 模式说明 -->
+          <div class="p-4 rounded-xl" :class="currentModeBackground">
+            <div class="flex items-start gap-3">
+              <UIcon :name="currentModeIcon" class="w-5 h-5 flex-shrink-0 mt-0.5" :class="currentModeIconColor" />
+              <div>
+                <p class="font-medium" :class="currentModeTitleColor">{{ currentModeTitle }}</p>
+                <p class="text-sm mt-1" :class="currentModeDescColor">{{ currentModeDescription }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </UCard>
+
+      <!-- CDN 配置 -->
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center">
+                <UIcon name="heroicons:bolt" class="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">CDN 加速</h3>
+                <p class="text-xs text-stone-500 dark:text-stone-400">配置 Cloudflare CDN 加速</p>
+              </div>
+            </div>
+            <UToggle v-model="settings.cdn_enabled" size="lg" />
+          </div>
+        </template>
+
+        <!-- CDN 未开启提示 -->
+        <div v-if="!settings.cdn_enabled" class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+          <div class="flex items-center gap-3">
+            <UIcon name="heroicons:information-circle" class="w-5 h-5 text-stone-400" />
+            <p class="text-sm text-stone-500 dark:text-stone-400">
+              CDN 加速未开启。开启后可通过 Cloudflare 加速图片访问并降低源站压力。
+            </p>
+          </div>
+        </div>
+
+        <!-- CDN 配置详情 -->
+        <div v-else class="space-y-6">
+          <!-- 基础配置 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <UFormGroup label="Zone ID">
+              <UInput v-model="settings.cloudflare_zone_id" placeholder="Cloudflare Zone ID" />
+            </UFormGroup>
+
+            <UFormGroup label="API Token">
+              <UInput
+                v-model="settings.cloudflare_api_token"
+                type="password"
+                :placeholder="settings.cloudflare_api_token_set ? '已设置（留空保持不变）' : '输入 Cloudflare API Token'"
+              />
+              <template #hint>
+                <span v-if="settings.cloudflare_api_token_set" class="text-xs text-green-600 dark:text-green-400">
+                  已配置 API Token
+                </span>
+                <span v-else class="text-xs text-amber-600 dark:text-amber-400">
+                  未配置 API Token
+                </span>
+              </template>
+            </UFormGroup>
+
+            <UFormGroup label="缓存策略">
+              <USelect
+                v-model="settings.cloudflare_cache_level"
+                :options="policyOptions.cloudflare_cache_level"
+                option-attribute="label"
+                value-attribute="value"
+              />
+            </UFormGroup>
+          </div>
+
+          <!-- TTL 配置 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <UFormGroup label="浏览器 TTL（秒）">
+              <UInput v-model.number="settings.cloudflare_browser_ttl" type="number" min="0" />
+              <template #hint>
+                <span class="text-xs text-stone-500">默认 14400（4小时）</span>
+              </template>
+            </UFormGroup>
+
+            <UFormGroup label="边缘 TTL（秒）">
+              <UInput v-model.number="settings.cloudflare_edge_ttl" type="number" min="0" />
+              <template #hint>
+                <span class="text-xs text-stone-500">默认 2592000（30天）</span>
+              </template>
+            </UFormGroup>
+          </div>
+
+          <!-- 功能开关 -->
+          <div class="space-y-4">
+            <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+              <div>
+                <p class="font-medium text-stone-900 dark:text-white">智能路由</p>
+                <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  根据文件缓存状态智能选择访问路径
+                </p>
+              </div>
+              <UToggle v-model="settings.enable_smart_routing" size="lg" />
+            </div>
+
+            <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+              <div>
+                <p class="font-medium text-stone-900 dark:text-white">回源兜底</p>
+                <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  CDN 访问失败时自动回源
+                </p>
+              </div>
+              <UToggle v-model="settings.fallback_to_origin" size="lg" />
+            </div>
+
+            <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+              <div>
+                <p class="font-medium text-stone-900 dark:text-white">缓存预热</p>
+                <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  上传后自动预热 CDN 缓存
+                </p>
+              </div>
+              <UToggle v-model="settings.enable_cache_warming" size="lg" />
+            </div>
+
+            <div v-if="settings.enable_cache_warming" class="pl-4 border-l-2 border-amber-500">
+              <UFormGroup label="预热延迟（秒）">
+                <UInput v-model.number="settings.cache_warming_delay" type="number" min="0" class="w-32" />
+              </UFormGroup>
+            </div>
+
+            <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+              <div>
+                <p class="font-medium text-stone-900 dark:text-white">CDN 监控</p>
+                <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  监控文件缓存状态
+                </p>
+              </div>
+              <UToggle v-model="settings.cdn_monitor_enabled" size="lg" />
+            </div>
+
+            <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+              <div>
+                <p class="font-medium text-stone-900 dark:text-white">CDN 重定向</p>
+                <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  已缓存文件重定向到 CDN
+                </p>
+              </div>
+              <UToggle v-model="settings.cdn_redirect_enabled" size="lg" />
+            </div>
+
+            <div v-if="settings.cdn_redirect_enabled" class="pl-4 border-l-2 border-amber-500 space-y-4">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <UFormGroup label="最大重定向次数">
+                  <UInput v-model.number="settings.cdn_redirect_max_count" type="number" min="1" />
+                </UFormGroup>
+                <UFormGroup label="新文件延迟（秒）">
+                  <UInput v-model.number="settings.cdn_redirect_delay" type="number" min="0" />
+                  <template #hint>
+                    <span class="text-xs text-stone-500">新上传文件等待多久后才重定向</span>
+                  </template>
+                </UFormGroup>
+              </div>
+            </div>
+          </div>
+        </div>
+      </UCard>
+
+      <!-- 群组上传配置 -->
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
+                <UIcon name="heroicons:user-group" class="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">群组上传</h3>
+                <p class="text-xs text-stone-500 dark:text-stone-400">Telegram 群组图片上传功能</p>
+              </div>
+            </div>
+            <UToggle v-model="settings.group_upload_enabled" size="lg" />
+          </div>
+        </template>
+
+        <!-- 群组上传未开启提示 -->
+        <div v-if="!settings.group_upload_enabled" class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+          <div class="flex items-center gap-3">
+            <UIcon name="heroicons:information-circle" class="w-5 h-5 text-stone-400" />
+            <p class="text-sm text-stone-500 dark:text-stone-400">
+              群组上传功能未开启。开启后可在 Telegram 群组中直接发送图片上传到图床。
+            </p>
+          </div>
+        </div>
+
+        <!-- 群组上传配置详情 -->
+        <div v-else class="space-y-6">
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">仅管理员可上传</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                限制只有指定管理员才能通过群组上传
+              </p>
+            </div>
+            <UToggle v-model="settings.group_upload_admin_only" size="lg" />
+          </div>
+
+          <div v-if="settings.group_upload_admin_only">
+            <UFormGroup label="管理员 ID 列表">
+              <UInput v-model="settings.group_admin_ids" placeholder="多个 ID 用逗号分隔，如: 123456789,987654321" />
+              <template #hint>
+                <span class="text-xs text-stone-500">Telegram 用户 ID，多个用逗号分隔</span>
+              </template>
+            </UFormGroup>
+          </div>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">自动回复链接</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                上传成功后自动回复图片链接
+              </p>
+            </div>
+            <UToggle v-model="settings.group_upload_reply" size="lg" />
+          </div>
+
+          <div v-if="settings.group_upload_reply">
+            <UFormGroup label="回复消息删除延迟（秒）">
+              <UInput v-model.number="settings.group_upload_delete_delay" type="number" min="0" />
+              <template #hint>
+                <span class="text-xs text-stone-500">0 表示不自动删除回复消息</span>
+              </template>
+            </UFormGroup>
+          </div>
+        </div>
+      </UCard>
+
       <!-- 游客上传策略 -->
       <UCard>
         <template #header>
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-              <UIcon name="heroicons:user-group" class="w-5 h-5 text-white" />
+            <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center">
+              <UIcon name="heroicons:users" class="w-5 h-5 text-white" />
             </div>
             <div>
               <h3 class="text-lg font-semibold text-stone-900 dark:text-white">游客上传策略</h3>
@@ -38,7 +304,6 @@
         </template>
 
         <div class="space-y-6">
-          <!-- 上传策略选择 -->
           <div>
             <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-3">上传策略</label>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -77,7 +342,6 @@
             </div>
           </div>
 
-          <!-- Token 生成开关 -->
           <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
             <div>
               <p class="font-medium text-stone-900 dark:text-white">允许游客生成 Token</p>
@@ -92,7 +356,6 @@
             />
           </div>
 
-          <!-- 已有 Token 处理策略 -->
           <div v-if="settings.guest_upload_policy !== 'open'">
             <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-3">
               已有 Token 处理策略
@@ -114,7 +377,7 @@
       <UCard>
         <template #header>
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center">
+            <div class="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center">
               <UIcon name="heroicons:key" class="w-5 h-5 text-white" />
             </div>
             <div>
@@ -157,7 +420,7 @@
       <UCard>
         <template #header>
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center">
+            <div class="w-10 h-10 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-lg flex items-center justify-center">
               <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
             </div>
             <div>
@@ -275,13 +538,13 @@ definePageMeta({
 const runtimeConfig = useRuntimeConfig()
 const notification = useNotification()
 
-// 状态
 const loading = ref(false)
 const saving = ref(false)
 const revokingTokens = ref(false)
+const settingsLoaded = ref(false)
 
-// 设置数据
 const settings = ref({
+  // 游客上传策略
   guest_upload_policy: 'open',
   guest_token_generation_enabled: true,
   guest_existing_tokens_policy: 'keep',
@@ -289,12 +552,33 @@ const settings = ref({
   guest_token_max_expires_days: 365,
   max_file_size_mb: 20,
   daily_upload_limit: 0,
+  // CDN 配置
+  cdn_enabled: false,
+  cloudflare_cdn_domain: '',
+  cloudflare_api_token: '',
+  cloudflare_api_token_set: false,
+  cloudflare_zone_id: '',
+  cloudflare_cache_level: 'aggressive',
+  cloudflare_browser_ttl: 14400,
+  cloudflare_edge_ttl: 2592000,
+  enable_smart_routing: false,
+  fallback_to_origin: true,
+  enable_cache_warming: false,
+  cache_warming_delay: 5,
+  cdn_monitor_enabled: false,
+  cdn_redirect_enabled: false,
+  cdn_redirect_max_count: 2,
+  cdn_redirect_delay: 10,
+  // 群组上传配置
+  group_upload_enabled: false,
+  group_upload_admin_only: false,
+  group_admin_ids: '',
+  group_upload_reply: true,
+  group_upload_delete_delay: 0,
 })
 
-// 原始设置（用于重置）
 const originalSettings = ref<typeof settings.value | null>(null)
 
-// 策略选项
 const policyOptions = ref({
   guest_upload_policy: [
     { value: 'open', label: '完全开放', description: '允许匿名上传和 Token 上传' },
@@ -306,9 +590,96 @@ const policyOptions = ref({
     { value: 'disable_guest', label: '禁用游客 Token', description: '关闭时禁用所有游客生成的 Token' },
     { value: 'disable_all', label: '禁用所有 Token', description: '关闭时禁用所有 Token' },
   ],
+  cloudflare_cache_level: [
+    { value: 'basic', label: '基础' },
+    { value: 'aggressive', label: '激进' },
+    { value: 'simplified', label: '简化' },
+  ],
 })
 
-// 加载设置
+// 域名模式计算属性
+const hasDomain = computed(() => !!settings.value.cloudflare_cdn_domain?.trim())
+const cdnEnabled = computed(() => settings.value.cdn_enabled)
+
+// 当前模式: cdn | direct | default
+const currentMode = computed(() => {
+  if (hasDomain.value && cdnEnabled.value) return 'cdn'
+  if (hasDomain.value && !cdnEnabled.value) return 'direct'
+  return 'default'
+})
+
+const currentModeLabel = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'CDN 加速'
+    case 'direct': return '自定义域名'
+    default: return '默认模式'
+  }
+})
+
+const currentModeClass = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+    case 'direct': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+    default: return 'bg-stone-100 text-stone-600 dark:bg-neutral-700 dark:text-stone-400'
+  }
+})
+
+const currentModeBackground = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'bg-green-50 dark:bg-green-900/20'
+    case 'direct': return 'bg-blue-50 dark:bg-blue-900/20'
+    default: return 'bg-stone-50 dark:bg-neutral-800'
+  }
+})
+
+const currentModeIcon = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'heroicons:bolt'
+    case 'direct': return 'heroicons:globe-alt'
+    default: return 'heroicons:server'
+  }
+})
+
+const currentModeIconColor = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'text-green-500'
+    case 'direct': return 'text-blue-500'
+    default: return 'text-stone-400'
+  }
+})
+
+const currentModeTitleColor = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'text-green-800 dark:text-green-200'
+    case 'direct': return 'text-blue-800 dark:text-blue-200'
+    default: return 'text-stone-700 dark:text-stone-300'
+  }
+})
+
+const currentModeDescColor = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'text-green-600 dark:text-green-300'
+    case 'direct': return 'text-blue-600 dark:text-blue-300'
+    default: return 'text-stone-500 dark:text-stone-400'
+  }
+})
+
+const currentModeTitle = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return 'CDN 加速模式'
+    case 'direct': return '自定义域名模式'
+    default: return '默认模式'
+  }
+})
+
+const currentModeDescription = computed(() => {
+  switch (currentMode.value) {
+    case 'cdn': return '图片将通过 Cloudflare CDN 加速访问，降低源站压力并提升全球访问速度'
+    case 'direct': return '图片链接使用自定义域名，直接访问源站，无 CDN 缓存加速'
+    default: return '使用当前访问域名生成图片链接，适合本地开发或单域名部署场景'
+  }
+})
+
 const loadSettings = async () => {
   loading.value = true
   try {
@@ -317,11 +688,17 @@ const loadSettings = async () => {
     })
 
     if (response.success) {
-      settings.value = { ...response.data }
-      originalSettings.value = { ...response.data }
+      const data = response.data
+      settings.value = {
+        ...settings.value,
+        ...data,
+        cloudflare_api_token: '',
+      }
+      originalSettings.value = { ...settings.value }
+      settingsLoaded.value = true
 
       if (response.policy_options) {
-        policyOptions.value = response.policy_options
+        policyOptions.value = { ...policyOptions.value, ...response.policy_options }
       }
     }
   } catch (error: any) {
@@ -332,21 +709,26 @@ const loadSettings = async () => {
   }
 }
 
-// 保存设置
 const saveSettings = async () => {
   saving.value = true
   try {
+    const payload = {
+      ...settings.value,
+      apply_token_policy: settings.value.guest_upload_policy !== 'open'
+    }
+    if (!payload.cloudflare_api_token) {
+      delete (payload as any).cloudflare_api_token
+    }
+
     const response = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
       method: 'PUT',
       credentials: 'include',
-      body: {
-        ...settings.value,
-        apply_token_policy: settings.value.guest_upload_policy !== 'open'
-      }
+      body: payload
     })
 
     if (response.success) {
       notification.success('保存成功', response.message || '系统设置已更新')
+      settings.value = { ...settings.value, ...response.data, cloudflare_api_token: '' }
       originalSettings.value = { ...settings.value }
 
       if (response.tokens_disabled > 0) {
@@ -361,7 +743,6 @@ const saveSettings = async () => {
   }
 }
 
-// 重置设置
 const resetSettings = () => {
   if (originalSettings.value) {
     settings.value = { ...originalSettings.value }
@@ -369,7 +750,6 @@ const resetSettings = () => {
   }
 }
 
-// 批量禁用 Token
 const revokeTokens = async (type: 'guest' | 'all') => {
   const confirmMessage = type === 'all'
     ? '确定要禁用所有 Token 吗？此操作不可撤销。'
@@ -398,7 +778,6 @@ const revokeTokens = async (type: 'guest' | 'all') => {
   }
 }
 
-// 页面加载
 onMounted(() => {
   loadSettings()
 })

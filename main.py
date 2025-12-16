@@ -65,7 +65,7 @@ def _get_bot_status() -> dict:
 from tg_imagebed.utils import acquire_lock, release_lock, add_cache_headers, get_static_file_version
 
 # 导入数据库
-from tg_imagebed.database import init_database, get_all_files_count, get_total_size, init_system_settings
+from tg_imagebed.database import init_database, get_all_files_count, get_total_size, init_system_settings, migrate_env_settings
 
 # 导入服务
 from tg_imagebed.services.cdn_service import start_cdn_monitor, stop_cdn_monitor
@@ -139,6 +139,7 @@ def create_app() -> Flask:
     # 注意：main() 函数也会调用这些初始化，但由于幂等性，重复调用不会有问题
     init_database()
     init_system_settings()
+    migrate_env_settings()
     logger.debug("数据库与系统设置初始化检查完成")
 
     app.secret_key = SECRET_KEY
@@ -522,6 +523,9 @@ def main():
 
     # 初始化系统设置
     init_system_settings()
+
+    # 迁移环境变量配置到数据库
+    migrate_env_settings()
 
     # 启动 CDN 监控
     if CDN_ENABLED and CLOUDFLARE_CDN_DOMAIN and CDN_MONITOR_ENABLED:

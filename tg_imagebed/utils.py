@@ -229,9 +229,43 @@ def format_size(size_bytes: int) -> str:
 
 
 # ===================== 域名获取 =====================
+_DOMAIN_SETTINGS_CACHE = {"ts": 0.0, "domain": "", "cdn_enabled": False}
+
+
+def _get_effective_domain_settings():
+    """
+    从数据库读取域名/cdn_enabled 设置。
+    失败时回退到环境变量配置。
+    """
+    import time as _time
+    now = _time.time()
+    if now - _DOMAIN_SETTINGS_CACHE["ts"] < 1.0:
+        return _DOMAIN_SETTINGS_CACHE["domain"], _DOMAIN_SETTINGS_CACHE["cdn_enabled"]
+
+    domain = ""
+    cdn_enabled = False
+    try:
+        from .database import get_system_setting
+        domain = str(get_system_setting("cloudflare_cdn_domain") or "").strip()
+        cdn_enabled = str(get_system_setting("cdn_enabled") or "0") == "1"
+    except Exception:
+        domain = str(CLOUDFLARE_CDN_DOMAIN or "").strip()
+        cdn_enabled = bool(CDN_ENABLED)
+
+    _DOMAIN_SETTINGS_CACHE["ts"] = now
+    _DOMAIN_SETTINGS_CACHE["domain"] = domain
+    _DOMAIN_SETTINGS_CACHE["cdn_enabled"] = cdn_enabled
+    return domain, cdn_enabled
+
+
 def get_domain(request) -> str:
     """
     根据请求动态获取域名
+
+    三种模式：
+    - CDN 模式: 配置了域名 + cdn_enabled=True => https://<domain>
+    - 直连模式: 配置了域名 + cdn_enabled=False => https://<domain> (或保持请求 scheme)
+    - 默认模式: 未配置域名 => 使用请求 host
 
     Args:
         request: Flask request 对象，可以为 None
@@ -239,12 +273,11 @@ def get_domain(request) -> str:
     Returns:
         完整的域名 URL
     """
-    if request:
-        # 如果启用了 CDN 且不是 API 请求，返回 CDN 域名
-        if CDN_ENABLED and CLOUDFLARE_CDN_DOMAIN:
-            if not request.path.startswith('/api/'):
-                return f"https://{CLOUDFLARE_CDN_DOMAIN}"
+    configured_domain, cdn_enabled = _get_effective_domain_settings()
+    has_domain = bool(configured_domain)
+    cdn_mode = has_domain and cdn_enabled
 
+    if request:
         # 检测 Cloudflare 访问者信息
         cf_visitor = request.headers.get('CF-Visitor')
         if cf_visitor:
@@ -257,12 +290,19 @@ def get_domain(request) -> str:
         else:
             scheme = request.headers.get('X-Forwarded-Proto', 'http')
 
-        # 获取主机名
-        host = (request.headers.get('X-Forwarded-Host') or
-                request.headers.get('Host') or
-                request.host)
+        # Host 选择：配置了域名则使用配置域名，否则使用请求 host
+        if has_domain:
+            host = configured_domain
+        else:
+            host = (
+                request.headers.get('X-Forwarded-Host')
+                or request.headers.get('Host')
+                or request.host
+            )
 
-        base_url = f"{scheme}://{host}"
+        # Scheme 选择：CDN 模式强制 https，其他模式保持请求 scheme
+        effective_scheme = 'https' if cdn_mode else scheme
+        base_url = f"{effective_scheme}://{host}"
 
         # 处理前缀
         forwarded_prefix = request.headers.get('X-Forwarded-Prefix', '')
@@ -271,9 +311,9 @@ def get_domain(request) -> str:
 
         return base_url
 
-    # 当 request 为 None 时（如 Telegram Bot 场景），优先使用 CDN 域名
-    if CDN_ENABLED and CLOUDFLARE_CDN_DOMAIN:
-        return f"https://{CLOUDFLARE_CDN_DOMAIN}"
+    # request 为 None 时（如 Telegram Bot 场景）
+    if has_domain:
+        return f"https://{configured_domain}"
 
     # 回退到本地地址（仅用于开发环境）
     return f"http://{LOCAL_IP}:{PORT}"

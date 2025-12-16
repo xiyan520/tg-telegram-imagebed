@@ -11,22 +11,28 @@ from flask import request, jsonify, Response, send_file, redirect, make_response
 
 from . import images_bp
 from ..config import (
-    CDN_ENABLED, CLOUDFLARE_CDN_DOMAIN,
-    CDN_REDIRECT_ENABLED, CDN_REDIRECT_MAX_COUNT, CDN_REDIRECT_CACHE_TIME, CDN_REDIRECT_DELAY,
-    CDN_MONITOR_ENABLED, ENABLE_GROUP_UPLOAD, GROUP_UPLOAD_ADMIN_ONLY, GROUP_UPLOAD_REPLY,
+    CDN_REDIRECT_CACHE_TIME,
     STATIC_FOLDER, STATIC_VERSION, START_TIME, PORT,
     logger
 )
 from ..database import (
     get_file_info, update_access_count, update_cdn_cache_status,
-    get_stats, get_recent_uploads
+    get_stats, get_recent_uploads, update_file_path_in_db,
+    get_system_setting, get_system_setting_int
 )
 from ..utils import (
     add_cache_headers, format_size, get_domain, get_static_file_version, LOCAL_IP
 )
 from ..services.cdn_service import cloudflare_cdn, get_monitor_queue_size
-from ..database import update_file_path_in_db
 from ..storage.router import get_storage_router
+
+
+def _get_domain_mode():
+    """获取域名模式配置"""
+    domain = str(get_system_setting('cloudflare_cdn_domain') or '').strip()
+    cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
+    cdn_mode = bool(domain) and cdn_enabled
+    return domain, cdn_enabled, cdn_mode
 
 
 @images_bp.route('/')
@@ -68,13 +74,19 @@ def serve_image(encrypted_id):
     is_cdn_request = bool(request.headers.get('CF-Connecting-IP'))
     access_type = 'cdn_pull' if is_cdn_request else 'direct_access'
 
+    # 从数据库读取域名和 CDN 配置
+    cdn_domain, _, cdn_mode = _get_domain_mode()
+    cdn_redirect_enabled = str(get_system_setting('cdn_redirect_enabled') or '0') == '1'
+    cdn_redirect_max_count = get_system_setting_int('cdn_redirect_max_count', 2, minimum=1)
+    cdn_redirect_delay = get_system_setting_int('cdn_redirect_delay', 10, minimum=0)
+
     # 检查是否来自 CDN 域名
     host = request.headers.get('Host', '')
-    is_from_cdn_domain = CLOUDFLARE_CDN_DOMAIN and host == CLOUDFLARE_CDN_DOMAIN
+    is_from_cdn_domain = cdn_domain and host == cdn_domain
 
     # 检查 Referer
     referer = request.headers.get('Referer', '')
-    is_referer_from_cdn = CLOUDFLARE_CDN_DOMAIN and CLOUDFLARE_CDN_DOMAIN in referer
+    is_referer_from_cdn = cdn_domain and cdn_domain in referer
 
     # 检查重定向计数
     redirect_count = request.headers.get('X-Redirect-Count', '0')
@@ -87,20 +99,19 @@ def serve_image(encrypted_id):
     is_new_file = False
     if file_info.get('upload_time'):
         time_since_upload = time.time() - file_info['upload_time']
-        is_new_file = time_since_upload < CDN_REDIRECT_DELAY
+        is_new_file = time_since_upload < cdn_redirect_delay
 
-    # CDN 重定向逻辑
-    if (CDN_REDIRECT_ENABLED and
+    # CDN 重定向逻辑（仅在 CDN 模式下生效）
+    if (cdn_redirect_enabled and
         not is_cdn_request and
         not is_from_cdn_domain and
         not is_referer_from_cdn and
         not is_new_file and
-        redirect_count < CDN_REDIRECT_MAX_COUNT and
-        CDN_ENABLED and
-        CLOUDFLARE_CDN_DOMAIN):
+        redirect_count < cdn_redirect_max_count and
+        cdn_mode):
 
         if file_info.get('cdn_cached'):
-            cdn_url = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{encrypted_id}"
+            cdn_url = f"https://{cdn_domain}/image/{encrypted_id}"
             request_url = request.url
             if cdn_url not in request_url:
                 logger.info(f"图片已缓存，重定向到CDN: {encrypted_id} -> {cdn_url}")
@@ -126,7 +137,11 @@ def serve_image(encrypted_id):
     if if_none_match and if_none_match == etag:
         response = Response(status=304)
         response.headers['ETag'] = etag
-        response.headers['Cache-Control'] = 'public, max-age=31536000, s-maxage=2592000, immutable'
+        # CDN 模式使用长缓存，其他模式使用短缓存
+        if cdn_mode:
+            response.headers['Cache-Control'] = 'public, max-age=31536000, s-maxage=2592000, immutable'
+        else:
+            response.headers['Cache-Control'] = 'public, max-age=3600'
         response.headers['Access-Control-Allow-Origin'] = '*'
         return response
 
@@ -176,7 +191,8 @@ def serve_image(encrypted_id):
             headers=resp_headers
         )
 
-        if CDN_ENABLED:
+        # 根据模式设置缓存头
+        if cdn_mode:
             if is_new_file:
                 resp.headers['Cache-Control'] = 'public, max-age=300, s-maxage=300'
             else:
@@ -234,6 +250,8 @@ def get_recent_api():
 
     try:
         recent_files = get_recent_uploads(limit, page)
+        base_url = get_domain(request)
+        cdn_domain, _, cdn_mode = _get_domain_mode()
 
         for file in recent_files:
             if file.get('created_at'):
@@ -243,9 +261,9 @@ def get_recent_api():
                 except Exception:
                     pass
 
-            base_url = get_domain(request)
             file['image_url'] = f"{base_url}/image/{file['encrypted_id']}"
-            file['cdn_url'] = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{file['encrypted_id']}" if CLOUDFLARE_CDN_DOMAIN else None
+            # 仅在 CDN 模式下返回 cdn_url
+            file['cdn_url'] = f"https://{cdn_domain}/image/{file['encrypted_id']}" if cdn_mode else None
             file['cdn_cached'] = file.get('cdn_cached', 0)
             file['is_group_upload'] = file.get('is_group_upload', 0)
 
@@ -278,24 +296,32 @@ def get_recent_api():
 def get_info():
     """获取服务器信息"""
     stats = get_stats()
+    cdn_domain, cdn_enabled, cdn_mode = _get_domain_mode()
+    cdn_monitor_enabled = str(get_system_setting('cdn_monitor_enabled') or '0') == '1'
+    cdn_redirect_enabled = str(get_system_setting('cdn_redirect_enabled') or '0') == '1'
+    group_upload_enabled = str(get_system_setting('group_upload_enabled') or '0') == '1'
+    group_upload_admin_only = str(get_system_setting('group_upload_admin_only') or '0') == '1'
+    group_upload_reply = str(get_system_setting('group_upload_reply') or '1') == '1'
+    max_file_size_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=100)
 
     response = jsonify({
         'server_ip': LOCAL_IP,
         'domain': get_domain(request),
-        'cdn_domain': f"https://{CLOUDFLARE_CDN_DOMAIN}" if CLOUDFLARE_CDN_DOMAIN else None,
+        'cdn_domain': f"https://{cdn_domain}" if cdn_domain else None,
         'port': PORT,
         'storage_type': 'telegram_cloud + sqlite',
         'total_files': stats['total_files'],
         'group_uploads': stats['group_uploads'],
-        'cdn_enabled': CDN_ENABLED,
-        'cloudflare_cdn': bool(CLOUDFLARE_CDN_DOMAIN),
-        'cdn_monitor_enabled': CDN_MONITOR_ENABLED,
+        'cdn_enabled': cdn_enabled,
+        'cdn_mode': cdn_mode,
+        'cloudflare_cdn': bool(cdn_domain),
+        'cdn_monitor_enabled': cdn_monitor_enabled,
         'cdn_monitor_queue': get_monitor_queue_size(),
-        'cdn_redirect_enabled': CDN_REDIRECT_ENABLED,
-        'group_upload_enabled': ENABLE_GROUP_UPLOAD,
-        'group_upload_admin_only': GROUP_UPLOAD_ADMIN_ONLY,
-        'group_upload_reply': GROUP_UPLOAD_REPLY,
-        'max_file_size': 20 * 1024 * 1024,
+        'cdn_redirect_enabled': cdn_redirect_enabled,
+        'group_upload_enabled': group_upload_enabled,
+        'group_upload_admin_only': group_upload_admin_only,
+        'group_upload_reply': group_upload_reply,
+        'max_file_size': max_file_size_mb * 1024 * 1024,
         'static_version': STATIC_VERSION,
     })
 
@@ -306,14 +332,19 @@ def get_info():
 @images_bp.route('/api/health')
 def health_check():
     """健康检查端点"""
+    cdn_domain, cdn_enabled, cdn_mode = _get_domain_mode()
+    cdn_redirect_enabled = str(get_system_setting('cdn_redirect_enabled') or '0') == '1'
+    group_upload_enabled = str(get_system_setting('group_upload_enabled') or '0') == '1'
+
     response = jsonify({
         'status': 'healthy',
         'timestamp': int(time.time()),
         'base_url': get_domain(request),
-        'cdn_enabled': CDN_ENABLED,
-        'cloudflare_cdn': bool(CLOUDFLARE_CDN_DOMAIN),
-        'cdn_redirect_enabled': CDN_REDIRECT_ENABLED,
-        'group_upload_enabled': ENABLE_GROUP_UPLOAD,
+        'cdn_enabled': cdn_enabled,
+        'cdn_mode': cdn_mode,
+        'cloudflare_cdn': bool(cdn_domain),
+        'cdn_redirect_enabled': cdn_redirect_enabled,
+        'group_upload_enabled': group_upload_enabled,
         'version': STATIC_VERSION
     })
     response.headers['Access-Control-Allow-Origin'] = '*'

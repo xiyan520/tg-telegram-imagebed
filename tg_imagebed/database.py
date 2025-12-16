@@ -271,10 +271,12 @@ def save_file_info(encrypted_id: str, file_info: Dict[str, Any]) -> None:
         # 生成 ETag
         etag = f'W/"{encrypted_id}-{file_info.get("file_size", 0)}"'
 
-        # 生成 CDN URL
+        # 生成 CDN URL（仅在 CDN Mode：域名已配置 + cdn_enabled=1）
         cdn_url = None
-        if CDN_ENABLED and CLOUDFLARE_CDN_DOMAIN:
-            cdn_url = f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{encrypted_id}"
+        cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
+        cdn_domain = str(get_system_setting('cloudflare_cdn_domain') or '').strip()
+        if cdn_enabled and cdn_domain:
+            cdn_url = f"https://{cdn_domain}/image/{encrypted_id}"
 
         # 处理存储字段（类型防御：确保是字符串）
         storage_backend = str(file_info.get('storage_backend') or 'telegram').strip() or 'telegram'
@@ -761,23 +763,105 @@ def update_announcement(enabled: bool, content: str) -> int:
 
 
 # ===================== 系统设置管理 =====================
+# 敏感配置列表（日志中不打印值）
+SENSITIVE_SETTINGS = {
+    'storage_config_json', 'storage_upload_policy_json',
+    'cloudflare_api_token'
+}
+
 # 默认系统设置
 DEFAULT_SYSTEM_SETTINGS = {
+    # 游客上传策略
     'guest_upload_policy': 'open',  # open/token_only/admin_only
     'guest_token_generation_enabled': '1',  # 0/1
     'guest_existing_tokens_policy': 'keep',  # keep/disable_guest/disable_all
-    'max_file_size_mb': '20',  # 最大文件大小（MB）
-    'daily_upload_limit': '0',  # 每日上传限制（0=无限制）
-    'guest_token_max_upload_limit': '1000',  # 游客 Token 最大上传数
-    'guest_token_max_expires_days': '365',  # 游客 Token 最大有效期（天）
-    'storage_active_backend': 'telegram',  # 激活的存储后端
-    'storage_config_json': '',  # 存储配置 JSON
-    'storage_upload_policy_json': '',  # 上传场景路由策略 JSON
+    'max_file_size_mb': '20',
+    'daily_upload_limit': '0',  # 0=无限制
+    'guest_token_max_upload_limit': '1000',
+    'guest_token_max_expires_days': '365',
+    # 存储配置
+    'storage_active_backend': 'telegram',
+    'storage_config_json': '',
+    'storage_upload_policy_json': '',
+    # CDN 配置（默认不开启）
+    'cdn_enabled': '0',
+    'cloudflare_cdn_domain': '',
+    'cloudflare_api_token': '',
+    'cloudflare_zone_id': '',
+    'cloudflare_cache_level': 'aggressive',
+    'cloudflare_browser_ttl': '14400',
+    'cloudflare_edge_ttl': '2592000',
+    'enable_smart_routing': '0',
+    'fallback_to_origin': '1',
+    'enable_cache_warming': '0',
+    'cache_warming_delay': '5',
+    'cdn_monitor_enabled': '0',
+    'cdn_redirect_enabled': '0',
+    'cdn_redirect_max_count': '2',
+    'cdn_redirect_delay': '10',
+    # 群组上传配置（默认不开启）
+    'group_upload_enabled': '0',
+    'group_upload_admin_only': '0',
+    'group_admin_ids': '',
+    'group_upload_reply': '1',
+    'group_upload_delete_delay': '0',
 }
+
+# 环境变量迁移标记（避免每次启动重复覆盖管理员修改）
+_ENV_MIGRATED_KEY = '__env_settings_migrated_v1__'
+
+
+def _get_env_config_value(db_key: str):
+    """从 config.py 获取对应的环境变量配置值"""
+    from . import config
+
+    # 数据库 key -> config.py 变量名的映射
+    mapping = {
+        # CDN 配置
+        'cdn_enabled': ('CDN_ENABLED', 'bool'),
+        'cloudflare_cdn_domain': ('CLOUDFLARE_CDN_DOMAIN', 'str'),
+        'cloudflare_api_token': ('CLOUDFLARE_API_TOKEN', 'str'),
+        'cloudflare_zone_id': ('CLOUDFLARE_ZONE_ID', 'str'),
+        'cloudflare_cache_level': ('CLOUDFLARE_CACHE_LEVEL', 'str'),
+        'cloudflare_browser_ttl': ('CLOUDFLARE_BROWSER_TTL', 'int'),
+        'cloudflare_edge_ttl': ('CLOUDFLARE_EDGE_TTL', 'int'),
+        'enable_smart_routing': ('ENABLE_SMART_ROUTING', 'bool'),
+        'fallback_to_origin': ('FALLBACK_TO_ORIGIN', 'bool'),
+        'enable_cache_warming': ('ENABLE_CACHE_WARMING', 'bool'),
+        'cache_warming_delay': ('CACHE_WARMING_DELAY', 'int'),
+        'cdn_monitor_enabled': ('CDN_MONITOR_ENABLED', 'bool'),
+        'cdn_redirect_enabled': ('CDN_REDIRECT_ENABLED', 'bool'),
+        'cdn_redirect_max_count': ('CDN_REDIRECT_MAX_COUNT', 'int'),
+        'cdn_redirect_delay': ('CDN_REDIRECT_DELAY', 'int'),
+        # 群组上传配置
+        'group_upload_enabled': ('ENABLE_GROUP_UPLOAD', 'bool'),
+        'group_upload_admin_only': ('GROUP_UPLOAD_ADMIN_ONLY', 'bool'),
+        'group_admin_ids': ('GROUP_ADMIN_IDS', 'str'),
+        'group_upload_reply': ('GROUP_UPLOAD_REPLY', 'bool'),
+        'group_upload_delete_delay': ('GROUP_UPLOAD_DELETE_DELAY', 'int'),
+    }
+
+    if db_key not in mapping:
+        return None
+
+    config_name, value_type = mapping[db_key]
+
+    if not hasattr(config, config_name):
+        return None
+
+    value = getattr(config, config_name)
+
+    # 转换为数据库存储格式
+    if value_type == 'bool':
+        return '1' if value else '0'
+    elif value_type == 'int':
+        return str(value)
+    else:
+        return str(value) if value else ''
 
 
 def init_system_settings() -> None:
-    """初始化系统设置（在 admin_config 表中）"""
+    """初始化系统设置（在 admin_config 表中），并从环境变量迁移现有配置"""
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -785,14 +869,73 @@ def init_system_settings() -> None:
                 cursor.execute(
                     'SELECT value FROM admin_config WHERE key = ?', (key,)
                 )
-                if not cursor.fetchone():
+                existing = cursor.fetchone()
+
+                if not existing:
+                    # 尝试从环境变量/config.py 获取值
+                    env_value = _get_env_config_value(key)
+                    value_to_insert = env_value if env_value is not None else default_value
+
                     cursor.execute(
                         'INSERT INTO admin_config (key, value) VALUES (?, ?)',
-                        (key, default_value)
+                        (key, value_to_insert)
                     )
-                    logger.info(f"初始化系统设置: {key}={default_value}")
+
+                    if key in SENSITIVE_SETTINGS:
+                        logger.info(f"初始化系统设置: {key}=[REDACTED]")
+                    else:
+                        source = "从环境变量迁移" if env_value is not None else "默认值"
+                        logger.info(f"初始化系统设置: {key}={value_to_insert} ({source})")
     except Exception as e:
         logger.error(f"初始化系统设置失败: {e}")
+
+
+def migrate_env_settings() -> int:
+    """将环境变量配置迁移到数据库（一次性迁移，避免覆盖管理员修改）"""
+    migrated = 0
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 检查是否已完成迁移（避免每次启动重复覆盖管理员在面板中的修改）
+            cursor.execute('SELECT value FROM admin_config WHERE key = ?', (_ENV_MIGRATED_KEY,))
+            marker = cursor.fetchone()
+            if marker and str(marker[0]) == '1':
+                return 0
+
+            for key, default_value in DEFAULT_SYSTEM_SETTINGS.items():
+                env_value = _get_env_config_value(key)
+                if env_value is None:
+                    continue
+
+                # 检查当前值是否为默认值
+                cursor.execute('SELECT value FROM admin_config WHERE key = ?', (key,))
+                row = cursor.fetchone()
+                current_value = row[0] if row else default_value
+
+                # 只有当当前值等于默认值且环境变量值不同时才更新
+                if current_value == default_value and env_value != default_value:
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO admin_config (key, value, updated_at)
+                        VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ''', (key, env_value))
+                    migrated += 1
+                    if key in SENSITIVE_SETTINGS:
+                        logger.info(f"迁移环境变量配置: {key}=[REDACTED]")
+                    else:
+                        logger.info(f"迁移环境变量配置: {key}={env_value}")
+
+            # 标记迁移完成（即使 migrated==0 也应标记，否则会在每次启动重复判断）
+            cursor.execute('''
+                INSERT OR REPLACE INTO admin_config (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            ''', (_ENV_MIGRATED_KEY, '1'))
+
+        if migrated > 0:
+            logger.info(f"共迁移 {migrated} 项环境变量配置到数据库")
+    except Exception as e:
+        logger.error(f"迁移环境变量配置失败: {e}")
+    return migrated
 
 
 def get_system_setting(key: str) -> Optional[str]:
@@ -842,9 +985,7 @@ def update_system_setting(key: str, value: str) -> bool:
                 INSERT OR REPLACE INTO admin_config (key, value, updated_at)
                 VALUES (?, ?, CURRENT_TIMESTAMP)
             ''', (key, value))
-            # 敏感配置不打印value，防止泄露密钥
-            sensitive_keys = {'storage_config_json', 'storage_upload_policy_json'}
-            if key in sensitive_keys:
+            if key in SENSITIVE_SETTINGS:
                 logger.info(f"更新系统设置: {key}=[REDACTED]")
             else:
                 logger.info(f"更新系统设置: {key}={value}")
@@ -865,7 +1006,10 @@ def update_system_settings(settings: Dict[str, str]) -> bool:
                         INSERT OR REPLACE INTO admin_config (key, value, updated_at)
                         VALUES (?, ?, CURRENT_TIMESTAMP)
                     ''', (key, value))
-                    logger.info(f"更新系统设置: {key}={value}")
+                    if key in SENSITIVE_SETTINGS:
+                        logger.info(f"更新系统设置: {key}=[REDACTED]")
+                    else:
+                        logger.info(f"更新系统设置: {key}={value}")
             return True
     except Exception as e:
         logger.error(f"批量更新系统设置失败: {e}")
@@ -1339,7 +1483,7 @@ __all__ = [
     # 公告
     'get_announcement', 'update_announcement',
     # 系统设置
-    'init_system_settings', 'get_system_setting', 'get_all_system_settings',
+    'init_system_settings', 'migrate_env_settings', 'get_system_setting', 'get_all_system_settings',
     'update_system_setting', 'update_system_settings', 'get_public_settings',
     'get_system_setting_int', 'get_upload_count_today',
     'is_guest_upload_allowed', 'is_token_upload_allowed', 'is_token_generation_allowed',
