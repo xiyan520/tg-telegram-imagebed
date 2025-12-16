@@ -20,6 +20,17 @@ try:
 except ImportError:
     pass
 
+
+def _normalize_proxy_url(proxy: str) -> str:
+    """规范化代理 URL，确保包含协议前缀"""
+    proxy = (proxy or "").strip()
+    if not proxy:
+        return ""
+    if "://" not in proxy:
+        return f"http://{proxy}"
+    return proxy
+
+
 # ===================== 基础路径配置 =====================
 # 注意：移动到 tg_imagebed/ 后，BASE_DIR 指向项目根目录
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,6 +44,11 @@ _config_warnings = []
 # ===================== Telegram 配置 =====================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 STORAGE_CHAT_ID = int(os.getenv("STORAGE_CHAT_ID", "0") or "0")
+
+# Telegram Bot 代理配置（python-telegram-bot 使用 httpx）
+_http_proxy = os.getenv("HTTP_PROXY", "") or os.getenv("http_proxy", "")
+_https_proxy = os.getenv("HTTPS_PROXY", "") or os.getenv("https_proxy", "")
+PROXY_URL = _normalize_proxy_url(_http_proxy or _https_proxy)
 
 # SECRET_KEY 必须从环境变量读取，无默认值时自动生成
 _secret_key = os.getenv("SECRET_KEY")
@@ -168,6 +184,7 @@ def print_config_info():
     logger.info("Telegram 图床机器人 - 模块化重构版")
     logger.info("=" * 60)
     logger.info(f"BOT_TOKEN: {'已配置' if BOT_TOKEN else '未配置'}")
+    logger.info(f"PROXY_URL: {PROXY_URL if PROXY_URL else '未配置'}")
     logger.info(f"STORAGE_CHAT_ID: {STORAGE_CHAT_ID}")
     logger.info(f"PORT: {PORT}")
     logger.info(f"DATABASE_PATH: {DATABASE_PATH}")
@@ -192,7 +209,7 @@ __all__ = [
     # 基础路径
     'BASE_DIR', 'FRONTEND_DIR', 'STATIC_FOLDER',
     # Telegram
-    'BOT_TOKEN', 'STORAGE_CHAT_ID', 'SECRET_KEY',
+    'BOT_TOKEN', 'STORAGE_CHAT_ID', 'SECRET_KEY', 'PROXY_URL',
     # 服务器
     'PORT', 'HOST',
     # 前端

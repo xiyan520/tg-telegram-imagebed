@@ -4,7 +4,8 @@ export const useAuthStore = defineStore('auth', {
   state: () => ({
     token: '',
     username: '',
-    isAuthenticated: false
+    isAuthenticated: false,
+    isChecking: false
   }),
 
   actions: {
@@ -41,6 +42,18 @@ export const useAuthStore = defineStore('auth', {
 
     // 登出
     async logout() {
+      const config = useRuntimeConfig()
+
+      // 调用后端登出接口
+      try {
+        await $fetch(`${config.public.apiBase}/api/admin/logout`, {
+          method: 'POST',
+          credentials: 'include'
+        })
+      } catch (e) {
+        // 忽略错误，继续清理本地状态
+      }
+
       this.token = ''
       this.username = ''
       this.isAuthenticated = false
@@ -75,17 +88,73 @@ export const useAuthStore = defineStore('auth', {
       }
     },
 
-    // 从 localStorage 恢复状态
-    restoreAuth() {
-      if (process.client) {
-        const token = localStorage.getItem('auth_token')
-        const username = localStorage.getItem('auth_username')
+    // 从 localStorage 恢复状态并验证后端 session
+    async restoreAuth() {
+      if (!process.client) return
 
-        if (token && username) {
-          this.token = token
-          this.username = username
+      const token = localStorage.getItem('auth_token')
+      const username = localStorage.getItem('auth_username')
+
+      if (!token || !username) {
+        this.clearAuth()
+        return
+      }
+
+      // 先临时设置状态（避免闪烁）
+      this.token = token
+      this.username = username
+
+      // 验证后端 session 是否有效
+      const isValid = await this.checkAuth()
+      if (!isValid) {
+        this.clearAuth()
+      }
+    },
+
+    // 检查后端 session 是否有效
+    async checkAuth(): Promise<boolean> {
+      if (this.isChecking) return this.isAuthenticated
+
+      const config = useRuntimeConfig()
+      this.isChecking = true
+
+      try {
+        const response = await $fetch<any>(`${config.public.apiBase}/api/admin/check`, {
+          credentials: 'include'
+        })
+
+        if (response.authenticated) {
           this.isAuthenticated = true
+          this.username = response.username || this.username
+          return true
+        } else {
+          return false
         }
+      } catch (error) {
+        console.warn('Session 验证失败:', error)
+        return false
+      } finally {
+        this.isChecking = false
+      }
+    },
+
+    // 清除认证状态
+    clearAuth() {
+      this.token = ''
+      this.username = ''
+      this.isAuthenticated = false
+
+      if (process.client) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('auth_username')
+      }
+    },
+
+    // 处理 401 错误（供全局错误处理调用）
+    handleUnauthorized() {
+      this.clearAuth()
+      if (process.client) {
+        navigateTo('/admin')
       }
     }
   }

@@ -1,9 +1,9 @@
-export default defineNuxtRouteMiddleware((to, from) => {
+export default defineNuxtRouteMiddleware(async (to, from) => {
   const authStore = useAuthStore()
 
-  // 恢复认证状态
+  // 恢复并验证认证状态
   if (process.client && !authStore.isAuthenticated) {
-    authStore.restoreAuth()
+    await authStore.restoreAuth()
   }
 
   // 如果未认证，重定向到登录页

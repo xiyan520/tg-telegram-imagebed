@@ -13,8 +13,9 @@ Telegram 图床机器人 - 模块化重构版入口文件
 import sys
 import time
 import threading
+from datetime import datetime, timezone
 
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -22,9 +23,43 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from tg_imagebed.config import (
     PORT, SECRET_KEY, ALLOWED_ORIGINS, DATABASE_PATH,
     CDN_ENABLED, CLOUDFLARE_CDN_DOMAIN, CDN_MONITOR_ENABLED,
-    BOT_TOKEN, STATIC_FOLDER,
+    BOT_TOKEN, PROXY_URL, STATIC_FOLDER,
     logger, print_config_info
 )
+
+# ===================== 全局机器人状态管理 =====================
+_BOT_STATUS_LOCK = threading.Lock()
+_BOT_STATUS = {
+    "enabled": bool(BOT_TOKEN),
+    "state": "disabled" if not BOT_TOKEN else "pending",
+    "message": "BOT_TOKEN 未配置" if not BOT_TOKEN else "等待启动",
+    "last_ok_at": None,
+    "last_error_at": None,
+    "last_error_type": None,
+    "last_error": None,
+    "conflict_retry": 0,
+    "next_retry_in_seconds": None,
+    "proxy_enabled": bool(PROXY_URL),
+}
+
+
+def _utc_iso(ts: float = None) -> str:
+    """生成 UTC ISO 时间字符串"""
+    if ts is None:
+        ts = time.time()
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _set_bot_status(**updates) -> None:
+    """更新机器人状态"""
+    with _BOT_STATUS_LOCK:
+        _BOT_STATUS.update(updates)
+
+
+def _get_bot_status() -> dict:
+    """获取机器人状态"""
+    with _BOT_STATUS_LOCK:
+        return dict(_BOT_STATUS)
 
 # 导入工具函数
 from tg_imagebed.utils import acquire_lock, release_lock, add_cache_headers, get_static_file_version
@@ -131,6 +166,12 @@ def create_app() -> Flask:
         add_cache_headers
     )
 
+    # 机器人状态 API
+    @app.get("/api/bot/status")
+    def bot_status():
+        """获取 Telegram 机器人状态"""
+        return jsonify(_get_bot_status())
+
     return app
 
 
@@ -142,15 +183,26 @@ def run_flask():
     app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
 
 
+def start_telegram_bot_thread():
+    """在后台线程启动 Telegram 机器人（不影响 Flask/Web 功能）"""
+    if not BOT_TOKEN:
+        _set_bot_status(state="disabled", message="BOT_TOKEN 未配置，Telegram 机器人未启动")
+        return None
+    t = threading.Thread(target=run_telegram_bot, name="telegram-bot", daemon=True)
+    t.start()
+    return t
+
+
 def run_telegram_bot():
-    """运行 Telegram 机器人"""
+    """运行 Telegram 机器人（独立线程，失败不影响 Web 服务）"""
     import asyncio
+    import telegram.error
     from telegram import Update
     from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
     from tg_imagebed.config import STORAGE_CHAT_ID, ENABLE_GROUP_UPLOAD
 
-    # Telegram 处理函数（简化版，完整版应放在 services/telegram_service.py）
+    # Telegram 处理函数
     async def start(update: Update, context):
         """处理 /start 命令"""
         from tg_imagebed.database import get_stats
@@ -178,15 +230,11 @@ def run_telegram_bot():
         msg = await update.message.reply_text("⏳ 正在处理图片...")
 
         try:
-            # 获取图片
             if update.message.photo:
                 photo = update.message.photo[-1]
                 file_info = await context.bot.get_file(photo.file_id)
-
-                # 下载图片
                 file_bytes = await file_info.download_as_bytearray()
 
-                # 处理上传
                 result = process_upload(
                     file_content=bytes(file_bytes),
                     filename=f"telegram_{photo.file_id[:12]}.jpg",
@@ -198,7 +246,6 @@ def run_telegram_bot():
                 if result:
                     base_url = get_domain(None)
                     permanent_url = f"{base_url}/image/{result['encrypted_id']}"
-
                     await msg.edit_text(
                         f"✅ *上传成功！*\n\n"
                         f"🔗 *永久直链:*\n`{permanent_url}`\n\n"
@@ -210,45 +257,254 @@ def run_telegram_bot():
                     await msg.edit_text("❌ 处理失败，请重试")
             else:
                 await msg.edit_text("❌ 请发送图片文件")
-
         except Exception as e:
             logger.error(f"Error processing photo: {e}")
             await msg.edit_text("❌ 处理失败，请重试")
 
     async def start_bot():
-        """异步启动机器人"""
+        """异步启动机器人（带指数退避重试）"""
+        # 指数退避配置
+        backoff_base = 5.0  # 基础等待时间（秒）
+        backoff_max = 120.0  # 最大等待时间（秒）
+        status_log_interval = 30.0  # 状态日志间隔（秒）
+        conflict_retry = 0
+        last_status_log_ts = 0.0
+
+        def is_409_conflict(err: BaseException) -> bool:
+            """检查是否为 409 Conflict 错误"""
+            if isinstance(err, telegram.error.Conflict):
+                return True
+            msg = str(err).lower()
+            return "409" in msg and "conflict" in msg
+
+        def log_conflict_help(retry_no: int, delay: float):
+            """输出 409 冲突帮助信息"""
+            logger.warning("=" * 60)
+            logger.warning("Telegram 轮询出现 409 Conflict（getUpdates 冲突）")
+            logger.warning("=" * 60)
+            logger.warning("说明: 该 BOT_TOKEN 同一时间只能有一个 polling 实例")
+            logger.warning("")
+            logger.warning("常见原因:")
+            logger.warning("  1. 另一个进程/容器正在运行同一个机器人")
+            logger.warning("  2. 该 BOT_TOKEN 配置了 Webhook（Webhook 与 Polling 不能同时使用）")
+            logger.warning("")
+            logger.warning("解决方案:")
+            logger.warning("  - 停止其他机器人实例/容器后再启动")
+            logger.warning("  - 如曾设置 Webhook，请先删除:")
+            logger.warning("    https://api.telegram.org/bot<TOKEN>/deleteWebhook")
+            logger.warning("")
+            logger.warning(f"当前策略: Web 服务正常运行，机器人将在 {delay:.0f} 秒后重试（第 {retry_no} 次）")
+            logger.warning("=" * 60)
+
+        def log_error_with_help(error_type: str, error: Exception, extra_info: str = ""):
+            """输出错误帮助信息"""
+            logger.error("=" * 60)
+            logger.error(f"Telegram 机器人错误: {error_type}")
+            logger.error("=" * 60)
+            logger.error(f"错误详情: {error}")
+            if extra_info:
+                logger.error("")
+                logger.error(extra_info)
+            logger.error("")
+            logger.error("注意: Web 服务（图床、管理后台）不受影响，仍可正常使用")
+            logger.error("机器人将在稍后自动重试...")
+            logger.error("=" * 60)
+
+        _set_bot_status(state="starting", message="Telegram 机器人启动中...")
+
+        while True:  # 主循环：持续重试，不退出
+            try:
+                # 构建 Application
+                builder = Application.builder().token(BOT_TOKEN).job_queue(None)
+                if PROXY_URL:
+                    logger.info(f"Telegram Bot 使用代理: {PROXY_URL}")
+                    builder = builder.proxy(PROXY_URL).get_updates_proxy(PROXY_URL)
+
+                telegram_app = builder.build()
+
+                # 用于触发 polling 重启的事件
+                restart_polling_event = asyncio.Event()
+
+                def polling_error_callback(err: BaseException) -> None:
+                    """轮询错误回调"""
+                    nonlocal conflict_retry, last_status_log_ts
+
+                    if is_409_conflict(err):
+                        _set_bot_status(
+                            state="conflict",
+                            message="检测到 getUpdates 冲突，轮询将退避后重试",
+                            last_error_type=type(err).__name__,
+                            last_error=str(err),
+                            last_error_at=_utc_iso(),
+                        )
+                        if not restart_polling_event.is_set():
+                            restart_polling_event.set()
+                        return
+
+                    # 非 409 错误：记录但继续
+                    _set_bot_status(
+                        last_error_type=type(err).__name__,
+                        last_error=str(err),
+                        last_error_at=_utc_iso(),
+                    )
+                    now = time.time()
+                    if now - last_status_log_ts >= status_log_interval:
+                        last_status_log_ts = now
+                        logger.error(f"Telegram 轮询错误: {type(err).__name__}: {err}")
+
+                async def application_error_handler(update, context) -> None:
+                    """应用级错误处理器"""
+                    err = getattr(context, "error", None)
+                    if err:
+                        polling_error_callback(err)
+
+                # 添加处理器
+                telegram_app.add_handler(CommandHandler("start", start))
+                telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+                telegram_app.add_error_handler(application_error_handler)
+
+                logger.info("Telegram 机器人启动中...")
+                bot_info = await telegram_app.bot.get_me()
+                logger.info(f"机器人信息: @{bot_info.username} (ID: {bot_info.id})")
+
+                await telegram_app.initialize()
+                await telegram_app.start()
+
+                # Polling 循环（遇到 409 冲突时退避重试）
+                while True:
+                    try:
+                        await telegram_app.updater.start_polling(
+                            drop_pending_updates=True,
+                            error_callback=polling_error_callback
+                        )
+                        conflict_retry = 0
+                        _set_bot_status(
+                            state="running",
+                            message="Telegram 机器人运行中",
+                            last_ok_at=_utc_iso(),
+                            conflict_retry=0,
+                            next_retry_in_seconds=None,
+                        )
+                        logger.info("Telegram 机器人已成功启动（polling）")
+
+                        # 等待冲突触发的重启请求
+                        await restart_polling_event.wait()
+                        restart_polling_event.clear()
+
+                    except telegram.error.Conflict:
+                        if not restart_polling_event.is_set():
+                            restart_polling_event.set()
+
+                    # 处理冲突：退避重试
+                    conflict_retry += 1
+                    delay = min(backoff_base * (2 ** (conflict_retry - 1)), backoff_max)
+                    _set_bot_status(
+                        state="conflict",
+                        message=f"getUpdates 冲突，{delay:.0f} 秒后重试（第 {conflict_retry} 次）",
+                        conflict_retry=conflict_retry,
+                        next_retry_in_seconds=delay,
+                    )
+                    log_conflict_help(conflict_retry, delay)
+
+                    try:
+                        await telegram_app.updater.stop()
+                    except Exception:
+                        pass
+
+                    # 等待退避时间
+                    await asyncio.sleep(delay)
+
+            except telegram.error.InvalidToken as e:
+                _set_bot_status(
+                    state="fatal",
+                    message="BOT_TOKEN 无效，机器人无法启动",
+                    last_error_type=type(e).__name__,
+                    last_error=str(e),
+                    last_error_at=_utc_iso(),
+                )
+                log_error_with_help(
+                    "Token 无效",
+                    e,
+                    "解决方案:\n"
+                    "  1. 检查 .env 文件中的 BOT_TOKEN 是否正确\n"
+                    "  2. 确认 Token 没有多余的空格或换行符\n"
+                    "  3. 在 @BotFather 中重新生成 Token"
+                )
+                # Token 无效是致命错误，不重试
+                return
+
+            except telegram.error.TimedOut as e:
+                _set_bot_status(
+                    state="error",
+                    message="连接 Telegram 超时，稍后重试",
+                    last_error_type=type(e).__name__,
+                    last_error=str(e),
+                    last_error_at=_utc_iso(),
+                )
+                log_error_with_help(
+                    "连接超时",
+                    e,
+                    f"可能原因:\n"
+                    f"  - 网络连接问题\n"
+                    f"  - 代理配置: {PROXY_URL if PROXY_URL else '未配置'}\n"
+                    f"  - 如在中国大陆，需配置代理访问 Telegram"
+                )
+                await asyncio.sleep(30)  # 超时后等待 30 秒重试
+
+            except telegram.error.NetworkError as e:
+                _set_bot_status(
+                    state="error",
+                    message="网络错误，稍后重试",
+                    last_error_type=type(e).__name__,
+                    last_error=str(e),
+                    last_error_at=_utc_iso(),
+                )
+                log_error_with_help(
+                    "网络错误",
+                    e,
+                    f"可能原因:\n"
+                    f"  - 网络连接不稳定\n"
+                    f"  - 防火墙阻止连接\n"
+                    f"  - 代理配置: {PROXY_URL if PROXY_URL else '未配置'}"
+                )
+                await asyncio.sleep(30)
+
+            except Exception as e:
+                _set_bot_status(
+                    state="error",
+                    message=f"机器人异常: {type(e).__name__}",
+                    last_error_type=type(e).__name__,
+                    last_error=str(e),
+                    last_error_at=_utc_iso(),
+                )
+                import traceback
+                logger.error("=" * 60)
+                logger.error(f"Telegram 机器人异常: {type(e).__name__}")
+                logger.error("=" * 60)
+                logger.error(f"错误详情: {e}")
+                logger.error("堆栈跟踪:")
+                logger.error(traceback.format_exc())
+                logger.error("")
+                logger.error("注意: Web 服务不受影响，机器人将在 30 秒后重试")
+                logger.error("=" * 60)
+                await asyncio.sleep(30)
+
+    # 线程入口：保证异常不会影响 Flask/Web 服务
+    while True:
         try:
-            # 禁用 job_queue 以解决 Python 3.13 兼容性问题
-            telegram_app = Application.builder().token(BOT_TOKEN).job_queue(None).build()
-
-            # 添加处理器
-            telegram_app.add_handler(CommandHandler("start", start))
-            telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-
-            logger.info("Telegram机器人启动中...")
-
-            bot_info = await telegram_app.bot.get_me()
-            logger.info(f"机器人信息: @{bot_info.username} (ID: {bot_info.id})")
-
-            await telegram_app.initialize()
-            await telegram_app.start()
-            await telegram_app.updater.start_polling(drop_pending_updates=True)
-
-            logger.info("Telegram机器人已成功启动")
-
-            await asyncio.Event().wait()
-
+            asyncio.run(start_bot())
+            return
         except Exception as e:
-            logger.error(f"Telegram机器人启动失败: {e}")
-            import traceback
-            traceback.print_exc()
-
-    try:
-        asyncio.run(start_bot())
-    except KeyboardInterrupt:
-        logger.info("Telegram机器人收到停止信号")
-    except Exception as e:
-        logger.error(f"运行Telegram机器人时发生错误: {e}")
+            _set_bot_status(
+                state="error",
+                message="Telegram 线程异常，5 秒后重试",
+                last_error_type=type(e).__name__,
+                last_error=str(e),
+                last_error_at=_utc_iso(),
+            )
+            logger.error(f"Telegram 线程异常: {type(e).__name__}: {e}")
+            logger.error("Web 服务不受影响，5 秒后重试...")
+            time.sleep(5)
 
 
 def main():
@@ -292,19 +548,24 @@ def main():
 
     time.sleep(2)
 
+    # Telegram 机器人独立线程运行：失败不影响 Web 服务
+    bot_thread = start_telegram_bot_thread()
+    if not bot_thread:
+        logger.warning("=" * 60)
+        logger.warning("Telegram 机器人未启动（BOT_TOKEN 未配置）")
+        logger.warning("Web 服务（图床、管理后台）仍可正常使用")
+        logger.warning("=" * 60)
+
     try:
-        if BOT_TOKEN:
-            run_telegram_bot()
-        else:
-            logger.warning("Telegram机器人未启动，请配置Token后重启")
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                logger.info("服务已停止")
+        # 主线程保持运行
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logger.info("收到停止信号，正在关闭服务...")
     finally:
         stop_cdn_monitor()
         release_lock()
+        logger.info("服务已停止")
 
 
 if __name__ == '__main__':
