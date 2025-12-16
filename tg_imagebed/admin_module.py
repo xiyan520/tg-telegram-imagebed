@@ -83,12 +83,15 @@ def _get_config_status_from_db() -> dict:
     except Exception as e:
         logger.debug(f"从数据库读取系统设置失败（回退到环境变量）: {e}")
 
+    # CDN 监控只有在 CDN 启用时才有意义
+    cdn_monitor_display = '已启用' if (cdn_enabled and cdn_monitor_enabled) else '已关闭'
+
     return {
         'cdnStatus': '已启用' if cdn_enabled else '未启用',
         'cdnDomain': cdn_domain if cdn_domain else '未配置',
         'uptime': '运行中',
         'groupUpload': '已启用' if group_upload_enabled else '未启用',
-        'cdnMonitor': '已启用' if cdn_monitor_enabled else '未启用'
+        'cdnMonitor': cdn_monitor_display
     }
 
 def init_admin_config():

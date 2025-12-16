@@ -169,8 +169,11 @@ def add_cache_headers(response: Response, cache_type: str = 'public', max_age: O
         response.headers['X-XSS-Protection'] = '1; mode=block'
         return response
 
+    # 从数据库获取 CDN 启用状态
+    _, cdn_enabled = _get_effective_domain_settings()
+
     # CDN 未启用时的处理
-    if not CDN_ENABLED:
+    if not cdn_enabled:
         if cache_type == 'static':
             response.headers['Cache-Control'] = 'public, max-age=3600'
         else:

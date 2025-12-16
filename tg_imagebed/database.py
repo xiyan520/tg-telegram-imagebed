@@ -766,11 +766,13 @@ def update_announcement(enabled: bool, content: str) -> int:
 # 敏感配置列表（日志中不打印值）
 SENSITIVE_SETTINGS = {
     'storage_config_json', 'storage_upload_policy_json',
-    'cloudflare_api_token'
+    'cloudflare_api_token', 'telegram_bot_token'
 }
 
 # 默认系统设置
 DEFAULT_SYSTEM_SETTINGS = {
+    # Telegram Bot 配置
+    'telegram_bot_token': '',
     # 游客上传策略
     'guest_upload_policy': 'open',  # open/token_only/admin_only
     'guest_token_generation_enabled': '1',  # 0/1
@@ -803,12 +805,101 @@ DEFAULT_SYSTEM_SETTINGS = {
     'group_upload_enabled': '0',
     'group_upload_admin_only': '0',
     'group_admin_ids': '',
+    'group_upload_allowed_chat_ids': '',
     'group_upload_reply': '1',
     'group_upload_delete_delay': '0',
 }
 
 # 环境变量迁移标记（避免每次启动重复覆盖管理员修改）
 _ENV_MIGRATED_KEY = '__env_settings_migrated_v1__'
+_STORAGE_CHAT_ID_MIGRATED_KEY = '__storage_chat_id_to_storage_config_v1__'
+
+
+def migrate_storage_chat_id_env_to_storage_config() -> int:
+    """一次性迁移：将环境变量 STORAGE_CHAT_ID 迁移到 storage_config_json (DB)。
+
+    规则:
+    - 仅运行一次（标记键）
+    - 如果设置了 STORAGE_CONFIG_JSON 环境变量则跳过
+    - 仅当 storage_config_json 为空/默认 或 telegram.chat_id 未设置/0/env:STORAGE_CHAT_ID 时写入
+    """
+    try:
+        import os as _os
+        from . import config as app_config
+
+        env_chat_id = int(getattr(app_config, "STORAGE_CHAT_ID", 0) or 0)
+        if not env_chat_id:
+            return 0
+
+        if (_os.getenv("STORAGE_CONFIG_JSON") or "").strip():
+            return 0
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute('SELECT value FROM admin_config WHERE key = ?', (_STORAGE_CHAT_ID_MIGRATED_KEY,))
+            row = cursor.fetchone()
+            if row and str(row[0] or '') == '1':
+                return 0
+
+            cursor.execute('SELECT value FROM admin_config WHERE key = ?', ('storage_config_json',))
+            row = cursor.fetchone()
+            raw = (row[0] if row else '') or ''
+
+            cfg = None
+            if raw.strip():
+                try:
+                    cfg = json.loads(raw)
+                except Exception:
+                    cfg = None
+            if not isinstance(cfg, dict):
+                cfg = {}
+
+            changed = False
+            backends = cfg.get('backends')
+            if not isinstance(backends, dict):
+                backends = {}
+                cfg['backends'] = backends
+                changed = True
+
+            telegram = backends.get('telegram')
+            if not isinstance(telegram, dict):
+                telegram = {'driver': 'telegram', 'bot_token': 'env:BOT_TOKEN'}
+                backends['telegram'] = telegram
+                changed = True
+
+            existing_chat_id = telegram.get('chat_id')
+            existing_norm = str(existing_chat_id).strip() if existing_chat_id is not None else ''
+            if existing_norm in ('', '0', 'env:STORAGE_CHAT_ID'):
+                telegram['chat_id'] = str(env_chat_id)
+                changed = True
+
+            if not str(cfg.get('active') or '').strip():
+                cfg['active'] = 'telegram'
+                changed = True
+
+            if changed:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO admin_config (key, value, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                ''', ('storage_config_json', json.dumps(cfg, ensure_ascii=False)))
+                logger.info("迁移 STORAGE_CHAT_ID -> storage_config_json 完成")
+
+            cursor.execute('''
+                INSERT OR REPLACE INTO admin_config (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+            ''', (_STORAGE_CHAT_ID_MIGRATED_KEY, '1'))
+
+        return 1 if changed else 0
+    except Exception as e:
+        logger.error(f"迁移 STORAGE_CHAT_ID -> storage_config_json 失败: {e}")
+        return 0
+
+
+def _settings_schema_fingerprint() -> str:
+    """系统设置 schema 指纹：用于新增配置项后触发一次 env 迁移"""
+    keys = ','.join(sorted(DEFAULT_SYSTEM_SETTINGS.keys()))
+    return hashlib.sha1(keys.encode('utf-8')).hexdigest()[:12]
 
 
 def _get_env_config_value(db_key: str):
@@ -837,6 +928,7 @@ def _get_env_config_value(db_key: str):
         'group_upload_enabled': ('ENABLE_GROUP_UPLOAD', 'bool'),
         'group_upload_admin_only': ('GROUP_UPLOAD_ADMIN_ONLY', 'bool'),
         'group_admin_ids': ('GROUP_ADMIN_IDS', 'str'),
+        'group_upload_allowed_chat_ids': ('GROUP_UPLOAD_ALLOWED_CHAT_IDS', 'str'),
         'group_upload_reply': ('GROUP_UPLOAD_REPLY', 'bool'),
         'group_upload_delete_delay': ('GROUP_UPLOAD_DELETE_DELAY', 'int'),
     }
@@ -886,21 +978,26 @@ def init_system_settings() -> None:
                     else:
                         source = "从环境变量迁移" if env_value is not None else "默认值"
                         logger.info(f"初始化系统设置: {key}={value_to_insert} ({source})")
+
+        # 一次性迁移 STORAGE_CHAT_ID -> storage_config_json
+        migrate_storage_chat_id_env_to_storage_config()
     except Exception as e:
         logger.error(f"初始化系统设置失败: {e}")
 
 
 def migrate_env_settings() -> int:
-    """将环境变量配置迁移到数据库（一次性迁移，避免覆盖管理员修改）"""
+    """将环境变量配置迁移到数据库（schema 变化时触发迁移）"""
     migrated = 0
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
 
-            # 检查是否已完成迁移（避免每次启动重复覆盖管理员在面板中的修改）
+            # 使用 schema 指纹：当新增配置项时会触发一次迁移
+            schema_fp = _settings_schema_fingerprint()
             cursor.execute('SELECT value FROM admin_config WHERE key = ?', (_ENV_MIGRATED_KEY,))
             marker = cursor.fetchone()
-            if marker and str(marker[0]) == '1':
+            marker_value = str(marker[0] or '') if marker else ''
+            if marker_value == schema_fp:
                 return 0
 
             for key, default_value in DEFAULT_SYSTEM_SETTINGS.items():
@@ -925,11 +1022,11 @@ def migrate_env_settings() -> int:
                     else:
                         logger.info(f"迁移环境变量配置: {key}={env_value}")
 
-            # 标记迁移完成（即使 migrated==0 也应标记，否则会在每次启动重复判断）
+            # 标记迁移完成（写入 schema 指纹）
             cursor.execute('''
                 INSERT OR REPLACE INTO admin_config (key, value, updated_at)
                 VALUES (?, ?, CURRENT_TIMESTAMP)
-            ''', (_ENV_MIGRATED_KEY, '1'))
+            ''', (_ENV_MIGRATED_KEY, schema_fp))
 
         if migrated > 0:
             logger.info(f"共迁移 {migrated} 项环境变量配置到数据库")

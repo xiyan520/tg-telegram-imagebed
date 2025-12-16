@@ -22,17 +22,22 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 # 导入配置
 from tg_imagebed.config import (
     PORT, SECRET_KEY, ALLOWED_ORIGINS, DATABASE_PATH,
-    CDN_ENABLED, CLOUDFLARE_CDN_DOMAIN, CDN_MONITOR_ENABLED,
-    BOT_TOKEN, PROXY_URL, STATIC_FOLDER,
+    PROXY_URL, STATIC_FOLDER,
     logger, print_config_info
+)
+
+# 导入 Bot 控制模块
+from tg_imagebed.bot_control import (
+    get_effective_bot_token, is_bot_token_configured,
+    wait_for_restart_signal, get_bot_token_status
 )
 
 # ===================== 全局机器人状态管理 =====================
 _BOT_STATUS_LOCK = threading.Lock()
 _BOT_STATUS = {
-    "enabled": bool(BOT_TOKEN),
-    "state": "disabled" if not BOT_TOKEN else "pending",
-    "message": "BOT_TOKEN 未配置" if not BOT_TOKEN else "等待启动",
+    "enabled": False,  # 延迟初始化
+    "state": "pending",
+    "message": "等待启动",
     "last_ok_at": None,
     "last_error_at": None,
     "last_error_type": None,
@@ -171,7 +176,15 @@ def create_app() -> Flask:
     @app.get("/api/bot/status")
     def bot_status():
         """获取 Telegram 机器人状态"""
-        return jsonify(_get_bot_status())
+        status = _get_bot_status()
+        # 公共端点：避免泄露 token 片段
+        token_status = get_bot_token_status()
+        status["token_config"] = {
+            "configured": bool(token_status.get("configured")),
+            "source": token_status.get("source"),
+            "env_set": bool(token_status.get("env_set")),
+        }
+        return jsonify(status)
 
     return app
 
@@ -186,9 +199,15 @@ def run_flask():
 
 def start_telegram_bot_thread():
     """在后台线程启动 Telegram 机器人（不影响 Flask/Web 功能）"""
-    if not BOT_TOKEN:
-        _set_bot_status(state="disabled", message="BOT_TOKEN 未配置，Telegram 机器人未启动")
-        return None
+    if not is_bot_token_configured():
+        _set_bot_status(
+            enabled=False,
+            state="disabled",
+            message="BOT_TOKEN 未配置，机器人将等待配置"
+        )
+    else:
+        _set_bot_status(enabled=True, state="pending", message="等待启动")
+    # 始终启动线程，让它等待配置更新
     t = threading.Thread(target=run_telegram_bot, name="telegram-bot", daemon=True)
     t.start()
     return t
@@ -200,8 +219,6 @@ def run_telegram_bot():
     import telegram.error
     from telegram import Update
     from telegram.ext import Application, CommandHandler, MessageHandler, filters
-
-    from tg_imagebed.config import STORAGE_CHAT_ID, ENABLE_GROUP_UPLOAD
 
     # Telegram 处理函数
     async def start(update: Update, context):
@@ -220,47 +237,134 @@ def run_telegram_bot():
             parse_mode='Markdown'
         )
 
+    def _parse_id_list(raw: str) -> set:
+        """解析逗号分隔的 ID 列表"""
+        if not raw:
+            return set()
+        try:
+            return {int(x.strip()) for x in raw.split(',') if x.strip()}
+        except ValueError:
+            return set()
+
     async def handle_photo(update: Update, context):
-        """处理图片上传"""
+        """处理图片上传（私聊/群组/频道）"""
         from tg_imagebed.services.file_service import process_upload
         from tg_imagebed.utils import get_domain
+        from tg_imagebed.database import get_system_setting
 
-        user_id = update.effective_user.id
-        username = update.effective_user.username or "未知用户"
+        message = update.effective_message
+        chat = update.effective_chat
+        if not message or not chat:
+            return
 
-        msg = await update.message.reply_text("⏳ 正在处理图片...")
+        chat_type = (getattr(chat, 'type', '') or '').lower()
+        is_group = chat_type in ('group', 'supergroup', 'channel')
+
+        # 群组/频道：执行权限检查
+        reply_enabled = True
+        delete_delay = 0
+        if is_group:
+            # 检查群组上传是否启用
+            if str(get_system_setting('group_upload_enabled') or '0') != '1':
+                return
+
+            # 检查白名单（留空表示允许所有）
+            allowed_raw = str(get_system_setting('group_upload_allowed_chat_ids') or '').strip()
+            if allowed_raw:
+                allowed_ids = _parse_id_list(allowed_raw)
+                if not allowed_ids or chat.id not in allowed_ids:
+                    return
+
+            # 检查管理员权限
+            if str(get_system_setting('group_upload_admin_only') or '0') == '1':
+                admin_raw = str(get_system_setting('group_admin_ids') or '').strip()
+                admin_ids = _parse_id_list(admin_raw)
+                user = update.effective_user
+                if not user or not admin_ids or user.id not in admin_ids:
+                    return
+
+            reply_enabled = str(get_system_setting('group_upload_reply') or '1') == '1'
+            try:
+                delete_delay = max(0, int(get_system_setting('group_upload_delete_delay') or '0'))
+            except (ValueError, TypeError):
+                delete_delay = 0
+
+        # 获取用户信息
+        user = update.effective_user
+        if user:
+            username = user.username or user.full_name or str(user.id)
+        else:
+            username = getattr(chat, 'title', '') or 'channel'
+
+        # 发送处理中消息
+        status_msg = None
+        if reply_enabled:
+            try:
+                status_msg = await message.reply_text("⏳ 正在处理图片...")
+            except Exception:
+                pass
 
         try:
-            if update.message.photo:
-                photo = update.message.photo[-1]
-                file_info = await context.bot.get_file(photo.file_id)
-                file_bytes = await file_info.download_as_bytearray()
+            if not message.photo:
+                if status_msg:
+                    await status_msg.edit_text("❌ 请发送图片文件")
+                return
 
-                result = process_upload(
-                    file_content=bytes(file_bytes),
-                    filename=f"telegram_{photo.file_id[:12]}.jpg",
-                    content_type='image/jpeg',
-                    username=username,
-                    source='telegram_bot'
+            photo = message.photo[-1]
+            file_info = await context.bot.get_file(photo.file_id)
+            file_bytes = await file_info.download_as_bytearray()
+
+            result = process_upload(
+                file_content=bytes(file_bytes),
+                filename=f"telegram_{photo.file_id[:12]}.jpg",
+                content_type='image/jpeg',
+                username=username,
+                source='telegram_group' if is_group else 'telegram_bot',
+                is_group_upload=is_group,
+                group_message_id=message.message_id if is_group else None,
+                upload_scene='group' if is_group else None
+            )
+
+            if not reply_enabled:
+                return
+
+            if result:
+                base_url = get_domain(None)
+                permanent_url = f"{base_url}/image/{result['encrypted_id']}"
+                text = (
+                    f"✅ *上传成功！*\n\n"
+                    f"🔗 *永久直链:*\n`{permanent_url}`\n\n"
+                    f"📊 *文件大小:* {result['file_size']} bytes\n"
+                    f"💡 链接永久有效"
                 )
 
-                if result:
-                    base_url = get_domain(None)
-                    permanent_url = f"{base_url}/image/{result['encrypted_id']}"
-                    await msg.edit_text(
-                        f"✅ *上传成功！*\n\n"
-                        f"🔗 *永久直链:*\n`{permanent_url}`\n\n"
-                        f"📊 *文件大小:* {result['file_size']} bytes\n"
-                        f"💡 链接永久有效",
-                        parse_mode='Markdown'
-                    )
+                reply_msg_id = None
+                if status_msg:
+                    await status_msg.edit_text(text, parse_mode='Markdown')
+                    reply_msg_id = status_msg.message_id
                 else:
-                    await msg.edit_text("❌ 处理失败，请重试")
+                    sent = await message.reply_text(text, parse_mode='Markdown')
+                    reply_msg_id = sent.message_id
+
+                # 群组延迟删除回复（后台执行，不阻塞）
+                if is_group and delete_delay > 0 and reply_msg_id:
+                    async def delayed_delete():
+                        try:
+                            await asyncio.sleep(delete_delay)
+                            await context.bot.delete_message(chat_id=chat.id, message_id=reply_msg_id)
+                        except Exception as e:
+                            logger.debug(f"删除回复消息失败: {e}")
+                    asyncio.create_task(delayed_delete())
             else:
-                await msg.edit_text("❌ 请发送图片文件")
+                if status_msg:
+                    await status_msg.edit_text("❌ 处理失败，请重试")
         except Exception as e:
             logger.error(f"Error processing photo: {e}")
-            await msg.edit_text("❌ 处理失败，请重试")
+            if status_msg:
+                try:
+                    await status_msg.edit_text("❌ 处理失败，请重试")
+                except Exception:
+                    pass
 
     async def start_bot():
         """异步启动机器人（带指数退避重试）"""
@@ -314,14 +418,41 @@ def run_telegram_bot():
         _set_bot_status(state="starting", message="Telegram 机器人启动中...")
 
         while True:  # 主循环：持续重试，不退出
+            # 获取当前有效 Token
+            current_token, token_source = get_effective_bot_token()
+            if not current_token:
+                _set_bot_status(
+                    enabled=False,
+                    state="disabled",
+                    message="BOT_TOKEN 未配置",
+                )
+                # 等待配置更新或重启信号（可响应管理员配置 Token 后重启）
+                if await asyncio.to_thread(wait_for_restart_signal, 10.0):
+                    logger.info("收到重启信号，检查配置...")
+                continue
+
+            _set_bot_status(enabled=True)
+            telegram_app = None
+            restart_watcher_task = None
+            admin_restart_event = asyncio.Event()
+
             try:
                 # 构建 Application
-                builder = Application.builder().token(BOT_TOKEN).job_queue(None)
+                builder = Application.builder().token(current_token).job_queue(None)
                 if PROXY_URL:
                     logger.info(f"Telegram Bot 使用代理: {PROXY_URL}")
                     builder = builder.proxy(PROXY_URL).get_updates_proxy(PROXY_URL)
 
                 telegram_app = builder.build()
+
+                # 管理端热重启监听器
+                async def restart_watcher():
+                    while True:
+                        if await asyncio.to_thread(wait_for_restart_signal, 1.0):
+                            admin_restart_event.set()
+                            break
+
+                restart_watcher_task = asyncio.create_task(restart_watcher())
 
                 # 用于触发 polling 重启的事件
                 restart_polling_event = asyncio.Event()
@@ -388,8 +519,25 @@ def run_telegram_bot():
                         )
                         logger.info("Telegram 机器人已成功启动（polling）")
 
-                        # 等待冲突触发的重启请求
-                        await restart_polling_event.wait()
+                        # 等待（1）冲突触发的重启请求，（2）管理员手动重启请求
+                        wait_conflict = asyncio.create_task(restart_polling_event.wait())
+                        wait_admin = asyncio.create_task(admin_restart_event.wait())
+                        done, pending = await asyncio.wait(
+                            {wait_conflict, wait_admin},
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                        for task in pending:
+                            task.cancel()
+
+                        if wait_admin in done:
+                            # 管理员请求重启，退出内层循环重建 Application
+                            logger.info("收到管理员重启请求，重新加载配置...")
+                            _set_bot_status(
+                                state="restarting",
+                                message="收到重启请求，重新加载配置...",
+                            )
+                            break
+
                         restart_polling_event.clear()
 
                     except telegram.error.Conflict:
@@ -418,7 +566,7 @@ def run_telegram_bot():
             except telegram.error.InvalidToken as e:
                 _set_bot_status(
                     state="fatal",
-                    message="BOT_TOKEN 无效，机器人无法启动",
+                    message="BOT_TOKEN 无效，等待重新配置",
                     last_error_type=type(e).__name__,
                     last_error=str(e),
                     last_error_at=_utc_iso(),
@@ -427,12 +575,14 @@ def run_telegram_bot():
                     "Token 无效",
                     e,
                     "解决方案:\n"
-                    "  1. 检查 .env 文件中的 BOT_TOKEN 是否正确\n"
+                    "  1. 在管理后台 > Telegram 设置中更新 Token\n"
                     "  2. 确认 Token 没有多余的空格或换行符\n"
-                    "  3. 在 @BotFather 中重新生成 Token"
+                    "  3. 在 @BotFather 中重新生成 Token\n"
+                    "  4. 更新后点击\"重启机器人\"按钮"
                 )
-                # Token 无效是致命错误，不重试
-                return
+                # DB 管理场景：等待管理员更新 token 后通过"重启"恢复
+                await asyncio.to_thread(wait_for_restart_signal, 3600.0)
+                continue
 
             except telegram.error.TimedOut as e:
                 _set_bot_status(
@@ -490,6 +640,31 @@ def run_telegram_bot():
                 logger.error("=" * 60)
                 await asyncio.sleep(30)
 
+            finally:
+                # 清理资源
+                if restart_watcher_task:
+                    restart_watcher_task.cancel()
+                    try:
+                        await restart_watcher_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        pass
+
+                if telegram_app:
+                    try:
+                        await telegram_app.updater.stop()
+                    except Exception:
+                        pass
+                    try:
+                        await telegram_app.stop()
+                    except Exception:
+                        pass
+                    try:
+                        await telegram_app.shutdown()
+                    except Exception:
+                        pass
+
     # 线程入口：保证异常不会影响 Flask/Web 服务
     while True:
         try:
@@ -527,9 +702,8 @@ def main():
     # 迁移环境变量配置到数据库
     migrate_env_settings()
 
-    # 启动 CDN 监控
-    if CDN_ENABLED and CLOUDFLARE_CDN_DOMAIN and CDN_MONITOR_ENABLED:
-        start_cdn_monitor()
+    # 启动 CDN 监控（由 start_cdn_monitor 内部判断是否启用）
+    start_cdn_monitor()
 
     logger.info("启动Telegram云图床服务...")
 
@@ -554,9 +728,10 @@ def main():
 
     # Telegram 机器人独立线程运行：失败不影响 Web 服务
     bot_thread = start_telegram_bot_thread()
-    if not bot_thread:
+    if not is_bot_token_configured():
         logger.warning("=" * 60)
-        logger.warning("Telegram 机器人未启动（BOT_TOKEN 未配置）")
+        logger.warning("Telegram 机器人等待配置（BOT_TOKEN 未设置）")
+        logger.warning("可通过管理后台 > Telegram 设置进行配置")
         logger.warning("Web 服务（图床、管理后台）仍可正常使用")
         logger.warning("=" * 60)
 

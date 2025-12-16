@@ -18,7 +18,7 @@ from .backends.local import LocalBackend
 from .backends.rclone import RcloneBackend
 from .backends.s3 import S3Backend
 
-from ..config import BOT_TOKEN, STORAGE_CHAT_ID, logger
+from ..config import BOT_TOKEN, logger
 
 
 def _resolve_env_ref(value: Any) -> Any:
@@ -72,7 +72,7 @@ class StorageRouter:
 
         if driver == "telegram":
             bot_token = str(cfg2.get("bot_token") or BOT_TOKEN)
-            chat_id = int(cfg2.get("chat_id") or STORAGE_CHAT_ID or 0)
+            chat_id = int(cfg2.get("chat_id") or 0)
             return TelegramBackend(name=name, bot_token=bot_token, chat_id=chat_id)
 
         if driver == "local":
@@ -278,7 +278,7 @@ def _load_storage_config() -> Dict[str, Any]:
             "telegram": {
                 "driver": "telegram",
                 "bot_token": "env:BOT_TOKEN",
-                "chat_id": "env:STORAGE_CHAT_ID",
+                "chat_id": "0",
             },
             "local": {
                 "driver": "local",

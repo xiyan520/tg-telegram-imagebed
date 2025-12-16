@@ -8,9 +8,7 @@ import json
 from flask import request, jsonify, Response, session
 
 from . import admin_bp
-from ..config import (
-    CLOUDFLARE_CDN_DOMAIN, STATIC_VERSION, DATABASE_PATH, logger
-)
+from ..config import STATIC_VERSION, DATABASE_PATH, logger
 from ..utils import add_cache_headers, format_size, get_domain
 from ..database import (
     get_announcement, update_announcement,
@@ -25,6 +23,11 @@ from ..storage.router import get_storage_router, reload_storage_router, _load_st
 
 # 导入 admin_module 用于登录验证装饰器
 from .. import admin_module
+
+
+def _get_cdn_domain() -> str:
+    """从数据库获取 CDN 域名"""
+    return str(get_system_setting('cloudflare_cdn_domain') or '').strip()
 
 
 # 注意：/api/admin/check 端点已在 admin_module.py 中定义
@@ -43,11 +46,12 @@ def purge_cdn_cache():
         return add_cache_headers(response, 'no-cache'), 400
 
     cdn_urls = []
+    cdn_domain = _get_cdn_domain()
     for url in urls:
         if '/image/' in url:
             encrypted_id = url.split('/image/')[-1]
-            if CLOUDFLARE_CDN_DOMAIN:
-                cdn_urls.append(f"https://{CLOUDFLARE_CDN_DOMAIN}/image/{encrypted_id}")
+            if cdn_domain:
+                cdn_urls.append(f"https://{cdn_domain}/image/{encrypted_id}")
 
     if cdn_urls and cloudflare_cdn.purge_cache(cdn_urls):
         response = jsonify({
@@ -82,7 +86,7 @@ def admin_cdn_probe():
     if not encrypted_ids:
         return add_cache_headers(jsonify({'success': False, 'error': 'No encrypted_ids provided'}), 'no-cache'), 400
 
-    if not CLOUDFLARE_CDN_DOMAIN:
+    if not _get_cdn_domain():
         return add_cache_headers(jsonify({'success': False, 'error': 'CDN domain not configured'}), 'no-cache'), 400
 
     encrypted_ids = encrypted_ids[:max_items]
@@ -128,7 +132,7 @@ def admin_cdn_warm():
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return add_cache_headers(response, 'no-cache')
 
-    if not CLOUDFLARE_CDN_DOMAIN:
+    if not _get_cdn_domain():
         return add_cache_headers(jsonify({'success': False, 'error': 'CDN domain not configured'}), 'no-cache'), 400
 
     data = request.get_json() or {}
@@ -203,7 +207,7 @@ def admin_cdn_stats():
 
     data = get_cdn_dashboard_stats(window_hours=window_hours)
     data['monitor'] = {'queue_size': get_monitor_queue_size()}
-    data['cloudflare'] = {'cdn_domain': CLOUDFLARE_CDN_DOMAIN or None}
+    data['cloudflare'] = {'cdn_domain': _get_cdn_domain() or None}
 
     return add_cache_headers(jsonify({'success': True, 'data': data}), 'no-cache')
 
@@ -221,7 +225,9 @@ def clear_cache():
     app_config.STATIC_VERSION = new_version
 
     cloudflare_success = False
-    if CLOUDFLARE_CDN_DOMAIN and cloudflare_cdn.zone_id:
+    cdn_domain = _get_cdn_domain()
+    cloudflare_cdn._refresh_config()  # 确保配置已从数据库加载
+    if cdn_domain and cloudflare_cdn.zone_id:
         if cloudflare_cdn.purge_all():
             message = '缓存已清理，Cloudflare缓存已清除'
             cloudflare_success = True
@@ -1068,6 +1074,124 @@ def admin_token_detail_api(token_id: int):
 
     except Exception as e:
         logger.error(f"Token 详情 API 失败: {e}")
+        response = jsonify({'success': False, 'error': str(e)})
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache'), 500
+
+
+# ===================== Telegram Bot 配置 API =====================
+
+@admin_bp.route('/api/admin/telegram/bot', methods=['GET', 'PUT', 'OPTIONS'])
+@admin_module.login_required
+def admin_telegram_bot_config():
+    """
+    Telegram Bot Token 配置 API:
+    - GET: 获取 Bot Token 配置状态
+    - PUT: 更新 Bot Token（仅当未通过环境变量设置时）
+    """
+    if request.method == 'OPTIONS':
+        response = Response()
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'GET, PUT, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache')
+
+    try:
+        from ..bot_control import get_bot_token_status, clear_token_cache
+
+        if request.method == 'GET':
+            status = get_bot_token_status()
+            response = jsonify({'success': True, 'data': status})
+            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            return add_cache_headers(response, 'no-cache')
+
+        # PUT: 更新 Bot Token
+        status = get_bot_token_status()
+        if status.get('env_set'):
+            response = jsonify({
+                'success': False,
+                'error': 'Bot Token 已通过环境变量设置，无法在界面修改'
+            })
+            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            return add_cache_headers(response, 'no-cache'), 400
+
+        data = request.get_json(silent=True) or {}
+        new_token = (data.get('token') or '').strip()
+
+        # 验证 Token 格式（基本格式检查）
+        if new_token and ':' not in new_token:
+            response = jsonify({
+                'success': False,
+                'error': 'Bot Token 格式无效，应为 数字:字符串 格式'
+            })
+            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            return add_cache_headers(response, 'no-cache'), 400
+
+        # 保存到数据库
+        update_system_setting('telegram_bot_token', new_token)
+        clear_token_cache()
+
+        logger.info(f"更新 Telegram Bot Token: {'已设置' if new_token else '已清除'}")
+
+        response = jsonify({
+            'success': True,
+            'message': 'Bot Token 已更新' if new_token else 'Bot Token 已清除',
+            'data': get_bot_token_status()
+        })
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache')
+
+    except Exception as e:
+        logger.error(f"Telegram Bot 配置 API 失败: {e}")
+        response = jsonify({'success': False, 'error': str(e)})
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache'), 500
+
+
+@admin_bp.route('/api/admin/telegram/bot/restart', methods=['POST', 'OPTIONS'])
+@admin_module.login_required
+def admin_telegram_bot_restart():
+    """请求 Telegram Bot 热重启"""
+    if request.method == 'OPTIONS':
+        response = Response()
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache')
+
+    try:
+        from ..bot_control import request_bot_restart, get_bot_token_status
+
+        status = get_bot_token_status()
+        if not status.get('configured'):
+            response = jsonify({
+                'success': False,
+                'error': 'Bot Token 未配置，无法重启'
+            })
+            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            return add_cache_headers(response, 'no-cache'), 400
+
+        success, message = request_bot_restart()
+
+        response = jsonify({
+            'success': success,
+            'message': message
+        })
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache'), 200 if success else 429
+
+    except Exception as e:
+        logger.error(f"Telegram Bot 重启 API 失败: {e}")
         response = jsonify({'success': False, 'error': str(e)})
         response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
         response.headers['Access-Control-Allow-Credentials'] = 'true'

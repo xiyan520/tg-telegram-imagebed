@@ -156,7 +156,7 @@
         <div class="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
           <div class="flex items-center gap-2 mb-2">
             <UIcon name="heroicons:globe-alt" class="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">CDN域名</p>
+            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">域名</p>
           </div>
           <p class="text-lg font-bold text-stone-900 dark:text-white truncate">
             {{ systemConfig.cdnDomain || '--' }}

@@ -67,28 +67,33 @@ FRONTEND_AUTOSTART = os.getenv("FRONTEND_AUTOSTART", "true").lower() == "true"
 FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", "3000"))
 FRONTEND_DEV_CMD = os.getenv("FRONTEND_DEV_CMD", "npm run dev")
 
-# ===================== 群组上传功能配置 =====================
-ENABLE_GROUP_UPLOAD = os.getenv("ENABLE_GROUP_UPLOAD", "true").lower() == "true"
+# ===================== 群组上传功能配置（已迁移到数据库，此处仅为首次启动迁移用） =====================
+ENABLE_GROUP_UPLOAD = os.getenv("ENABLE_GROUP_UPLOAD", "false").lower() == "true"
 GROUP_UPLOAD_ADMIN_ONLY = os.getenv("GROUP_UPLOAD_ADMIN_ONLY", "false").lower() == "true"
 GROUP_ADMIN_IDS = os.getenv("GROUP_ADMIN_IDS", "")
+GROUP_UPLOAD_ALLOWED_CHAT_IDS = os.getenv("GROUP_UPLOAD_ALLOWED_CHAT_IDS", "")
 GROUP_UPLOAD_REPLY = os.getenv("GROUP_UPLOAD_REPLY", "true").lower() == "true"
 GROUP_UPLOAD_DELETE_DELAY = int(os.getenv("GROUP_UPLOAD_DELETE_DELAY", "0"))
 
-# 解析管理员ID列表
-GROUP_ADMIN_ID_LIST: List[int] = []
-if GROUP_ADMIN_IDS:
+def _parse_id_list(raw: str) -> List[int]:
+    """解析逗号分隔的 ID 列表（支持负数如 -100xxx）"""
+    if not raw:
+        return []
     try:
-        GROUP_ADMIN_ID_LIST = [int(id.strip()) for id in GROUP_ADMIN_IDS.split(',') if id.strip()]
+        return [int(x.strip()) for x in raw.split(',') if x.strip()]
     except Exception:
-        pass
+        return []
 
-# ===================== CDN 相关配置 =====================
-CDN_ENABLED = os.getenv("CDN_ENABLED", "true").lower() == "true"
+GROUP_ADMIN_ID_LIST: List[int] = _parse_id_list(GROUP_ADMIN_IDS)
+GROUP_UPLOAD_ALLOWED_CHAT_ID_LIST: List[int] = _parse_id_list(GROUP_UPLOAD_ALLOWED_CHAT_IDS)
+
+# ===================== CDN 相关配置（已迁移到数据库，此处仅为首次启动迁移用） =====================
+CDN_ENABLED = os.getenv("CDN_ENABLED", "false").lower() == "true"
 CDN_CACHE_TTL = int(os.getenv("CDN_CACHE_TTL", "31536000"))
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
 
 # CDN重定向配置
-CDN_REDIRECT_ENABLED = os.getenv("CDN_REDIRECT_ENABLED", "true").lower() == "true"
+CDN_REDIRECT_ENABLED = os.getenv("CDN_REDIRECT_ENABLED", "false").lower() == "true"
 CDN_REDIRECT_MAX_COUNT = int(os.getenv("CDN_REDIRECT_MAX_COUNT", "2"))
 CDN_REDIRECT_CACHE_TIME = int(os.getenv("CDN_REDIRECT_CACHE_TIME", "300"))
 CDN_REDIRECT_DELAY = int(os.getenv("CDN_REDIRECT_DELAY", "10"))
@@ -102,15 +107,15 @@ CLOUDFLARE_BROWSER_TTL = int(os.getenv("CLOUDFLARE_BROWSER_TTL", "14400"))
 CLOUDFLARE_EDGE_TTL = int(os.getenv("CLOUDFLARE_EDGE_TTL", "2592000"))
 
 # 智能路由配置
-ENABLE_SMART_ROUTING = os.getenv("ENABLE_SMART_ROUTING", "true").lower() == "true"
+ENABLE_SMART_ROUTING = os.getenv("ENABLE_SMART_ROUTING", "false").lower() == "true"
 FALLBACK_TO_ORIGIN = os.getenv("FALLBACK_TO_ORIGIN", "true").lower() == "true"
 
 # 缓存预热配置
-ENABLE_CACHE_WARMING = os.getenv("ENABLE_CACHE_WARMING", "true").lower() == "true"
+ENABLE_CACHE_WARMING = os.getenv("ENABLE_CACHE_WARMING", "false").lower() == "true"
 CACHE_WARMING_DELAY = int(os.getenv("CACHE_WARMING_DELAY", "5"))
 
 # CDN缓存监控配置
-CDN_MONITOR_ENABLED = os.getenv("CDN_MONITOR_ENABLED", "true").lower() == "true"
+CDN_MONITOR_ENABLED = os.getenv("CDN_MONITOR_ENABLED", "false").lower() == "true"
 CDN_MONITOR_INTERVAL = int(os.getenv("CDN_MONITOR_INTERVAL", "5"))
 CDN_MONITOR_MAX_RETRIES = int(os.getenv("CDN_MONITOR_MAX_RETRIES", "15"))
 CDN_MONITOR_QUEUE_SIZE = int(os.getenv("CDN_MONITOR_QUEUE_SIZE", "1000"))
@@ -216,6 +221,7 @@ __all__ = [
     'FRONTEND_AUTOSTART', 'FRONTEND_PORT', 'FRONTEND_DEV_CMD',
     # 群组上传
     'ENABLE_GROUP_UPLOAD', 'GROUP_UPLOAD_ADMIN_ONLY', 'GROUP_ADMIN_IDS',
+    'GROUP_UPLOAD_ALLOWED_CHAT_IDS', 'GROUP_UPLOAD_ALLOWED_CHAT_ID_LIST',
     'GROUP_UPLOAD_REPLY', 'GROUP_UPLOAD_DELETE_DELAY', 'GROUP_ADMIN_ID_LIST',
     # CDN
     'CDN_ENABLED', 'CDN_CACHE_TTL', 'ALLOWED_ORIGINS',

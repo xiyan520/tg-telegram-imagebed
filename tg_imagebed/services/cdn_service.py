@@ -22,12 +22,71 @@ from urllib3.util.retry import Retry
 
 from ..config import (
     CLOUDFLARE_CDN_DOMAIN, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID,
-    CDN_ENABLED, CDN_MONITOR_ENABLED, CDN_MONITOR_INTERVAL,
-    CDN_MONITOR_MAX_RETRIES, CDN_MONITOR_QUEUE_SIZE,
+    CDN_MONITOR_INTERVAL, CDN_MONITOR_MAX_RETRIES, CDN_MONITOR_QUEUE_SIZE,
     ENABLE_CACHE_WARMING,
     logger
 )
-from ..database import update_cdn_cache_status, get_file_info, get_uncached_files
+from ..database import update_cdn_cache_status, get_file_info, get_uncached_files, get_system_setting
+
+
+# CDN 配置缓存（减少数据库查询）
+_CDN_SETTINGS_CACHE = {
+    "ts": 0.0,
+    "cdn_enabled": False,
+    "monitor_enabled": False,
+    "cdn_domain": "",
+    "api_token": "",
+    "zone_id": "",
+    "cache_warming_enabled": False,
+}
+
+
+def _get_effective_cdn_settings():
+    """从数据库读取 CDN 设置（带缓存，1秒 TTL）"""
+    now = time.time()
+    if (now - _CDN_SETTINGS_CACHE["ts"]) < 1.0:
+        return (
+            _CDN_SETTINGS_CACHE["cdn_enabled"],
+            _CDN_SETTINGS_CACHE["monitor_enabled"],
+            _CDN_SETTINGS_CACHE["cdn_domain"],
+            _CDN_SETTINGS_CACHE["api_token"],
+            _CDN_SETTINGS_CACHE["zone_id"],
+            _CDN_SETTINGS_CACHE["cache_warming_enabled"],
+        )
+
+    cdn_enabled = False
+    monitor_enabled = False
+    cdn_domain = ""
+    api_token = ""
+    zone_id = ""
+    cache_warming_enabled = False
+    try:
+        cdn_enabled = str(get_system_setting("cdn_enabled") or "0") == "1"
+        monitor_enabled = str(get_system_setting("cdn_monitor_enabled") or "0") == "1"
+        cdn_domain = str(get_system_setting("cloudflare_cdn_domain") or "").strip()
+        api_token = str(get_system_setting("cloudflare_api_token") or "").strip()
+        zone_id = str(get_system_setting("cloudflare_zone_id") or "").strip()
+        cache_warming_enabled = str(get_system_setting("enable_cache_warming") or "0") == "1"
+    except Exception as e:
+        # 数据库不可用时回退到 config 常量
+        logger.debug(f"从数据库读取 CDN 设置失败，使用 config 常量: {e}")
+        cdn_enabled = bool(CDN_ENABLED)
+        monitor_enabled = bool(CDN_MONITOR_ENABLED)
+        cdn_domain = str(CLOUDFLARE_CDN_DOMAIN or "").strip()
+        api_token = str(CLOUDFLARE_API_TOKEN or "").strip()
+        zone_id = str(CLOUDFLARE_ZONE_ID or "").strip()
+        cache_warming_enabled = bool(ENABLE_CACHE_WARMING)
+
+    _CDN_SETTINGS_CACHE.update({
+        "ts": now,
+        "cdn_enabled": cdn_enabled,
+        "monitor_enabled": monitor_enabled,
+        "cdn_domain": cdn_domain,
+        "api_token": api_token,
+        "zone_id": zone_id,
+        "cache_warming_enabled": cache_warming_enabled,
+    })
+    return cdn_enabled, monitor_enabled, cdn_domain, api_token, zone_id, cache_warming_enabled
 
 
 # CDN 缓存状态常量
@@ -52,14 +111,12 @@ class CloudflareCDN:
     """Cloudflare CDN 管理类"""
 
     def __init__(self):
-        self.api_token = CLOUDFLARE_API_TOKEN
-        self.zone_id = CLOUDFLARE_ZONE_ID
-        self.cdn_domain = CLOUDFLARE_CDN_DOMAIN
-        self.headers = {
-            'Authorization': f'Bearer {self.api_token}',
-            'Content-Type': 'application/json'
-        }
+        self.api_token = ""
+        self.zone_id = ""
+        self.cdn_domain = ""
+        self.headers = {'Content-Type': 'application/json'}
         self.base_url = 'https://api.cloudflare.com/client/v4'
+        self._cfg_ts = 0.0
 
         # 创建带重试的 Session
         self._session = requests.Session()
@@ -72,8 +129,24 @@ class CloudflareCDN:
         )
         self._session.mount('https://', HTTPAdapter(max_retries=retry))
 
+    def _refresh_config(self, *, force: bool = False) -> None:
+        """从数据库刷新 CDN 配置"""
+        now = time.time()
+        if not force and (now - self._cfg_ts) < 1.0:
+            return
+        _cdn_enabled, _monitor_enabled, cdn_domain, api_token, zone_id, _cache_warming = _get_effective_cdn_settings()
+        self.api_token = api_token
+        self.zone_id = zone_id
+        self.cdn_domain = cdn_domain
+        headers = {'Content-Type': 'application/json'}
+        if self.api_token:
+            headers['Authorization'] = f'Bearer {self.api_token}'
+        self.headers = headers
+        self._cfg_ts = now
+
     def _api_post(self, path: str, payload: dict) -> Tuple[bool, str]:
         """发送 Cloudflare API POST 请求"""
+        self._refresh_config()
         if not self.api_token or not self.zone_id:
             return False, 'missing Cloudflare credentials'
 
@@ -134,6 +207,7 @@ class CloudflareCDN:
 
     def probe_encrypted_id(self, encrypted_id: str) -> CDNProbeResult:
         """探测指定图片的 CDN 缓存状态"""
+        self._refresh_config()
         if not self.cdn_domain:
             return CDNProbeResult(
                 url='', status_code=0, cf_cache_status='',
@@ -147,7 +221,9 @@ class CloudflareCDN:
         同步预热缓存
         通过发送一个探测请求来触发 Cloudflare 缓存
         """
-        if not ENABLE_CACHE_WARMING or not self.cdn_domain:
+        _cdn_enabled, _monitor_enabled, _domain, _api_token, _zone_id, cache_warming_enabled = _get_effective_cdn_settings()
+        self._refresh_config()
+        if not cache_warming_enabled or not self.cdn_domain:
             return False
 
         probe = self.probe_encrypted_id(encrypted_id)
@@ -158,6 +234,7 @@ class CloudflareCDN:
 
     def purge_cache(self, urls: List[str]) -> bool:
         """清除指定URL的缓存（支持分块）"""
+        self._refresh_config()
         if not self.api_token or not self.zone_id:
             return False
 
@@ -182,6 +259,7 @@ class CloudflareCDN:
 
     def purge_by_tags(self, tags: List[str]) -> bool:
         """按 Cache-Tag 清除缓存（需要 Cloudflare Enterprise 或支持的计划）"""
+        self._refresh_config()
         if not tags:
             return True
 
@@ -195,6 +273,7 @@ class CloudflareCDN:
 
     def purge_all(self) -> bool:
         """清除所有缓存"""
+        self._refresh_config()
         if not self.api_token or not self.zone_id:
             return False
 
@@ -212,6 +291,7 @@ class CloudflareCDN:
 
     def check_cdn_status(self, encrypted_id: str) -> bool:
         """检查图片是否被CDN缓存"""
+        self._refresh_config()
         if not self.cdn_domain:
             return False
 
@@ -276,8 +356,8 @@ def _cdn_cache_monitor_worker():
             encrypted_id = task['encrypted_id']
             retries = task.get('retries', 0)
 
-            # 首次检查时尝试主动预热
-            if retries == 0 and ENABLE_CACHE_WARMING and CLOUDFLARE_CDN_DOMAIN:
+            # 首次检查时尝试主动预热（DB 控制）
+            if retries == 0:
                 cloudflare_cdn.warm_cache_sync(encrypted_id)
 
             # 检查是否已经缓存
@@ -315,7 +395,8 @@ def start_cdn_monitor():
     """启动CDN监控线程"""
     global _cdn_monitor_thread, _cdn_monitor_running
 
-    if not CDN_ENABLED or not CLOUDFLARE_CDN_DOMAIN or not CDN_MONITOR_ENABLED:
+    cdn_enabled, monitor_enabled, cdn_domain, _api_token, _zone_id, _cache_warming = _get_effective_cdn_settings()
+    if not cdn_enabled or not cdn_domain or not monitor_enabled:
         logger.info('CDN监控未启用')
         return
 
@@ -358,7 +439,8 @@ def stop_cdn_monitor():
 def add_to_cdn_monitor(encrypted_id: str, upload_time: Optional[int] = None, delay_seconds: int = 0):
     """添加图片到CDN监控队列"""
     # 必须同时满足：CDN启用、CDN域名配置、监控启用
-    if not CDN_ENABLED or not CDN_MONITOR_ENABLED or not CLOUDFLARE_CDN_DOMAIN:
+    cdn_enabled, monitor_enabled, cdn_domain, _api_token, _zone_id, _cache_warming = _get_effective_cdn_settings()
+    if not cdn_enabled or not monitor_enabled or not cdn_domain:
         return
 
     task = {
@@ -393,7 +475,8 @@ def _restore_cdn_monitor_tasks():
 
 def get_monitor_queue_size() -> int:
     """获取监控队列大小"""
-    return cdn_monitor_queue.qsize() if CDN_MONITOR_ENABLED else 0
+    _cdn_enabled, monitor_enabled, _cdn_domain, _api_token, _zone_id, _cache_warming = _get_effective_cdn_settings()
+    return cdn_monitor_queue.qsize() if monitor_enabled else 0
 
 
 __all__ = [

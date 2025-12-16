@@ -268,6 +268,13 @@
             </UFormGroup>
           </div>
 
+          <UFormGroup label="允许上传的群组/频道 ID">
+            <UInput v-model="settings.group_upload_allowed_chat_ids" placeholder="多个 ID 用逗号分隔，如: -1001234567890,-1009876543210" />
+            <template #hint>
+              <span class="text-xs text-stone-500">留空表示允许所有群组/频道触发上传，群组/频道 ID 通常以 -100 开头</span>
+            </template>
+          </UFormGroup>
+
           <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
             <div>
               <p class="font-medium text-stone-900 dark:text-white">自动回复链接</p>
@@ -573,6 +580,7 @@ const settings = ref({
   group_upload_enabled: false,
   group_upload_admin_only: false,
   group_admin_ids: '',
+  group_upload_allowed_chat_ids: '',
   group_upload_reply: true,
   group_upload_delete_delay: 0,
 })
