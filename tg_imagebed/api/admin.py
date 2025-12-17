@@ -16,6 +16,10 @@ from ..database import (
     admin_list_tokens, admin_create_token,
     admin_update_token_status, admin_delete_token,
     update_cdn_cache_status, get_uncached_files, get_cdn_dashboard_stats,
+    admin_list_galleries, admin_create_gallery, admin_get_gallery,
+    admin_update_gallery, admin_delete_gallery,
+    admin_add_images_to_gallery, admin_remove_images_from_gallery,
+    admin_get_gallery_images, admin_update_gallery_share,
 )
 from ..services.cdn_service import cloudflare_cdn, add_to_cdn_monitor, get_monitor_queue_size
 from ..services.file_service import process_upload
@@ -1196,3 +1200,160 @@ def admin_telegram_bot_restart():
         response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         return add_cache_headers(response, 'no-cache'), 500
+
+
+# ===================== 管理员画集 API =====================
+
+def _admin_json(data, status=200, cache='no-cache'):
+    """创建带 CORS 头的管理员 JSON 响应"""
+    resp = jsonify(data)
+    resp.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+    resp.headers['Access-Control-Allow-Credentials'] = 'true'
+    return add_cache_headers(resp, cache), status
+
+
+def _admin_options(methods: str):
+    """处理管理员 OPTIONS 预检请求"""
+    response = Response()
+    response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Access-Control-Allow-Methods'] = methods
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return add_cache_headers(response, 'no-cache')
+
+
+@admin_bp.route('/api/admin/galleries', methods=['GET', 'POST', 'OPTIONS'])
+@admin_module.login_required
+def admin_galleries_list_create():
+    """管理员画集列表/创建"""
+    if request.method == 'OPTIONS':
+        return _admin_options('GET, POST, OPTIONS')
+
+    if request.method == 'GET':
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 50, type=int)
+        limit = max(1, min(200, limit))
+        result = admin_list_galleries(page, limit)
+        base_url = get_domain(request)
+        for item in result['items']:
+            if item.get('cover_image'):
+                item['cover_url'] = f"{base_url}/image/{item['cover_image']}"
+            if item.get('share_enabled') and item.get('share_token'):
+                item['share_url'] = f"{base_url}/g/{item['share_token']}"
+        return _admin_json({'success': True, 'data': result})
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return _admin_json({'success': False, 'error': '画集名称不能为空'}, 400)
+    if len(name) > 100:
+        return _admin_json({'success': False, 'error': '画集名称不能超过100字符'}, 400)
+    description = (data.get('description') or '').strip()[:500]
+    gallery = admin_create_gallery(name, description)
+    if not gallery:
+        return _admin_json({'success': False, 'error': '创建画集失败'}, 500)
+    return _admin_json({'success': True, 'data': {'gallery': gallery}})
+
+
+@admin_bp.route('/api/admin/galleries/<int:gallery_id>', methods=['GET', 'PATCH', 'DELETE', 'OPTIONS'])
+@admin_module.login_required
+def admin_gallery_detail(gallery_id: int):
+    """管理员画集详情/更新/删除"""
+    if request.method == 'OPTIONS':
+        return _admin_options('GET, PATCH, DELETE, OPTIONS')
+
+    if request.method == 'GET':
+        gallery = admin_get_gallery(gallery_id)
+        if not gallery:
+            return _admin_json({'success': False, 'error': '画集不存在'}, 404)
+        base_url = get_domain(request)
+        if gallery.get('share_enabled') and gallery.get('share_token'):
+            gallery['share_url'] = f"{base_url}/g/{gallery['share_token']}"
+        if gallery.get('cover_image'):
+            gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
+        return _admin_json({'success': True, 'data': {'gallery': gallery}})
+
+    if request.method == 'PATCH':
+        data = request.get_json(silent=True) or {}
+        name = data.get('name')
+        description = data.get('description')
+        if name is not None:
+            name = str(name).strip()
+            if not name:
+                return _admin_json({'success': False, 'error': '画集名称不能为空'}, 400)
+            if len(name) > 100:
+                return _admin_json({'success': False, 'error': '画集名称不能超过100字符'}, 400)
+        if description is not None:
+            description = str(description).strip()[:500]
+        gallery = admin_update_gallery(gallery_id, name=name, description=description)
+        if not gallery:
+            return _admin_json({'success': False, 'error': '画集不存在'}, 404)
+        return _admin_json({'success': True, 'data': {'gallery': gallery}})
+
+    deleted = admin_delete_gallery(gallery_id)
+    if not deleted:
+        return _admin_json({'success': False, 'error': '画集不存在'}, 404)
+    return _admin_json({'success': True})
+
+
+@admin_bp.route('/api/admin/galleries/<int:gallery_id>/images', methods=['GET', 'POST', 'DELETE', 'OPTIONS'])
+@admin_module.login_required
+def admin_gallery_images(gallery_id: int):
+    """管理员画集图片管理"""
+    if request.method == 'OPTIONS':
+        return _admin_options('GET, POST, DELETE, OPTIONS')
+
+    if request.method == 'GET':
+        page = request.args.get('page', 1, type=int)
+        limit = request.args.get('limit', 50, type=int)
+        limit = max(1, min(200, limit))
+        result = admin_get_gallery_images(gallery_id, page, limit)
+        base_url = get_domain(request)
+        for item in result['items']:
+            item['image_url'] = f"{base_url}/image/{item['encrypted_id']}"
+        return _admin_json({'success': True, 'data': result})
+
+    data = request.get_json(silent=True) or {}
+    encrypted_ids = data.get('encrypted_ids', [])
+    if not isinstance(encrypted_ids, list) or not encrypted_ids:
+        return _admin_json({'success': False, 'error': '请提供图片ID列表'}, 400)
+    encrypted_ids = list(dict.fromkeys([str(e).strip() for e in encrypted_ids if str(e).strip()]))[:500]
+    if not encrypted_ids:
+        return _admin_json({'success': False, 'error': '请提供图片ID列表'}, 400)
+
+    if request.method == 'POST':
+        result = admin_add_images_to_gallery(gallery_id, encrypted_ids)
+        return _admin_json({'success': True, 'data': result})
+
+    removed = admin_remove_images_from_gallery(gallery_id, encrypted_ids)
+    return _admin_json({'success': True, 'data': {'removed': removed}})
+
+
+@admin_bp.route('/api/admin/galleries/<int:gallery_id>/share', methods=['POST', 'DELETE', 'OPTIONS'])
+@admin_module.login_required
+def admin_gallery_share(gallery_id: int):
+    """管理员画集分享管理"""
+    if request.method == 'OPTIONS':
+        return _admin_options('POST, DELETE, OPTIONS')
+
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        enabled = bool(data.get('enabled', True))
+        expires_at = data.get('expires_at')
+        try:
+            gallery = admin_update_gallery_share(gallery_id, enabled, expires_at)
+        except ValueError as e:
+            return _admin_json({'success': False, 'error': str(e)}, 400)
+        if not gallery:
+            return _admin_json({'success': False, 'error': '画集不存在'}, 404)
+        base_url = get_domain(request)
+        share_url = f"{base_url}/g/{gallery['share_token']}" if gallery.get('share_enabled') and gallery.get('share_token') else None
+        return _admin_json({'success': True, 'data': {'share_url': share_url, 'share_expires_at': gallery.get('share_expires_at')}})
+
+    try:
+        gallery = admin_update_gallery_share(gallery_id, False)
+    except ValueError as e:
+        return _admin_json({'success': False, 'error': str(e)}, 400)
+    if not gallery:
+        return _admin_json({'success': False, 'error': '画集不存在'}, 404)
+    return _admin_json({'success': True})

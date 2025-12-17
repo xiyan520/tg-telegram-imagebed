@@ -45,6 +45,14 @@ export const adminMenu: AdminMenuItem[] = [
     activeMatch: { type: 'prefix', prefixes: ['/admin/tokens'] },
   },
   {
+    key: 'galleries',
+    label: '画集管理',
+    to: '/admin/galleries',
+    icon: 'heroicons:rectangle-stack',
+    permissions: ['admin'],
+    activeMatch: { type: 'prefix', prefixes: ['/admin/galleries'] },
+  },
+  {
     key: 'settings',
     label: '系统设置',
     to: '/admin/settings',

@@ -158,7 +158,7 @@ def create_app() -> Flask:
     # 注册蓝图 - 必须先导入路由模块以触发路由注册
     from tg_imagebed.api import upload_bp, images_bp, admin_bp, auth_bp
     # 导入路由模块，触发 @bp.route 装饰器执行
-    from tg_imagebed.api import upload, images, admin, auth, settings
+    from tg_imagebed.api import upload, images, admin, auth, settings, galleries
 
     app.register_blueprint(upload_bp)
     app.register_blueprint(images_bp)
