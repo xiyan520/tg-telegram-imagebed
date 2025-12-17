@@ -684,6 +684,76 @@ def verify_auth_token(token: str) -> Dict[str, Any]:
         return {'valid': False, 'reason': '验证失败'}
 
 
+def verify_auth_token_access(token: str) -> Dict[str, Any]:
+    """验证 auth_token 是否有效（访问级别：不检查上传额度，用于查看相册）"""
+    if not token:
+        return {'valid': False, 'reason': 'Token为空'}
+
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM auth_tokens WHERE token = ?', (token,))
+            row = cursor.fetchone()
+
+            if not row:
+                return {'valid': False, 'reason': 'Token不存在'}
+
+            token_data = dict(row)
+
+            # 检查是否激活
+            if not token_data.get('is_active', 1):
+                return {'valid': False, 'reason': 'Token已被禁用'}
+
+            # 检查是否过期
+            if token_data.get('expires_at'):
+                try:
+                    expires_at = datetime.fromisoformat(str(token_data['expires_at']).replace('Z', '+00:00'))
+                    if datetime.now() > expires_at.replace(tzinfo=None):
+                        return {'valid': False, 'reason': 'Token已过期'}
+                except Exception:
+                    pass
+
+            # 计算剩余上传次数（但不作为验证条件）
+            upload_count = int(token_data.get('upload_count') or 0)
+            upload_limit = int(token_data.get('upload_limit') or 999999)
+            remaining_uploads = upload_limit - upload_count
+
+            return {
+                'valid': True,
+                'token_data': token_data,
+                'remaining_uploads': max(0, remaining_uploads),
+                'can_upload': remaining_uploads > 0
+            }
+
+    except Exception as e:
+        logger.error(f"验证auth_token(access)失败: {e}")
+        return {'valid': False, 'reason': '验证失败'}
+
+
+def update_token_description(token: str, description: Optional[str]) -> bool:
+    """更新 Token 描述（前端可用作相册名称）"""
+    try:
+        token = (token or '').strip()
+        if not token:
+            return False
+        desc_value = (str(description or '').strip()[:200]) or None
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 先检查token是否存在
+            cursor.execute("SELECT 1 FROM auth_tokens WHERE token = ?", (token,))
+            if not cursor.fetchone():
+                return False
+            # 执行更新（即使值相同也返回成功，保证幂等性）
+            cursor.execute(
+                "UPDATE auth_tokens SET description = ? WHERE token = ?",
+                (desc_value, token)
+            )
+            return True
+    except Exception as e:
+        logger.error(f"更新token描述失败: {e}")
+        return False
+
+
 def update_token_usage(token: str) -> None:
     """更新 token 使用记录"""
     try:
@@ -834,11 +904,9 @@ DEFAULT_SYSTEM_SETTINGS = {
     'cdn_redirect_enabled': '0',
     'cdn_redirect_max_count': '2',
     'cdn_redirect_delay': '10',
-    # 群组上传配置（默认不开启）
-    'group_upload_enabled': '0',
+    # 群组上传配置
     'group_upload_admin_only': '0',
     'group_admin_ids': '',
-    'group_upload_allowed_chat_ids': '',
     'group_upload_reply': '1',
     'group_upload_delete_delay': '0',
 }
@@ -958,10 +1026,8 @@ def _get_env_config_value(db_key: str):
         'cdn_redirect_max_count': ('CDN_REDIRECT_MAX_COUNT', 'int'),
         'cdn_redirect_delay': ('CDN_REDIRECT_DELAY', 'int'),
         # 群组上传配置
-        'group_upload_enabled': ('ENABLE_GROUP_UPLOAD', 'bool'),
         'group_upload_admin_only': ('GROUP_UPLOAD_ADMIN_ONLY', 'bool'),
         'group_admin_ids': ('GROUP_ADMIN_IDS', 'str'),
-        'group_upload_allowed_chat_ids': ('GROUP_UPLOAD_ALLOWED_CHAT_IDS', 'str'),
         'group_upload_reply': ('GROUP_UPLOAD_REPLY', 'bool'),
         'group_upload_delete_delay': ('GROUP_UPLOAD_DELETE_DELAY', 'int'),
     }
@@ -1639,8 +1705,14 @@ def _get_admin_gallery_owner_token() -> Optional[str]:
             row = cur.fetchone()
             token = (str(row[0]).strip() if row and row[0] else '')
             if not token:
-                token = _ensure_admin_gallery_owner_token()
-            return token or None
+                return _ensure_admin_gallery_owner_token()
+            # 验证token是否在auth_tokens表中存在（可能被删除了）
+            cur.execute('SELECT 1 FROM auth_tokens WHERE token = ?', (token,))
+            if not cur.fetchone():
+                # token不存在，需要重新创建
+                logger.warning(f"Admin gallery owner token 在 auth_tokens 表中不存在，重新创建")
+                return _ensure_admin_gallery_owner_token()
+            return token
     except Exception as e:
         logger.error(f"读取 admin gallery owner token 失败: {e}")
         return None

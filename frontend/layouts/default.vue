@@ -54,12 +54,8 @@
               <span class="relative z-10">首页</span>
               <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </NuxtLink>
-            <NuxtLink to="/gallery" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
-              <span class="relative z-10">画廊</span>
-              <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            </NuxtLink>
-            <NuxtLink to="/guest" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
-              <span class="relative z-10">Token</span>
+            <NuxtLink to="/album" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
+              <span class="relative z-10">相册</span>
               <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </NuxtLink>
             <NuxtLink to="/docs" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
@@ -86,11 +82,8 @@
           <NuxtLink to="/" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
             首页
           </NuxtLink>
-          <NuxtLink to="/gallery" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
-            画廊
-          </NuxtLink>
-          <NuxtLink to="/guest" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
-            Token
+          <NuxtLink to="/album" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
+            相册
           </NuxtLink>
           <NuxtLink to="/docs" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
             文档

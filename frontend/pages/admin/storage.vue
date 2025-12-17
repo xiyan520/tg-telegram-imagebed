@@ -323,6 +323,39 @@
               <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Chat ID</label>
               <UInput v-model="backendForm.chat_id" placeholder="留空使用环境变量 STORAGE_CHAT_ID" />
             </div>
+
+            <!-- 群组上传配置 -->
+            <div class="pt-4 border-t border-stone-200 dark:border-neutral-700">
+              <p class="font-medium text-stone-900 dark:text-white mb-4">群组上传设置</p>
+              <div class="space-y-4">
+                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">仅管理员可上传</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">限制只有指定管理员才能通过群组上传</p>
+                  </div>
+                  <UToggle v-model="groupUpload.admin_only" />
+                </div>
+
+                <div v-if="groupUpload.admin_only">
+                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">管理员 ID</label>
+                  <UInput v-model="groupUpload.admin_ids" placeholder="多个 ID 用逗号分隔" />
+                  <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">Telegram 用户 ID，多个用逗号分隔</p>
+                </div>
+
+                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">自动回复链接</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">上传成功后自动回复图片链接</p>
+                  </div>
+                  <UToggle v-model="groupUpload.reply" />
+                </div>
+
+                <div v-if="groupUpload.reply">
+                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">回复删除延迟（秒）</label>
+                  <UInput v-model.number="groupUpload.delete_delay" type="number" min="0" placeholder="0 表示不自动删除" />
+                </div>
+              </div>
+            </div>
           </template>
 
           <!-- Local 配置 -->
@@ -435,6 +468,7 @@ const savingPolicy = ref(false)
 const uploading = ref(false)
 const savingBackend = ref(false)
 const deleting = ref(false)
+const savingGroupUpload = ref(false)
 
 // 环境变量覆盖标志
 const envOverride = ref(false)
@@ -458,6 +492,14 @@ const policy = ref<{
   group: '',
   admin_default: '',
   admin_allowed: []
+})
+
+// 群组上传配置
+const groupUpload = ref({
+  admin_only: false,
+  admin_ids: '',
+  reply: true,
+  delete_delay: 0
 })
 
 // 上传相关
@@ -558,11 +600,12 @@ const formatSize = (bytes: number): string => {
 const loadAll = async () => {
   loading.value = true
   try {
-    const [storageResp, healthResp, policyResp, configResp] = await Promise.all([
+    const [storageResp, healthResp, policyResp, configResp, settingsResp] = await Promise.all([
       $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage`, { credentials: 'include' }),
       $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/health`, { credentials: 'include' }),
       $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/policy`, { credentials: 'include' }),
-      $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/config`, { credentials: 'include' })
+      $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/config`, { credentials: 'include' }),
+      $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, { credentials: 'include' })
     ])
 
     backends.value = storageResp?.data?.backends || {}
@@ -583,6 +626,17 @@ const loadAll = async () => {
     // 加载配置详情
     envOverride.value = configResp?.data?.env_override || false
     backendConfigs.value = configResp?.data?.backends || {}
+
+    // 加载群组上传配置
+    if (settingsResp?.data) {
+      const d = settingsResp.data
+      groupUpload.value = {
+        admin_only: d.group_upload_admin_only ?? false,
+        admin_ids: d.group_admin_ids ?? '',
+        reply: d.group_upload_reply ?? true,
+        delete_delay: d.group_upload_delete_delay ?? 0
+      }
+    }
   } catch (e: any) {
     console.error('加载存储配置失败:', e)
     notification.error('加载失败', e?.data?.error || '无法获取存储配置')
@@ -629,6 +683,33 @@ const savePolicy = async () => {
     notification.error('保存失败', e?.data?.error || e?.message || '无法保存路由策略')
   } finally {
     savingPolicy.value = false
+  }
+}
+
+// 保存群组上传配置
+const saveGroupUpload = async (silent = false) => {
+  savingGroupUpload.value = true
+  try {
+    const payload = {
+      group_upload_admin_only: groupUpload.value.admin_only,
+      group_admin_ids: groupUpload.value.admin_ids,
+      group_upload_reply: groupUpload.value.reply,
+      group_upload_delete_delay: groupUpload.value.delete_delay
+    }
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
+      method: 'PUT',
+      body: payload,
+      credentials: 'include'
+    })
+    if (!resp?.success) throw new Error(resp?.error || '保存失败')
+  } catch (e: any) {
+    console.error('保存群组上传配置失败:', e)
+    if (!silent) {
+      notification.error('保存失败', e?.data?.error || e?.message || '无法保存群组上传配置')
+    }
+    throw e
+  } finally {
+    savingGroupUpload.value = false
   }
 }
 
@@ -793,7 +874,6 @@ const saveBackend = async () => {
         credentials: 'include'
       })
       if (!resp?.success) throw new Error(resp?.error || '更新失败')
-      notification.success('已保存', `存储 ${name} 更新成功`)
     } else {
       // 添加
       const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends`, {
@@ -802,9 +882,14 @@ const saveBackend = async () => {
         credentials: 'include'
       })
       if (!resp?.success) throw new Error(resp?.error || '添加失败')
-      notification.success('已添加', `存储 ${name} 添加成功`)
     }
 
+    // 如果是 Telegram 驱动，同时保存群组上传配置
+    if (form.driver === 'telegram') {
+      await saveGroupUpload(true)
+    }
+
+    notification.success('已保存', `存储 ${name} ${editingBackend.value ? '更新' : '添加'}成功`)
     showBackendModal.value = false
     await loadAll()
   } catch (e: any) {

@@ -51,7 +51,6 @@ except ImportError:
 def _get_config_status_from_db() -> dict:
     """从数据库读取配置状态（回退到环境变量）"""
     cdn_enabled = os.getenv('CDN_ENABLED', 'false').lower() == 'true'
-    group_upload_enabled = os.getenv('ENABLE_GROUP_UPLOAD', 'false').lower() == 'true'
     cdn_monitor_enabled = os.getenv('CDN_MONITOR_ENABLED', 'false').lower() == 'true'
     cdn_domain = (os.getenv('CLOUDFLARE_CDN_DOMAIN') or '').strip()
 
@@ -63,11 +62,6 @@ def _get_config_status_from_db() -> dict:
         row = cursor.fetchone()
         if row is not None:
             cdn_enabled = str(row[0]) == '1'
-
-        cursor.execute("SELECT value FROM admin_config WHERE key = ?", ('group_upload_enabled',))
-        row = cursor.fetchone()
-        if row is not None:
-            group_upload_enabled = str(row[0]) == '1'
 
         cursor.execute("SELECT value FROM admin_config WHERE key = ?", ('cdn_monitor_enabled',))
         row = cursor.fetchone()
@@ -90,7 +84,6 @@ def _get_config_status_from_db() -> dict:
         'cdnStatus': '已启用' if cdn_enabled else '未启用',
         'cdnDomain': cdn_domain if cdn_domain else '未配置',
         'uptime': '运行中',
-        'groupUpload': '已启用' if group_upload_enabled else '未启用',
         'cdnMonitor': cdn_monitor_display
     }
 

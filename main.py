@@ -248,7 +248,7 @@ def run_telegram_bot():
 
     async def handle_photo(update: Update, context):
         """处理图片上传（私聊/群组/频道）"""
-        from tg_imagebed.services.file_service import process_upload
+        from tg_imagebed.services.file_service import process_upload, record_existing_telegram_file
         from tg_imagebed.utils import get_domain
         from tg_imagebed.database import get_system_setting
 
@@ -264,17 +264,6 @@ def run_telegram_bot():
         reply_enabled = True
         delete_delay = 0
         if is_group:
-            # 检查群组上传是否启用
-            if str(get_system_setting('group_upload_enabled') or '0') != '1':
-                return
-
-            # 检查白名单（留空表示允许所有）
-            allowed_raw = str(get_system_setting('group_upload_allowed_chat_ids') or '').strip()
-            if allowed_raw:
-                allowed_ids = _parse_id_list(allowed_raw)
-                if not allowed_ids or chat.id not in allowed_ids:
-                    return
-
             # 检查管理员权限
             if str(get_system_setting('group_upload_admin_only') or '0') == '1':
                 admin_raw = str(get_system_setting('group_admin_ids') or '').strip()
@@ -313,17 +302,33 @@ def run_telegram_bot():
             photo = message.photo[-1]
             file_info = await context.bot.get_file(photo.file_id)
             file_bytes = await file_info.download_as_bytearray()
+            filename = f"telegram_{photo.file_id[:12]}.jpg"
 
-            result = process_upload(
-                file_content=bytes(file_bytes),
-                filename=f"telegram_{photo.file_id[:12]}.jpg",
-                content_type='image/jpeg',
-                username=username,
-                source='telegram_group' if is_group else 'telegram_bot',
-                is_group_upload=is_group,
-                group_message_id=message.message_id if is_group else None,
-                upload_scene='group' if is_group else None
-            )
+            if is_group:
+                # 群组/频道：不做二次上传，直接记录原始 file_id/file_path
+                result = record_existing_telegram_file(
+                    file_id=photo.file_id,
+                    file_path=getattr(file_info, 'file_path', '') or '',
+                    file_content=bytes(file_bytes),
+                    filename=filename,
+                    content_type='image/jpeg',
+                    username=username,
+                    source='telegram_group',
+                    is_group_upload=True,
+                    group_message_id=message.message_id,
+                )
+            else:
+                # 私聊：保持原有上传流程
+                result = process_upload(
+                    file_content=bytes(file_bytes),
+                    filename=filename,
+                    content_type='image/jpeg',
+                    username=username,
+                    source='telegram_bot',
+                    is_group_upload=False,
+                    group_message_id=None,
+                    upload_scene=None
+                )
 
             if not reply_enabled:
                 return

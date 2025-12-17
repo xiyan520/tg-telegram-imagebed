@@ -1,24 +1,66 @@
 import { defineStore } from 'pinia'
+import type { TokenInfo, TokenVaultItem, TokenVaultPersistedV1 } from '~/types/tokenVault'
 
-interface TokenInfo {
-  token: string
-  upload_count: number
-  upload_limit: number
-  remaining_uploads: number
-  expires_at: string
-  created_at: string
-  last_used: string | null
+const VAULT_STORAGE_KEY = 'token_vault_v1'
+const LEGACY_TOKEN_KEY = 'guest_token'
+const LEGACY_IS_GUEST_KEY = 'is_guest'
+
+const nowIso = () => new Date().toISOString()
+
+const maskToken = (token: string) => {
+  const t = (token || '').trim()
+  if (t.length <= 12) return t
+  return `${t.slice(0, 8)}…${t.slice(-4)}`
+}
+
+const safeParse = <T,>(raw: string | null, fallback: T): T => {
+  try {
+    if (!raw) return fallback
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+const newId = () => {
+  const c = globalThis.crypto as any
+  if (c?.randomUUID) return c.randomUUID()
+  return `id_${Math.random().toString(16).slice(2)}_${Date.now()}`
 }
 
 export const useGuestTokenStore = defineStore('guestToken', {
   state: () => ({
+    vault: {
+      version: 1 as const,
+      activeId: null as string | null,
+      items: [] as TokenVaultItem[]
+    } satisfies TokenVaultPersistedV1,
+
+    // 向后兼容：保留这些字段作为"当前激活Token"视图
     token: '',
     tokenInfo: null as TokenInfo | null,
-    isGuest: false
+    isGuest: true
   }),
 
   getters: {
+    vaultItems: (state) => state.vault.items,
+    activeVaultId: (state) => state.vault.activeId,
+    activeVaultItem: (state) => state.vault.items.find(i => i.id === state.vault.activeId) || null,
+
     hasToken: (state) => !!state.token,
+    activeAlbumLabel: (state) => {
+      const item = state.vault.items.find(i => i.id === state.vault.activeId)
+      if (!item) return ''
+      const name = (item.albumName || '').trim()
+      return name || '未命名相册'
+    },
+    activeAlbumLabelWithToken: (state) => {
+      const item = state.vault.items.find(i => i.id === state.vault.activeId)
+      if (!item) return ''
+      const name = (item.albumName || '').trim()
+      return `${name || '未命名相册'} (${maskToken(item.token)})`
+    },
+
     remainingUploads: (state) => state.tokenInfo?.remaining_uploads || 0,
     uploadLimit: (state) => state.tokenInfo?.upload_limit || 0,
     uploadCount: (state) => state.tokenInfo?.upload_count || 0,
@@ -30,33 +72,156 @@ export const useGuestTokenStore = defineStore('guestToken', {
   },
 
   actions: {
+    persistVault() {
+      if (!import.meta.client) return
+      localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(this.vault))
+    },
+
+    loadVault() {
+      if (!import.meta.client) return
+      const raw = localStorage.getItem(VAULT_STORAGE_KEY)
+      const parsed = safeParse<TokenVaultPersistedV1 | null>(raw, null)
+      if (parsed?.version === 1 && Array.isArray(parsed.items)) {
+        const validItems = parsed.items
+          .filter(i => i && typeof i.id === 'string' && typeof i.token === 'string')
+          .map(i => ({
+            id: i.id,
+            token: (i.token || '').trim(),
+            albumName: typeof i.albumName === 'string' ? i.albumName : '',
+            addedAt: i.addedAt || nowIso(),
+            lastSelectedAt: i.lastSelectedAt,
+            lastVerifiedAt: i.lastVerifiedAt,
+            tokenInfo: i.tokenInfo
+          }))
+
+        // 验证 activeId 是否有效，无效则自动选择第一个
+        let activeId = parsed.activeId || null
+        if (activeId && !validItems.some(i => i.id === activeId)) {
+          activeId = validItems[0]?.id || null
+        }
+
+        this.vault = {
+          version: 1,
+          activeId,
+          items: validItems
+        }
+      }
+    },
+
+    importLegacySingleTokenIfNeeded() {
+      if (!import.meta.client) return
+      const legacyToken = (localStorage.getItem(LEGACY_TOKEN_KEY) || '').trim()
+      const legacyIsGuest = localStorage.getItem(LEGACY_IS_GUEST_KEY) === 'true'
+      if (!legacyToken || !legacyIsGuest) return
+
+      const exists = this.vault.items.some(i => i.token === legacyToken)
+      if (!exists) {
+        const item: TokenVaultItem = {
+          id: newId(),
+          token: legacyToken,
+          albumName: '',
+          addedAt: nowIso()
+        }
+        this.vault.items.unshift(item)
+        this.vault.activeId = item.id
+        this.persistVault()
+      }
+
+      localStorage.removeItem(LEGACY_TOKEN_KEY)
+      localStorage.removeItem(LEGACY_IS_GUEST_KEY)
+    },
+
+    syncActiveFromVault() {
+      const active = this.vault.items.find(i => i.id === this.vault.activeId) || null
+      this.token = active?.token || ''
+      this.tokenInfo = active?.tokenInfo || null
+      this.isGuest = true
+    },
+
+    async setActiveTokenById(id: string, opts?: { verify?: boolean }) {
+      const item = this.vault.items.find(i => i.id === id)
+      if (!item) throw new Error('Token不存在')
+      this.vault.activeId = item.id
+      item.lastSelectedAt = nowIso()
+      this.persistVault()
+      this.syncActiveFromVault()
+      if (opts?.verify) return this.verifyToken()
+    },
+
+    updateAlbumName(id: string, albumName: string) {
+      const item = this.vault.items.find(i => i.id === id)
+      if (!item) throw new Error('Token不存在')
+      item.albumName = (albumName || '').slice(0, 50)
+      this.persistVault()
+    },
+
+    removeTokenFromVault(id: string) {
+      const idx = this.vault.items.findIndex(i => i.id === id)
+      if (idx < 0) return
+      const removingActive = this.vault.activeId === id
+      this.vault.items.splice(idx, 1)
+
+      if (removingActive) {
+        this.vault.activeId = this.vault.items[0]?.id || null
+      }
+      this.persistVault()
+      this.syncActiveFromVault()
+    },
+
+    async addTokenToVault(token: string, opts?: { albumName?: string; makeActive?: boolean; verify?: boolean }) {
+      const t = (token || '').trim()
+      if (!t) throw new Error('Token不能为空')
+
+      const existing = this.vault.items.find(i => i.token === t)
+      if (existing) {
+        if (typeof opts?.albumName === 'string') existing.albumName = opts.albumName.slice(0, 50)
+        if (opts?.makeActive) {
+          this.vault.activeId = existing.id
+          existing.lastSelectedAt = nowIso()
+        }
+        this.persistVault()
+        this.syncActiveFromVault()
+        if (opts?.verify) await this.verifyToken()
+        return existing.id
+      }
+
+      const item: TokenVaultItem = {
+        id: newId(),
+        token: t,
+        albumName: typeof opts?.albumName === 'string' ? opts.albumName.slice(0, 50) : '',
+        addedAt: nowIso()
+      }
+      this.vault.items.unshift(item)
+      if (opts?.makeActive !== false) {
+        this.vault.activeId = item.id
+        item.lastSelectedAt = nowIso()
+      }
+      this.persistVault()
+      this.syncActiveFromVault()
+      if (opts?.verify) await this.verifyToken()
+      return item.id
+    },
+
     // 生成新的游客token
-    async generateToken(options?: { upload_limit?: number; expires_days?: number }) {
+    async generateToken(options?: { upload_limit?: number; expires_days?: number; albumName?: string }) {
       const config = useRuntimeConfig()
 
       try {
         const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/generate`, {
           method: 'POST',
           body: {
-            upload_limit: options?.upload_limit || 999999,  // 默认无限制
-            expires_days: options?.expires_days || 36500,   // 默认100年
-            description: '游客Token'
+            upload_limit: options?.upload_limit || 999999,
+            expires_days: options?.expires_days || 36500,
+            description: options?.albumName || ''
           }
         })
 
         if (response.success) {
-          this.token = response.data.token
-          this.isGuest = true
-
-          // 保存到 localStorage
-          if (process.client) {
-            localStorage.setItem('guest_token', this.token)
-            localStorage.setItem('is_guest', 'true')
-          }
-
-          // 获取token详细信息
-          await this.verifyToken()
-
+          await this.addTokenToVault(response.data.token, {
+            albumName: options?.albumName || '',
+            makeActive: true,
+            verify: true
+          })
           return response.data
         } else {
           throw new Error(response.error || '生成Token失败')
@@ -84,54 +249,45 @@ export const useGuestTokenStore = defineStore('guestToken', {
 
         if (response.success && response.valid) {
           this.tokenInfo = response.data
+          const active = this.vault.items.find(i => i.id === this.vault.activeId)
+          if (active) {
+            active.tokenInfo = response.data
+            active.lastVerifiedAt = nowIso()
+            this.persistVault()
+          }
           return response.data
         } else {
           throw new Error(response.reason || 'Token无效')
         }
       } catch (error: any) {
-        // Token无效,清除本地存储
-        this.clearToken()
         throw new Error(error.data?.reason || error.message || 'Token验证失败')
       }
     },
 
     // 刷新token(重新生成)
     async refreshToken(options?: { upload_limit?: number; expires_days?: number }) {
-      // 清除旧token
       this.clearToken()
-
-      // 生成新token
       return await this.generateToken(options)
     },
 
-    // 清除token
+    // 清除当前激活的token（不删除vault中的记录）
     clearToken() {
-      this.token = ''
-      this.tokenInfo = null
-      this.isGuest = false
-
-      if (process.client) {
-        localStorage.removeItem('guest_token')
-        localStorage.removeItem('is_guest')
-      }
+      this.vault.activeId = null
+      this.persistVault()
+      this.syncActiveFromVault()
     },
 
     // 从 localStorage 恢复token
     async restoreToken() {
-      if (process.client) {
-        const token = localStorage.getItem('guest_token')
-        const isGuest = localStorage.getItem('is_guest')
-
-        if (token && isGuest === 'true') {
-          this.token = token
-          this.isGuest = true
-
+      if (import.meta.client) {
+        this.loadVault()
+        this.importLegacySingleTokenIfNeeded()
+        this.syncActiveFromVault()
+        if (this.token) {
           try {
-            // 验证token是否仍然有效
             await this.verifyToken()
-          } catch (error) {
-            // Token无效,清除
-            this.clearToken()
+          } catch {
+            // 保留vault，不清除
           }
         }
       }
@@ -155,11 +311,20 @@ export const useGuestTokenStore = defineStore('guestToken', {
         })
 
         if (response.success) {
-          // 更新token信息
           if (response.data.total_uploads !== undefined) {
+            // 更新当前 tokenInfo
             if (this.tokenInfo) {
               this.tokenInfo.upload_count = response.data.total_uploads
               this.tokenInfo.remaining_uploads = response.data.remaining_uploads
+              this.tokenInfo.can_upload = response.data.can_upload
+            }
+            // 同步更新 vault 中的 tokenInfo
+            const active = this.vault.items.find(i => i.id === this.vault.activeId)
+            if (active && active.tokenInfo) {
+              active.tokenInfo.upload_count = response.data.total_uploads
+              active.tokenInfo.remaining_uploads = response.data.remaining_uploads
+              active.tokenInfo.can_upload = response.data.can_upload
+              this.persistVault()
             }
           }
           return response.data
@@ -169,6 +334,28 @@ export const useGuestTokenStore = defineStore('guestToken', {
       } catch (error: any) {
         throw new Error(error.data?.error || error.message || '获取上传历史失败')
       }
+    },
+
+    // 更新相册描述（同步到服务器）
+    async updateDescription(description: string) {
+      if (!this.token) throw new Error('未提供Token')
+      const config = useRuntimeConfig()
+      const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${this.token}` },
+        body: { description }
+      })
+      if (!response?.success) throw new Error(response?.error || '更新失败')
+
+      // 同步到本地vault
+      const active = this.vault.items.find(i => i.id === this.vault.activeId)
+      if (active) {
+        active.albumName = description
+        if (active.tokenInfo) active.tokenInfo.description = description
+        this.persistVault()
+      }
+      if (this.tokenInfo) this.tokenInfo.description = description
+      return response.data
     }
   }
 })

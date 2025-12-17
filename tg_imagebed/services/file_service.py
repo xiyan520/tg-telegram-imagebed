@@ -259,8 +259,77 @@ def process_upload(
     }
 
 
+def record_existing_telegram_file(
+    *,
+    file_id: str,
+    file_path: str,
+    file_content: bytes,
+    filename: str,
+    content_type: str,
+    username: str = 'web_user',
+    source: str = 'telegram_group',
+    auth_token: Optional[str] = None,
+    is_group_upload: bool = False,
+    group_message_id: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    直接记录已存在于 Telegram 的文件（不做二次上传）
+
+    适用于群组监听场景：用户在群里发送图片后，bot 通过 getFile 拿到 file_path，
+    同时下载字节用于计算 file_hash（去重/审计），但不再把图片转存到存储频道。
+    """
+    if not file_id:
+        return None
+
+    file_path = file_path or ''
+    file_size = len(file_content or b'')
+
+    if not content_type:
+        content_type = get_mime_type(filename)
+
+    file_hash = hashlib.md5(file_content or b'').hexdigest()
+    encrypted_id = encrypt_file_id(file_id, file_path)
+    mime_type = get_mime_type(filename)
+    upload_time = int(time.time())
+
+    file_data = {
+        'file_id': file_id,
+        'file_path': file_path,
+        'upload_time': upload_time,
+        'user_id': 0,
+        'username': username,
+        'file_size': file_size,
+        'source': source,
+        'original_filename': filename,
+        'mime_type': mime_type,
+        'file_hash': file_hash,
+        'is_group_upload': is_group_upload,
+        'group_message_id': group_message_id,
+        'auth_token': auth_token,
+        'storage_backend': 'telegram',
+        'storage_key': file_id,
+        'storage_meta': {
+            'file_path': file_path,
+            'recorded_at': upload_time,
+            'existing_telegram_file': True,
+        },
+    }
+    save_file_info(encrypted_id, file_data)
+    add_to_cdn_monitor(encrypted_id, upload_time)
+
+    logger.info(f"已记录 Telegram 既有文件: {filename} -> {encrypted_id}")
+
+    return {
+        'encrypted_id': encrypted_id,
+        'file_size': file_size,
+        'filename': filename,
+        'mime_type': mime_type
+    }
+
+
 __all__ = [
     'get_fresh_file_path',
     'upload_to_telegram',
     'process_upload',
+    'record_existing_telegram_file',
 ]

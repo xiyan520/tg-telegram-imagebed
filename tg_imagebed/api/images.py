@@ -299,7 +299,6 @@ def get_info():
     cdn_domain, cdn_enabled, cdn_mode = _get_domain_mode()
     cdn_monitor_enabled = str(get_system_setting('cdn_monitor_enabled') or '0') == '1'
     cdn_redirect_enabled = str(get_system_setting('cdn_redirect_enabled') or '0') == '1'
-    group_upload_enabled = str(get_system_setting('group_upload_enabled') or '0') == '1'
     group_upload_admin_only = str(get_system_setting('group_upload_admin_only') or '0') == '1'
     group_upload_reply = str(get_system_setting('group_upload_reply') or '1') == '1'
     max_file_size_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=100)
@@ -318,7 +317,6 @@ def get_info():
         'cdn_monitor_enabled': cdn_monitor_enabled,
         'cdn_monitor_queue': get_monitor_queue_size(),
         'cdn_redirect_enabled': cdn_redirect_enabled,
-        'group_upload_enabled': group_upload_enabled,
         'group_upload_admin_only': group_upload_admin_only,
         'group_upload_reply': group_upload_reply,
         'max_file_size': max_file_size_mb * 1024 * 1024,
@@ -334,7 +332,6 @@ def health_check():
     """健康检查端点"""
     cdn_domain, cdn_enabled, cdn_mode = _get_domain_mode()
     cdn_redirect_enabled = str(get_system_setting('cdn_redirect_enabled') or '0') == '1'
-    group_upload_enabled = str(get_system_setting('group_upload_enabled') or '0') == '1'
 
     response = jsonify({
         'status': 'healthy',
@@ -344,7 +341,6 @@ def health_check():
         'cdn_mode': cdn_mode,
         'cloudflare_cdn': bool(cdn_domain),
         'cdn_redirect_enabled': cdn_redirect_enabled,
-        'group_upload_enabled': group_upload_enabled,
         'version': STATIC_VERSION
     })
     response.headers['Access-Control-Allow-Origin'] = '*'

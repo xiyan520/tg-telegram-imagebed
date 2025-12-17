@@ -4,7 +4,7 @@
     <div class="flex items-center justify-between">
       <div>
         <h1 class="text-2xl font-bold text-stone-900 dark:text-white">系统设置</h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">配置上传策略、CDN 加速和群组上传功能</p>
+        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">配置域名、CDN 加速和上传策略</p>
       </div>
       <UButton
         icon="heroicons:arrow-path"
@@ -216,82 +216,6 @@
                 </UFormGroup>
               </div>
             </div>
-          </div>
-        </div>
-      </UCard>
-
-      <!-- 群组上传配置 -->
-      <UCard>
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:user-group" class="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">群组上传</h3>
-                <p class="text-xs text-stone-500 dark:text-stone-400">Telegram 群组图片上传功能</p>
-              </div>
-            </div>
-            <UToggle v-model="settings.group_upload_enabled" size="lg" />
-          </div>
-        </template>
-
-        <!-- 群组上传未开启提示 -->
-        <div v-if="!settings.group_upload_enabled" class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
-          <div class="flex items-center gap-3">
-            <UIcon name="heroicons:information-circle" class="w-5 h-5 text-stone-400" />
-            <p class="text-sm text-stone-500 dark:text-stone-400">
-              群组上传功能未开启。开启后可在 Telegram 群组中直接发送图片上传到图床。
-            </p>
-          </div>
-        </div>
-
-        <!-- 群组上传配置详情 -->
-        <div v-else class="space-y-6">
-          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
-            <div>
-              <p class="font-medium text-stone-900 dark:text-white">仅管理员可上传</p>
-              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                限制只有指定管理员才能通过群组上传
-              </p>
-            </div>
-            <UToggle v-model="settings.group_upload_admin_only" size="lg" />
-          </div>
-
-          <div v-if="settings.group_upload_admin_only">
-            <UFormGroup label="管理员 ID 列表">
-              <UInput v-model="settings.group_admin_ids" placeholder="多个 ID 用逗号分隔，如: 123456789,987654321" />
-              <template #hint>
-                <span class="text-xs text-stone-500">Telegram 用户 ID，多个用逗号分隔</span>
-              </template>
-            </UFormGroup>
-          </div>
-
-          <UFormGroup label="允许上传的群组/频道 ID">
-            <UInput v-model="settings.group_upload_allowed_chat_ids" placeholder="多个 ID 用逗号分隔，如: -1001234567890,-1009876543210" />
-            <template #hint>
-              <span class="text-xs text-stone-500">留空表示允许所有群组/频道触发上传，群组/频道 ID 通常以 -100 开头</span>
-            </template>
-          </UFormGroup>
-
-          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
-            <div>
-              <p class="font-medium text-stone-900 dark:text-white">自动回复链接</p>
-              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                上传成功后自动回复图片链接
-              </p>
-            </div>
-            <UToggle v-model="settings.group_upload_reply" size="lg" />
-          </div>
-
-          <div v-if="settings.group_upload_reply">
-            <UFormGroup label="回复消息删除延迟（秒）">
-              <UInput v-model.number="settings.group_upload_delete_delay" type="number" min="0" />
-              <template #hint>
-                <span class="text-xs text-stone-500">0 表示不自动删除回复消息</span>
-              </template>
-            </UFormGroup>
           </div>
         </div>
       </UCard>
@@ -576,13 +500,6 @@ const settings = ref({
   cdn_redirect_enabled: false,
   cdn_redirect_max_count: 2,
   cdn_redirect_delay: 10,
-  // 群组上传配置
-  group_upload_enabled: false,
-  group_upload_admin_only: false,
-  group_admin_ids: '',
-  group_upload_allowed_chat_ids: '',
-  group_upload_reply: true,
-  group_upload_delete_delay: 0,
 })
 
 const originalSettings = ref<typeof settings.value | null>(null)

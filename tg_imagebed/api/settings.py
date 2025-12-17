@@ -82,10 +82,8 @@ def _format_settings_for_response(settings: dict) -> dict:
         'cdn_redirect_max_count': _safe_int(settings.get('cdn_redirect_max_count'), 2, 1),
         'cdn_redirect_delay': _safe_int(settings.get('cdn_redirect_delay'), 10, 0),
         # 群组上传配置
-        'group_upload_enabled': settings.get('group_upload_enabled', '0') == '1',
         'group_upload_admin_only': settings.get('group_upload_admin_only', '0') == '1',
         'group_admin_ids': settings.get('group_admin_ids', ''),
-        'group_upload_allowed_chat_ids': settings.get('group_upload_allowed_chat_ids', ''),
         'group_upload_reply': settings.get('group_upload_reply', '1') == '1',
         'group_upload_delete_delay': _safe_int(settings.get('group_upload_delete_delay'), 0, 0),
     }
@@ -270,9 +268,6 @@ def admin_system_settings():
                 settings_to_update['cdn_redirect_delay'] = str(max(0, delay))
 
             # 群组上传配置
-            if 'group_upload_enabled' in data:
-                settings_to_update['group_upload_enabled'] = '1' if data['group_upload_enabled'] else '0'
-
             if 'group_upload_admin_only' in data:
                 settings_to_update['group_upload_admin_only'] = '1' if data['group_upload_admin_only'] else '0'
 
@@ -284,15 +279,6 @@ def admin_system_settings():
                     except ValueError:
                         errors.append('管理员 ID 格式无效，应为逗号分隔的数字')
                 settings_to_update['group_admin_ids'] = ids_str
-
-            if 'group_upload_allowed_chat_ids' in data:
-                ids_str = str(data['group_upload_allowed_chat_ids']).strip()
-                if ids_str:
-                    try:
-                        [int(x.strip()) for x in ids_str.split(',') if x.strip()]
-                    except ValueError:
-                        errors.append('群组白名单 ID 格式无效，应为逗号分隔的数字')
-                settings_to_update['group_upload_allowed_chat_ids'] = ids_str
 
             if 'group_upload_reply' in data:
                 settings_to_update['group_upload_reply'] = '1' if data['group_upload_reply'] else '0'

@@ -11,8 +11,8 @@ from . import auth_bp
 from ..config import logger
 from ..utils import add_cache_headers, format_size, get_domain
 from ..database import (
-    verify_auth_token, get_token_info, update_token_usage,
-    is_token_generation_allowed, is_token_upload_allowed,
+    verify_auth_token, verify_auth_token_access, get_token_info, update_token_usage,
+    update_token_description, is_token_generation_allowed, is_token_upload_allowed,
     get_system_setting_int, get_upload_count_today
 )
 from ..services.auth_service import create_token, get_token_upload_history
@@ -144,7 +144,8 @@ def verify_guest_token():
             response.headers['Access-Control-Allow-Origin'] = '*'
             return add_cache_headers(response, 'no-cache'), 400
 
-        verification = verify_auth_token(token)
+        # 使用 access 验证（配额用完的Token也应能验证，以便查看相册）
+        verification = verify_auth_token_access(token)
 
         if verification['valid']:
             token_data = verification['token_data']
@@ -154,7 +155,9 @@ def verify_guest_token():
                 'data': {
                     'upload_count': token_data['upload_count'],
                     'upload_limit': token_data['upload_limit'],
-                    'remaining_uploads': verification['remaining_uploads'],
+                    'remaining_uploads': max(0, verification.get('remaining_uploads', 0)),
+                    'can_upload': verification.get('can_upload', False),
+                    'description': token_data.get('description'),
                     'expires_at': token_data['expires_at'],
                     'created_at': token_data['created_at'],
                     'last_used': token_data['last_used']
@@ -319,7 +322,8 @@ def get_token_uploads_api():
             response.headers['Access-Control-Allow-Origin'] = '*'
             return add_cache_headers(response, 'no-cache'), 401
 
-        verification = verify_auth_token(token)
+        # 使用 access 验证（即使额度用完也能查看相册）
+        verification = verify_auth_token_access(token)
         if not verification['valid']:
             response = jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"})
             response.headers['Access-Control-Allow-Origin'] = '*'
@@ -348,7 +352,8 @@ def get_token_uploads_api():
                 'uploads': uploads,
                 'total_uploads': token_info['upload_count'] if token_info else 0,
                 'upload_limit': token_info['upload_limit'] if token_info else 0,
-                'remaining_uploads': verification['remaining_uploads'],
+                'remaining_uploads': max(0, verification.get('remaining_uploads', 0)),
+                'can_upload': verification.get('can_upload', False),
                 'page': page,
                 'limit': limit,
                 'has_more': len(uploads) == limit
@@ -363,3 +368,63 @@ def get_token_uploads_api():
         response = jsonify({'success': False, 'error': str(e)})
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 500
+
+
+@auth_bp.route('/api/auth/token', methods=['GET', 'PATCH', 'OPTIONS'])
+def token_profile_api():
+    """Token(=相册)信息：获取/更新描述（相册名称）"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, PATCH, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        return add_cache_headers(response, 'no-cache')
+
+    token = _extract_bearer_token()
+    if not token:
+        response = jsonify({'success': False, 'error': '未提供Token'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(response, 'no-cache'), 401
+
+    verification = verify_auth_token_access(token)
+    if not verification['valid']:
+        response = jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(response, 'no-cache'), 401
+
+    token_data = verification['token_data']
+
+    if request.method == 'GET':
+        response = jsonify({
+            'success': True,
+            'data': {
+                'token': token,
+                'description': token_data.get('description')
+            }
+        })
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(response, 'no-cache')
+
+    # PATCH: 更新描述
+    data = request.get_json(silent=True) or {}
+    if 'description' not in data:
+        response = jsonify({'success': False, 'error': '缺少 description 参数'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(response, 'no-cache'), 400
+
+    new_description = str(data.get('description') or '').strip()[:200]
+
+    if not update_token_description(token, new_description):
+        response = jsonify({'success': False, 'error': '更新失败'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(response, 'no-cache'), 500
+
+    response = jsonify({
+        'success': True,
+        'data': {
+            'token': token,
+            'description': new_description
+        }
+    })
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    return add_cache_headers(response, 'no-cache')

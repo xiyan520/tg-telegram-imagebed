@@ -605,8 +605,7 @@ console.log(await res.json())`,
   "domain": "{{baseUrl}}",
   "cdn_enabled": true,
   "total_files": 1234,
-  "max_file_size": 20971520,
-  "group_upload_enabled": true
+  "max_file_size": 20971520
 }`,
           },
         ],
