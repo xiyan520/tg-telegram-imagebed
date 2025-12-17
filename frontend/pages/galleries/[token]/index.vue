@@ -54,7 +54,7 @@
         <NuxtLink
           v-for="gallery in galleries"
           :key="gallery.id"
-          :to="gallery.share_token ? `/g/${gallery.share_token}?from=${shareToken}` : '#'"
+          :to="`/galleries/${shareToken}/${gallery.id}`"
           class="group relative aspect-[4/3] rounded-2xl overflow-hidden border border-stone-200 dark:border-neutral-700 hover:border-amber-400 dark:hover:border-amber-500 transition-all hover:shadow-xl bg-white dark:bg-neutral-900"
         >
           <!-- 封面图 -->
@@ -68,11 +68,11 @@
             v-else
             class="w-full h-full bg-gradient-to-br from-stone-100 to-stone-200 dark:from-neutral-800 dark:to-neutral-700 flex items-center justify-center"
           >
-            <UIcon name="heroicons:photo" class="w-16 h-16 text-stone-300 dark:text-neutral-600" />
+            <UIcon :name="gallery.is_locked ? 'heroicons:lock-closed' : 'heroicons:photo'" class="w-16 h-16 text-stone-300 dark:text-neutral-600" />
           </div>
 
           <!-- 锁定标记 -->
-          <div v-if="gallery.access_mode === 'password'" class="absolute top-3 right-3 z-10">
+          <div v-if="gallery.is_locked" class="absolute top-3 right-3 z-10">
             <div class="bg-black/60 backdrop-blur-sm rounded-full p-2">
               <UIcon name="heroicons:lock-closed" class="w-4 h-4 text-white" />
             </div>

@@ -17,7 +17,7 @@ from ..database import (
     admin_update_token_status, admin_delete_token,
     update_cdn_cache_status, get_uncached_files, get_cdn_dashboard_stats,
     admin_list_galleries, admin_create_gallery, admin_get_gallery,
-    admin_update_gallery, admin_delete_gallery,
+    admin_update_gallery, admin_delete_gallery, admin_set_gallery_cover,
     admin_add_images_to_gallery, admin_remove_images_from_gallery,
     admin_get_gallery_images, admin_update_gallery_share,
 )
@@ -1357,3 +1357,33 @@ def admin_gallery_share(gallery_id: int):
     if not gallery:
         return _admin_json({'success': False, 'error': '画集不存在'}, 404)
     return _admin_json({'success': True})
+
+
+@admin_bp.route('/api/admin/galleries/<int:gallery_id>/cover', methods=['PUT', 'DELETE', 'OPTIONS'])
+@admin_module.login_required
+def admin_gallery_cover(gallery_id: int):
+    """管理员设置/清除画集封面"""
+    if request.method == 'OPTIONS':
+        return _admin_options('PUT, DELETE, OPTIONS')
+
+    if request.method == 'PUT':
+        data = request.get_json(silent=True) or {}
+        encrypted_id = (data.get('encrypted_id') or '').strip()
+        if not encrypted_id:
+            return _admin_json({'success': False, 'error': '未指定封面图片'}, 400)
+        gallery = admin_set_gallery_cover(gallery_id, encrypted_id)
+        if not gallery:
+            return _admin_json({'success': False, 'error': '画集不存在或图片不在画集中'}, 404)
+        base_url = get_domain(request)
+        if gallery.get('cover_image'):
+            gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
+        return _admin_json({'success': True, 'data': {'gallery': gallery}})
+
+    # DELETE - 清除手动设置的封面，恢复默认
+    gallery = admin_set_gallery_cover(gallery_id, None)
+    if not gallery:
+        return _admin_json({'success': False, 'error': '画集不存在'}, 404)
+    base_url = get_domain(request)
+    if gallery.get('cover_image'):
+        gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
+    return _admin_json({'success': True, 'data': {'gallery': gallery}})

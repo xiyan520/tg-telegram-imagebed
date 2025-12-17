@@ -7,8 +7,7 @@
           <!-- 左侧：画集信息 -->
           <div class="flex items-center gap-3 min-w-0">
             <NuxtLink
-              v-if="fromGalleries"
-              :to="`/galleries/${fromGalleries}`"
+              :to="`/galleries/${shareAllToken}`"
               class="shrink-0 p-1.5 -ml-1.5 rounded-lg text-stone-500 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white hover:bg-stone-100 dark:hover:bg-neutral-800 transition-colors"
               title="返回全部画集"
             >
@@ -108,7 +107,7 @@
         </div>
         <h1 class="text-2xl font-bold text-stone-900 dark:text-white mb-2">无法访问</h1>
         <p class="text-stone-600 dark:text-stone-400 mb-6">{{ error }}</p>
-        <UButton to="/" color="primary">返回首页</UButton>
+        <UButton :to="`/galleries/${shareAllToken}`" color="primary">返回画集列表</UButton>
       </div>
 
       <!-- 画集内容 -->
@@ -272,8 +271,7 @@
       v-model="showLoginModal"
       title="验证身份"
       :subtitle="lockedGalleryName ? `访问画集「${lockedGalleryName}」` : undefined"
-      :mode="requiresToken ? 'token' : 'both'"
-      :gallery-share-token="shareToken"
+      mode="token"
       @success="onLoginSuccess"
     />
   </div>
@@ -288,14 +286,14 @@ definePageMeta({ layout: false })
 const route = useRoute()
 const galleryApi = useGalleryApi()
 
-const shareToken = computed(() => route.params.token as string)
-const fromGalleries = computed(() => route.query.from as string | undefined)
+const shareAllToken = computed(() => route.params.token as string)
+const galleryId = computed(() => parseInt(route.params.id as string, 10))
 
 // 数据状态
 const loading = ref(true)
 const error = ref('')
 const galleryData = ref<{
-  gallery: { name: string; description?: string; image_count: number }
+  gallery: { id: number; name: string; description?: string; image_count: number; access_mode: string }
   images: GalleryImage[]
   total: number
   page: number
@@ -395,8 +393,16 @@ const loadGallery = async () => {
   error.value = ''
   requiresPassword.value = false
   requiresToken.value = false
+
+  // 验证 galleryId 有效性
+  if (isNaN(galleryId.value) || galleryId.value <= 0) {
+    error.value = '无效的画集 ID'
+    loading.value = false
+    return
+  }
+
   try {
-    galleryData.value = await galleryApi.getSharedGallery(shareToken.value, 1, 50)
+    galleryData.value = await galleryApi.getShareAllGallery(shareAllToken.value, galleryId.value, 1, 50)
     page.value = 1
   } catch (e: any) {
     if (e.requires_password) {
@@ -419,7 +425,7 @@ const submitPassword = async () => {
   unlocking.value = true
   unlockError.value = ''
   try {
-    await galleryApi.unlockGallery(shareToken.value, passwordInput.value)
+    await galleryApi.unlockShareAllGallery(shareAllToken.value, galleryId.value, passwordInput.value)
     passwordInput.value = ''
     requiresPassword.value = false
     await loadGallery()
@@ -430,7 +436,7 @@ const submitPassword = async () => {
   }
 }
 
-// 登录成功回调
+// Token 验证成功回调
 const onLoginSuccess = async () => {
   requiresToken.value = false
   await loadGallery()
@@ -441,7 +447,7 @@ const loadMore = async () => {
   loadingMore.value = true
   try {
     const nextPage = page.value + 1
-    const result = await galleryApi.getSharedGallery(shareToken.value, nextPage, 50)
+    const result = await galleryApi.getShareAllGallery(shareAllToken.value, galleryId.value, nextPage, 50)
     galleryData.value.images.push(...result.images)
     galleryData.value.has_more = result.has_more
     page.value = nextPage
@@ -526,13 +532,11 @@ watch(lightboxOpen, async (open) => {
 
 // 当需要 Token 验证时自动弹出登录弹窗
 watch(requiresToken, (needsToken) => {
-  if (needsToken) {
-    showLoginModal.value = true
-  }
+  if (needsToken) showLoginModal.value = true
 })
 
 // 监听路由参数变化
-watch(shareToken, () => {
+watch([shareAllToken, galleryId], () => {
   closeLightbox()
   loadGallery()
 })

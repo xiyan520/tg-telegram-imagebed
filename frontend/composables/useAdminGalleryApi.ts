@@ -10,6 +10,8 @@ export interface Gallery {
   share_token?: string
   share_url?: string
   share_expires_at?: string
+  access_mode?: string
+  hide_from_share_all?: boolean
   created_at: string
   updated_at: string
 }
@@ -124,6 +126,25 @@ export const useAdminGalleryApi = () => {
     return true
   }
 
+  const setCover = async (galleryId: number, encryptedId: string) => {
+    const response = await $fetch<any>(`${baseURL}/api/admin/galleries/${galleryId}/cover`, {
+      method: 'PUT',
+      credentials: 'include',
+      body: { encrypted_id: encryptedId }
+    })
+    if (!response?.success) throw new Error(response?.error || '设置封面失败')
+    return response.data.gallery as Gallery
+  }
+
+  const clearCover = async (galleryId: number) => {
+    const response = await $fetch<any>(`${baseURL}/api/admin/galleries/${galleryId}/cover`, {
+      method: 'DELETE',
+      credentials: 'include'
+    })
+    if (!response?.success) throw new Error(response?.error || '清除封面失败')
+    return response.data.gallery as Gallery
+  }
+
   return {
     getGalleries,
     createGallery,
@@ -134,6 +155,8 @@ export const useAdminGalleryApi = () => {
     addImagesToGallery,
     removeImagesFromGallery,
     enableShare,
-    disableShare
+    disableShare,
+    setCover,
+    clearCover
   }
 }

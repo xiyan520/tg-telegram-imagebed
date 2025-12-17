@@ -207,13 +207,15 @@ export const useGuestTokenStore = defineStore('guestToken', {
       const config = useRuntimeConfig()
 
       try {
+        // 只传递用户明确指定的参数，否则让后端使用默认值
+        const body: Record<string, any> = {}
+        if (options?.upload_limit != null) body.upload_limit = options.upload_limit
+        if (options?.expires_days != null) body.expires_days = options.expires_days
+        if (options?.albumName) body.description = options.albumName
+
         const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/generate`, {
           method: 'POST',
-          body: {
-            upload_limit: options?.upload_limit || 999999,
-            expires_days: options?.expires_days || 36500,
-            description: options?.albumName || ''
-          }
+          body
         })
 
         if (response.success) {

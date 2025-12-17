@@ -84,7 +84,9 @@
           :class="[
             selectedImages.includes(image.encrypted_id)
               ? 'border-amber-500 ring-2 ring-amber-500 ring-offset-2'
-              : 'border-stone-200 dark:border-neutral-700 hover:border-amber-400'
+              : image.encrypted_id === gallery?.cover_image
+                ? 'border-green-500 ring-2 ring-green-500 ring-offset-2'
+                : 'border-stone-200 dark:border-neutral-700 hover:border-amber-400'
           ]"
           @click="toggleSelection(image.encrypted_id)"
         >
@@ -94,10 +96,31 @@
             loading="lazy"
             class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-300"
           />
+          <!-- 封面标记 -->
+          <div v-if="image.encrypted_id === gallery?.cover_image" class="absolute top-2 right-2 z-10">
+            <div class="bg-green-500 text-white text-xs px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1">
+              <UIcon name="heroicons:star-solid" class="w-3 h-3" />
+              <span>封面</span>
+            </div>
+          </div>
+          <!-- 选择框 -->
           <div class="absolute top-2 left-2 z-10">
             <div class="bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg">
               <UCheckbox :model-value="selectedImages.includes(image.encrypted_id)" @click.stop />
             </div>
+          </div>
+          <!-- 设为封面按钮 -->
+          <div v-if="image.encrypted_id !== gallery?.cover_image" class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+            <UButton
+              icon="heroicons:star"
+              color="white"
+              variant="solid"
+              size="xs"
+              :loading="settingCover === image.encrypted_id"
+              @click.stop="setCoverImage(image.encrypted_id)"
+            >
+              设为封面
+            </UButton>
           </div>
           <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
             <p class="text-white text-xs truncate">{{ image.original_filename }}</p>
@@ -113,7 +136,7 @@
     </UCard>
 
     <!-- 编辑画集模态框 -->
-    <UModal v-model="editModalOpen">
+    <UModal v-model="editModalOpen" :prevent-close="addTokenModalOpen">
       <UCard>
         <template #header>
           <div class="flex items-center justify-between">
@@ -128,6 +151,62 @@
           <UFormGroup label="描述" hint="可选">
             <UTextarea v-model="editForm.description" placeholder="输入画集描述" :rows="3" :maxlength="500" />
           </UFormGroup>
+
+          <!-- 访问控制设置 -->
+          <UDivider label="访问控制" />
+          <p class="text-xs text-stone-500 dark:text-stone-400">控制通过分享链接访问此画集的权限</p>
+
+          <UFormGroup label="访问模式">
+            <USelectMenu
+              v-model="accessForm.mode"
+              :options="accessModeOptions"
+              value-attribute="value"
+              option-attribute="label"
+            />
+          </UFormGroup>
+
+          <UFormGroup v-if="accessForm.mode === 'password'" label="访问密码" required>
+            <UInput v-model="accessForm.password" type="password" placeholder="设置新密码（留空则保持原密码）" />
+          </UFormGroup>
+
+          <!-- Token 授权管理 -->
+          <div v-if="accessForm.mode === 'token'" class="space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium text-stone-700 dark:text-stone-300">已授权的 Token</span>
+              <UButton size="xs" color="primary" variant="soft" @click="openAddTokenModal">
+                <UIcon name="heroicons:plus" class="w-3.5 h-3.5 mr-1" />
+                添加授权
+              </UButton>
+            </div>
+            <div v-if="loadingTokenAccess" class="flex justify-center py-4">
+              <div class="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+            <div v-else-if="tokenAccessList.length === 0" class="text-center py-4 text-sm text-stone-500">
+              暂无授权的 Token，添加后才能通过 Token 访问此画集
+            </div>
+            <div v-else class="max-h-48 overflow-y-auto space-y-2">
+              <div
+                v-for="item in tokenAccessList"
+                :key="item.token_masked"
+                class="flex items-center justify-between p-2 bg-stone-50 dark:bg-neutral-800 rounded-lg"
+              >
+                <div class="min-w-0 flex-1">
+                  <code class="text-xs text-stone-600 dark:text-stone-400">{{ item.token_masked }}</code>
+                  <p v-if="item.description" class="text-xs text-stone-500 truncate">{{ item.description }}</p>
+                </div>
+                <UButton
+                  icon="heroicons:trash"
+                  color="red"
+                  variant="ghost"
+                  size="xs"
+                  :loading="revokingToken === item.token"
+                  @click="revokeTokenAccess(item.token)"
+                />
+              </div>
+            </div>
+          </div>
+
+          <UCheckbox v-model="accessForm.hideFromShareAll" label="在全部分享中隐藏此画集" />
         </div>
         <template #footer>
           <div class="flex justify-end gap-2">
@@ -143,53 +222,26 @@
       <UCard>
         <template #header>
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">分享设置</h3>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">单独分享链接</h3>
             <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="shareModalOpen = false" />
           </div>
         </template>
         <div class="space-y-4">
-          <!-- 分享链接 -->
+          <p class="text-sm text-stone-600 dark:text-stone-400">
+            单独分享链接仅分享这一个画集。如需分享全部画集，请使用管理后台的"全部分享"功能。
+          </p>
+
+          <!-- 分享链接状态 -->
           <div v-if="gallery?.share_enabled && gallery?.share_url" class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-            <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">分享链接</p>
+            <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">分享链接已开启</p>
             <div class="flex items-center gap-2">
               <code class="flex-1 text-xs p-2 bg-white dark:bg-neutral-900 rounded break-all">{{ gallery.share_url }}</code>
               <UButton icon="heroicons:clipboard-document" color="primary" variant="soft" size="sm" @click="copyShareUrl">复制</UButton>
             </div>
           </div>
-          <div v-else class="text-center py-4">
-            <p class="text-stone-600 dark:text-stone-400">点击下方按钮开启分享</p>
+          <div v-else class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-lg border border-stone-200 dark:border-neutral-700">
+            <p class="text-sm text-stone-600 dark:text-stone-400">分享链接未开启，点击下方按钮开启。</p>
           </div>
-
-          <!-- 访问控制设置（仅分享开启时显示） -->
-          <template v-if="gallery?.share_enabled">
-            <UDivider label="访问控制" />
-
-            <UFormGroup label="访问模式">
-              <USelectMenu
-                v-model="accessForm.mode"
-                :options="accessModeOptions"
-                value-attribute="value"
-                option-attribute="label"
-              />
-            </UFormGroup>
-
-            <UFormGroup v-if="accessForm.mode === 'password'" label="访问密码" required>
-              <UInput v-model="accessForm.password" type="password" placeholder="设置访问密码" />
-            </UFormGroup>
-
-            <UCheckbox v-model="accessForm.hideFromShareAll" label="在全部分享中隐藏此画集" />
-
-            <UButton
-              color="primary"
-              variant="soft"
-              block
-              :loading="savingAccess"
-              :disabled="accessForm.mode === 'password' && !accessForm.password"
-              @click="saveAccessSettings"
-            >
-              保存访问设置
-            </UButton>
-          </template>
         </div>
         <template #footer>
           <div class="flex justify-between">
@@ -265,6 +317,38 @@
         </template>
       </UCard>
     </UModal>
+
+    <!-- 添加 Token 授权模态框 -->
+    <UModal v-model="addTokenModalOpen">
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">添加 Token 授权</h3>
+            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="addTokenModalOpen = false" />
+          </div>
+        </template>
+        <div class="space-y-4">
+          <p class="text-sm text-stone-600 dark:text-stone-400">
+            输入要授权访问此画集的 Token。授权后，持有该 Token 的用户可以查看此画集。
+          </p>
+          <UFormGroup label="Token" required>
+            <UInput
+              v-model="newTokenToAdd"
+              placeholder="输入完整的 Token（如 guest_xxx...）"
+              :disabled="addingToken"
+            />
+          </UFormGroup>
+        </div>
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <UButton color="gray" variant="ghost" @click="addTokenModalOpen = false">取消</UButton>
+            <UButton color="primary" :loading="addingToken" :disabled="!newTokenToAdd.trim()" @click="addTokenAccess">
+              授权
+            </UButton>
+          </div>
+        </template>
+      </UCard>
+    </UModal>
   </div>
 </template>
 
@@ -298,11 +382,11 @@ const saving = ref(false)
 
 const shareModalOpen = ref(false)
 const sharingAction = ref(false)
-const savingAccess = ref(false)
 const accessForm = ref({ mode: 'public', password: '', hideFromShareAll: false })
 const accessModeOptions = [
   { value: 'public', label: '公开访问' },
   { value: 'password', label: '密码保护' },
+  { value: 'token', label: 'Token 授权' },
   { value: 'admin_only', label: '仅管理员可见' }
 ]
 
@@ -314,6 +398,17 @@ const userImages = ref<any[]>([])
 const loadingUserImages = ref(false)
 const selectedToAdd = ref<string[]>([])
 const adding = ref(false)
+
+// Token 授权管理状态
+const tokenAccessList = ref<any[]>([])
+const loadingTokenAccess = ref(false)
+const addTokenModalOpen = ref(false)
+const newTokenToAdd = ref('')
+const addingToken = ref(false)
+const revokingToken = ref('')
+
+// 封面设置状态
+const settingCover = ref('')
 
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '--'
@@ -366,60 +461,75 @@ const removeSelected = async () => {
   }
 }
 
+const setCoverImage = async (encryptedId: string) => {
+  if (settingCover.value) return
+  settingCover.value = encryptedId
+  try {
+    gallery.value = await galleryApi.setCover(galleryId.value, encryptedId)
+    notification.success('设置成功', '封面图片已更新')
+  } catch (error: any) {
+    notification.error('设置失败', error.message)
+  } finally {
+    settingCover.value = ''
+  }
+}
+
 const openEditModal = () => {
   editForm.value = { name: gallery.value?.name || '', description: gallery.value?.description || '' }
+  accessForm.value = {
+    mode: gallery.value?.access_mode || 'public',
+    password: '',
+    hideFromShareAll: gallery.value?.hide_from_share_all || false
+  }
   editModalOpen.value = true
+  // 如果是 token 模式，加载 Token 授权列表
+  if (accessForm.value.mode === 'token') {
+    loadTokenAccessList()
+  }
 }
+
+// 监听访问模式变化，当切换到 token 模式时加载列表
+watch(() => accessForm.value.mode, (newMode) => {
+  if (newMode === 'token' && editModalOpen.value) {
+    loadTokenAccessList()
+  }
+})
 
 const saveEdit = async () => {
   saving.value = true
   try {
+    // 保存基本信息
     gallery.value = await galleryApi.updateGallery(galleryId.value, editForm.value)
+
+    // 保存访问控制设置
+    const accessBody: any = {
+      access_mode: accessForm.value.mode,
+      hide_from_share_all: accessForm.value.hideFromShareAll
+    }
+    if (accessForm.value.mode === 'password' && accessForm.value.password) {
+      accessBody.password = accessForm.value.password
+    }
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/galleries/${galleryId.value}/access`, {
+      method: 'PATCH',
+      credentials: 'include',
+      body: accessBody
+    })
+    if (response.success) {
+      gallery.value = { ...gallery.value, ...response.data.gallery }
+    }
+
     notification.success('保存成功', '画集信息已更新')
     editModalOpen.value = false
+    accessForm.value.password = ''
   } catch (error: any) {
-    notification.error('保存失败', error.message)
+    notification.error('保存失败', error.data?.error || error.message)
   } finally {
     saving.value = false
   }
 }
 
 const openShareModal = () => {
-  accessForm.value = {
-    mode: gallery.value?.access_mode || 'public',
-    password: '',
-    hideFromShareAll: gallery.value?.hide_from_share_all || false
-  }
   shareModalOpen.value = true
-}
-
-const saveAccessSettings = async () => {
-  savingAccess.value = true
-  try {
-    const body: any = {
-      access_mode: accessForm.value.mode,
-      hide_from_share_all: accessForm.value.hideFromShareAll
-    }
-    if (accessForm.value.mode === 'password' && accessForm.value.password) {
-      body.password = accessForm.value.password
-    }
-    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/galleries/${galleryId.value}/access`, {
-      method: 'PATCH',
-      credentials: 'include',
-      body
-    })
-    if (response.success) {
-      gallery.value = { ...gallery.value, ...response.data.gallery }
-      notification.success('保存成功', '访问设置已更新')
-      accessForm.value.password = ''
-    } else {
-      throw new Error(response.error)
-    }
-  } catch (error: any) {
-    notification.error('保存失败', error.data?.error || error.message || '无法保存访问设置')
-  } finally {
-    savingAccess.value = false
-  }
 }
 
 const enableShare = async () => {
@@ -519,6 +629,73 @@ const addImages = async () => {
     notification.error('添加失败', error.message)
   } finally {
     adding.value = false
+  }
+}
+
+// ===================== Token 授权管理 =====================
+const loadTokenAccessList = async () => {
+  loadingTokenAccess.value = true
+  try {
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/galleries/${galleryId.value}/access-tokens`, {
+      credentials: 'include'
+    })
+    if (response.success) {
+      tokenAccessList.value = response.data.items || []
+    }
+  } catch (error: any) {
+    console.error('加载 Token 授权列表失败:', error)
+  } finally {
+    loadingTokenAccess.value = false
+  }
+}
+
+const openAddTokenModal = () => {
+  newTokenToAdd.value = ''
+  addTokenModalOpen.value = true
+}
+
+const addTokenAccess = async () => {
+  if (!newTokenToAdd.value.trim()) return
+  addingToken.value = true
+  try {
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/galleries/${galleryId.value}/access-tokens`, {
+      method: 'POST',
+      credentials: 'include',
+      body: { token: newTokenToAdd.value.trim() }
+    })
+    if (response.success) {
+      notification.success('授权成功', 'Token 已添加到授权列表')
+      addTokenModalOpen.value = false
+      newTokenToAdd.value = ''
+      await loadTokenAccessList()
+    } else {
+      throw new Error(response.error || '授权失败')
+    }
+  } catch (error: any) {
+    notification.error('授权失败', error.data?.error || error.message)
+  } finally {
+    addingToken.value = false
+  }
+}
+
+const revokeTokenAccess = async (token: string) => {
+  revokingToken.value = token
+  try {
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/galleries/${galleryId.value}/access-tokens`, {
+      method: 'DELETE',
+      credentials: 'include',
+      body: { token }
+    })
+    if (response.success) {
+      notification.success('撤销成功', 'Token 授权已移除')
+      await loadTokenAccessList()
+    } else {
+      throw new Error(response.error || '撤销失败')
+    }
+  } catch (error: any) {
+    notification.error('撤销失败', error.data?.error || error.message)
+  } finally {
+    revokingToken.value = ''
   }
 }
 

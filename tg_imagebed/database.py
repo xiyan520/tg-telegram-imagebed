@@ -271,6 +271,19 @@ def init_database() -> None:
                 )
             ''')
 
+            # 创建画集 Token 授权表（用于 token 访问模式）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS gallery_token_access (
+                    gallery_id INTEGER NOT NULL,
+                    token TEXT NOT NULL,
+                    expires_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (gallery_id, token),
+                    FOREIGN KEY (gallery_id) REFERENCES galleries(id) ON DELETE CASCADE,
+                    FOREIGN KEY (token) REFERENCES auth_tokens(token) ON DELETE CASCADE
+                )
+            ''')
+
             # 迁移：为 galleries 表添加访问控制字段
             cursor.execute("PRAGMA table_info(galleries)")
             gallery_columns = [col[1] for col in cursor.fetchall()]
@@ -279,6 +292,7 @@ def init_database() -> None:
                 ('access_mode', "TEXT DEFAULT 'public'"),
                 ('password_hash', 'TEXT'),
                 ('hide_from_share_all', 'INTEGER DEFAULT 0'),
+                ('cover_image', 'TEXT'),  # 手动设置的封面图（encrypted_id）
             ]
             for col_name, col_type in gallery_new_columns:
                 if col_name not in gallery_columns:
@@ -303,6 +317,9 @@ def init_database() -> None:
                 ('idx_galleries_hide_share_all', 'galleries(hide_from_share_all)'),
                 ('idx_gallery_images_gallery', 'gallery_images(gallery_id, added_at DESC)'),
                 ('idx_share_all_token', 'share_all_links(share_token)'),
+                ('idx_gallery_token_access_gallery', 'gallery_token_access(gallery_id)'),
+                ('idx_gallery_token_access_token', 'gallery_token_access(token)'),
+                ('idx_gallery_token_access_expires', 'gallery_token_access(expires_at)'),
             ]
 
             for idx_name, idx_def in indexes:
@@ -1796,12 +1813,15 @@ def list_galleries(owner_token: str, page: int = 1, limit: int = 50) -> Dict[str
             offset = (page - 1) * limit
             cursor.execute('SELECT COUNT(*) FROM galleries WHERE owner_token = ?', (owner_token,))
             total = cursor.fetchone()[0]
+            # 优先使用手动设置的封面，否则取第一张图（按添加时间 ASC）
             cursor.execute('''
                 SELECT g.*,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count,
-                    (SELECT fs.encrypted_id FROM gallery_images gi2
-                     JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
-                     WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at DESC LIMIT 1) AS cover_image
+                    COALESCE(g.cover_image, (
+                        SELECT fs.encrypted_id FROM gallery_images gi2
+                        JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
+                        WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at ASC LIMIT 1
+                    )) AS cover_image
                 FROM galleries g
                 WHERE g.owner_token = ?
                 ORDER BY g.updated_at DESC
@@ -1858,6 +1878,69 @@ def delete_gallery(gallery_id: int, owner_token: str) -> bool:
         return False
 
 
+def set_gallery_cover(gallery_id: int, owner_token: str, encrypted_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """设置画集封面图（encrypted_id为None或空字符串则清除手动设置，使用默认第一张图）"""
+    # 规范化空字符串为None
+    if encrypted_id is not None and not encrypted_id.strip():
+        encrypted_id = None
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, owner_token))
+            if not cursor.fetchone():
+                return None
+            # 使用原子操作：如果指定了封面，在UPDATE中验证图片存在于画集
+            if encrypted_id:
+                cursor.execute('''
+                    UPDATE galleries SET cover_image = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND EXISTS (
+                        SELECT 1 FROM gallery_images WHERE gallery_id = ? AND encrypted_id = ?
+                    )
+                ''', (encrypted_id, gallery_id, gallery_id, encrypted_id))
+                if cursor.rowcount == 0:
+                    return None
+            else:
+                cursor.execute('''
+                    UPDATE galleries SET cover_image = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+                ''', (gallery_id,))
+            logger.info(f"设置画集封面: gallery_id={gallery_id}, cover_image={encrypted_id}")
+            return get_gallery(gallery_id, owner_token)
+    except Exception as e:
+        logger.error(f"设置画集封面失败: {e}")
+        return None
+
+
+def admin_set_gallery_cover(gallery_id: int, encrypted_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """管理员设置画集封面图"""
+    # 规范化空字符串为None
+    if encrypted_id is not None and not encrypted_id.strip():
+        encrypted_id = None
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM galleries WHERE id = ?', (gallery_id,))
+            if not cursor.fetchone():
+                return None
+            if encrypted_id:
+                cursor.execute('''
+                    UPDATE galleries SET cover_image = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND EXISTS (
+                        SELECT 1 FROM gallery_images WHERE gallery_id = ? AND encrypted_id = ?
+                    )
+                ''', (encrypted_id, gallery_id, gallery_id, encrypted_id))
+                if cursor.rowcount == 0:
+                    return None
+            else:
+                cursor.execute('''
+                    UPDATE galleries SET cover_image = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+                ''', (gallery_id,))
+            logger.info(f"Admin设置画集封面: gallery_id={gallery_id}, cover_image={encrypted_id}")
+            return admin_get_gallery(gallery_id)
+    except Exception as e:
+        logger.error(f"Admin设置画集封面失败: {e}")
+        return None
+
+
 def add_images_to_gallery(gallery_id: int, owner_token: str, encrypted_ids: List[str]) -> Dict[str, Any]:
     """添加图片到画集"""
     result = {'added': 0, 'skipped': 0, 'not_found': [], 'not_owned': []}
@@ -1897,13 +1980,20 @@ def remove_images_from_gallery(gallery_id: int, owner_token: str, encrypted_ids:
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT id FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, owner_token))
-            if not cursor.fetchone():
+            cursor.execute('SELECT id, cover_image FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, owner_token))
+            row = cursor.fetchone()
+            if not row:
                 return 0
+            current_cover = row['cover_image']
             placeholders = ','.join('?' * len(encrypted_ids))
             cursor.execute(f'DELETE FROM gallery_images WHERE gallery_id = ? AND encrypted_id IN ({placeholders})', [gallery_id] + encrypted_ids)
             removed = cursor.rowcount
-            cursor.execute('UPDATE galleries SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (gallery_id,))
+            # 如果移除了当前封面，清除封面设置
+            if current_cover and current_cover in encrypted_ids:
+                cursor.execute('UPDATE galleries SET cover_image = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (gallery_id,))
+                logger.info(f"封面图片被移除，清除封面设置: gallery_id={gallery_id}")
+            else:
+                cursor.execute('UPDATE galleries SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (gallery_id,))
             logger.info(f"从画集移除图片: gallery_id={gallery_id}, removed={removed}")
             return removed
     except Exception as e:
@@ -2017,7 +2107,7 @@ def update_gallery_access(
             updates = []
             params = []
             if access_mode is not None:
-                if access_mode not in ('public', 'password', 'admin_only'):
+                if access_mode not in ('public', 'password', 'admin_only', 'token'):
                     return None
                 updates.append('access_mode = ?')
                 params.append(access_mode)
@@ -2118,7 +2208,9 @@ def create_or_update_share_all_link(enabled: bool = True, expires_at: Optional[s
 
 
 def get_share_all_galleries(share_token: str, page: int = 1, limit: int = 50) -> Optional[Dict[str, Any]]:
-    """通过全部分享链接获取画集列表（排除隐藏和仅管理员可见的画集）"""
+    """通过全部分享链接获取画集列表（自动包含所有画集，排除隐藏和仅管理员可见的）"""
+    page = max(1, int(page or 1))
+    limit = max(1, min(100, int(limit or 50)))
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -2132,15 +2224,22 @@ def get_share_all_galleries(share_token: str, page: int = 1, limit: int = 50) ->
                 return None
 
             offset = (page - 1) * limit
-            # 获取画集列表（排除隐藏和仅管理员可见），只返回安全字段
+            # 获取画集列表，所有画集都返回封面（优先手动设置，否则用第一张图）
             cursor.execute('''
                 SELECT g.id, g.name, g.description, g.share_token, g.access_mode,
                        g.created_at, g.updated_at,
-                       (SELECT COUNT(*) FROM gallery_images WHERE gallery_id = g.id) as image_count
+                       (SELECT COUNT(*) FROM gallery_images WHERE gallery_id = g.id) as image_count,
+                       COALESCE(g.cover_image, (
+                           SELECT fs.encrypted_id
+                           FROM gallery_images gi2
+                           JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
+                           WHERE gi2.gallery_id = g.id
+                           ORDER BY gi2.added_at ASC
+                           LIMIT 1
+                       )) AS cover_image
                 FROM galleries g
                 WHERE g.hide_from_share_all = 0
                 AND g.access_mode != 'admin_only'
-                AND g.share_enabled = 1
                 ORDER BY g.updated_at DESC
                 LIMIT ? OFFSET ?
             ''', (limit, offset))
@@ -2149,7 +2248,7 @@ def get_share_all_galleries(share_token: str, page: int = 1, limit: int = 50) ->
             # 获取总数
             cursor.execute('''
                 SELECT COUNT(*) FROM galleries
-                WHERE hide_from_share_all = 0 AND access_mode != 'admin_only' AND share_enabled = 1
+                WHERE hide_from_share_all = 0 AND access_mode != 'admin_only'
             ''')
             total = cursor.fetchone()[0]
 
@@ -2163,6 +2262,222 @@ def get_share_all_galleries(share_token: str, page: int = 1, limit: int = 50) ->
     except Exception as e:
         logger.error(f"获取全部分享画集列表失败: {e}")
         return None
+
+
+def _validate_share_all_token(cursor, share_token: str) -> bool:
+    """验证全部分享链接有效性"""
+    cursor.execute('''
+        SELECT 1 FROM share_all_links
+        WHERE share_token = ? AND enabled = 1
+        AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+        LIMIT 1
+    ''', (share_token,))
+    return cursor.fetchone() is not None
+
+
+def get_share_all_gallery(share_token: str, gallery_id: int) -> Optional[Dict[str, Any]]:
+    """在全部分享上下文中获取单个画集信息（不含图片）"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            if not _validate_share_all_token(cursor, share_token):
+                return None
+
+            cursor.execute('''
+                SELECT g.id, g.name, g.description, g.access_mode,
+                       g.hide_from_share_all, g.created_at, g.updated_at,
+                       (SELECT COUNT(*) FROM gallery_images WHERE gallery_id = g.id) AS image_count
+                FROM galleries g
+                WHERE g.id = ?
+                  AND g.hide_from_share_all = 0
+                  AND g.access_mode != 'admin_only'
+                LIMIT 1
+            ''', (gallery_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Share-all 获取画集失败: {e}")
+        return None
+
+
+def get_share_all_gallery_images(
+    share_token: str,
+    gallery_id: int,
+    page: int = 1,
+    limit: int = 50
+) -> Optional[Dict[str, Any]]:
+    """在全部分享上下文中获取画集图片（不检查解锁 cookie，由 API 层处理）"""
+    page = max(1, int(page or 1))
+    limit = max(1, min(200, int(limit or 50)))
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            if not _validate_share_all_token(cursor, share_token):
+                return None
+
+            # 确保画集在 share-all 中可见
+            cursor.execute('''
+                SELECT 1 FROM galleries
+                WHERE id = ?
+                  AND hide_from_share_all = 0
+                  AND access_mode != 'admin_only'
+                LIMIT 1
+            ''', (gallery_id,))
+            if not cursor.fetchone():
+                return None
+
+            offset = (page - 1) * limit
+            cursor.execute('SELECT COUNT(*) FROM gallery_images WHERE gallery_id = ?', (gallery_id,))
+            total = cursor.fetchone()[0]
+
+            cursor.execute('''
+                SELECT fs.encrypted_id, fs.original_filename, fs.file_size, fs.created_at,
+                       fs.cdn_cached, fs.cdn_url, fs.mime_type, gi.added_at
+                FROM gallery_images gi
+                JOIN file_storage fs ON gi.encrypted_id = fs.encrypted_id
+                WHERE gi.gallery_id = ?
+                ORDER BY gi.added_at DESC
+                LIMIT ? OFFSET ?
+            ''', (gallery_id, limit, offset))
+            items = [dict(r) for r in cursor.fetchall()]
+            return {'items': items, 'total': total, 'page': page, 'limit': limit}
+    except Exception as e:
+        logger.error(f"Share-all 获取画集图片失败: {e}")
+        return None
+
+
+# ===================== 画集 Token 授权管理 =====================
+def grant_gallery_token_access(
+    gallery_id: int,
+    token: str,
+    owner_token: Optional[str] = None,
+    expires_at: Optional[str] = None,
+    is_admin: bool = False
+) -> bool:
+    """授权 Token 访问画集"""
+    try:
+        expires_value = _parse_datetime(expires_at) if expires_at else None
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 验证权限
+            if is_admin:
+                cursor.execute('SELECT 1 FROM galleries WHERE id = ?', (gallery_id,))
+            else:
+                cursor.execute('SELECT 1 FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, owner_token))
+            if not cursor.fetchone():
+                return False
+            # 验证 token 可用（存在 + 未禁用 + 未过期）
+            cursor.execute('''
+                SELECT 1 FROM auth_tokens
+                WHERE token = ? AND is_active = 1
+                AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            ''', (token,))
+            if not cursor.fetchone():
+                return False
+            cursor.execute('''
+                INSERT OR REPLACE INTO gallery_token_access (gallery_id, token, expires_at, created_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (gallery_id, token, expires_value))
+            logger.info(f"授权 Token 访问画集: gallery_id={gallery_id}, token={token[:12]}...")
+            return True
+    except Exception as e:
+        logger.error(f"授权 Token 访问画集失败: {e}")
+        return False
+
+
+def revoke_gallery_token_access(
+    gallery_id: int,
+    token: str,
+    owner_token: Optional[str] = None,
+    is_admin: bool = False
+) -> bool:
+    """撤销 Token 访问画集权限"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            if is_admin:
+                cursor.execute('SELECT 1 FROM galleries WHERE id = ?', (gallery_id,))
+            else:
+                cursor.execute('SELECT 1 FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, owner_token))
+            if not cursor.fetchone():
+                return False
+            cursor.execute('DELETE FROM gallery_token_access WHERE gallery_id = ? AND token = ?', (gallery_id, token))
+            if cursor.rowcount > 0:
+                logger.info(f"撤销 Token 访问画集: gallery_id={gallery_id}, token={token[:12]}...")
+                return True
+            return False
+    except Exception as e:
+        logger.error(f"撤销 Token 访问画集失败: {e}")
+        return False
+
+
+def list_gallery_token_access(
+    gallery_id: int,
+    owner_token: Optional[str] = None,
+    is_admin: bool = False
+) -> Optional[List[Dict[str, Any]]]:
+    """获取画集的授权 Token 列表"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            if is_admin:
+                cursor.execute('SELECT 1 FROM galleries WHERE id = ?', (gallery_id,))
+            else:
+                cursor.execute('SELECT 1 FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, owner_token))
+            if not cursor.fetchone():
+                return None
+            cursor.execute('''
+                SELECT gta.token, gta.expires_at, gta.created_at,
+                       at.description, at.is_active,
+                       CASE WHEN at.expires_at IS NOT NULL AND at.expires_at < CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS token_expired
+                FROM gallery_token_access gta
+                LEFT JOIN auth_tokens at ON gta.token = at.token
+                WHERE gta.gallery_id = ?
+                ORDER BY gta.created_at DESC
+            ''', (gallery_id,))
+            items = []
+            for row in cursor.fetchall():
+                data = dict(row)
+                token_full = data.pop('token', '')
+                data['token_masked'] = f"{token_full[:8]}...{token_full[-4:]}" if len(token_full) > 12 else token_full
+                data['token'] = token_full
+                items.append(data)
+            return items
+    except Exception as e:
+        logger.error(f"获取画集授权 Token 列表失败: {e}")
+        return None
+
+
+def is_token_authorized_for_gallery(gallery_id: int, token: str) -> bool:
+    """检查 Token 是否有权访问画集"""
+    if not token:
+        return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT 1 FROM gallery_token_access
+                WHERE gallery_id = ? AND token = ?
+                AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            ''', (gallery_id, token))
+            return cursor.fetchone() is not None
+    except Exception as e:
+        logger.error(f"检查 Token 画集授权失败: {e}")
+        return False
+
+
+def is_gallery_owner(gallery_id: int, token: str) -> bool:
+    """检查 Token 是否为画集所有者"""
+    if not token:
+        return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1 FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, token))
+            return cursor.fetchone() is not None
+    except Exception as e:
+        logger.error(f"检查画集所有权失败: {e}")
+        return False
 
 
 __all__ = [
@@ -2192,15 +2507,20 @@ __all__ = [
     'disable_guest_tokens', 'disable_all_tokens',
     # 画集管理
     'create_gallery', 'get_gallery', 'list_galleries', 'update_gallery', 'delete_gallery',
+    'set_gallery_cover',
     'add_images_to_gallery', 'remove_images_from_gallery', 'get_gallery_images',
     'update_gallery_share', 'get_shared_gallery',
     # 画集访问控制
     'update_gallery_access', 'verify_gallery_password',
+    # 画集 Token 授权
+    'grant_gallery_token_access', 'revoke_gallery_token_access',
+    'list_gallery_token_access', 'is_token_authorized_for_gallery', 'is_gallery_owner',
     # 全部分享链接
     'get_share_all_link', 'create_or_update_share_all_link', 'get_share_all_galleries',
+    'get_share_all_gallery', 'get_share_all_gallery_images',
     # 管理员画集
     'admin_create_gallery', 'admin_get_gallery', 'admin_list_galleries',
-    'admin_update_gallery', 'admin_delete_gallery',
+    'admin_update_gallery', 'admin_delete_gallery', 'admin_set_gallery_cover',
     'admin_add_images_to_gallery', 'admin_remove_images_from_gallery',
     'admin_get_gallery_images', 'admin_update_gallery_share',
 ]
@@ -2234,13 +2554,15 @@ def admin_get_gallery(gallery_id: int) -> Optional[Dict[str, Any]]:
             data = dict(row)
             cur.execute('SELECT COUNT(*) FROM gallery_images WHERE gallery_id = ?', (gallery_id,))
             data['image_count'] = cur.fetchone()[0]
-            cur.execute('''
-                SELECT fs.encrypted_id FROM gallery_images gi
-                JOIN file_storage fs ON gi.encrypted_id = fs.encrypted_id
-                WHERE gi.gallery_id = ? ORDER BY gi.added_at DESC LIMIT 1
-            ''', (gallery_id,))
-            cover = cur.fetchone()
-            data['cover_image'] = cover[0] if cover else None
+            # 优先使用手动设置的封面，否则取第一张图（按添加时间 ASC）
+            if not data.get('cover_image'):
+                cur.execute('''
+                    SELECT fs.encrypted_id FROM gallery_images gi
+                    JOIN file_storage fs ON gi.encrypted_id = fs.encrypted_id
+                    WHERE gi.gallery_id = ? ORDER BY gi.added_at ASC LIMIT 1
+                ''', (gallery_id,))
+                cover = cur.fetchone()
+                data['cover_image'] = cover[0] if cover else None
             return data
     except Exception as e:
         logger.error(f"Admin 获取画集失败: {e}")
@@ -2260,12 +2582,15 @@ def admin_list_galleries(page: int = 1, limit: int = 50) -> Dict[str, Any]:
             cur.execute(f'SELECT COUNT(*) FROM galleries g {where}', params)
             total = cur.fetchone()[0]
             offset = (page - 1) * limit
+            # 优先使用手动设置的封面，否则取第一张图（按添加时间 ASC）
             cur.execute(f'''
                 SELECT g.*,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count,
-                    (SELECT fs.encrypted_id FROM gallery_images gi2
-                     JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
-                     WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at DESC LIMIT 1) AS cover_image
+                    COALESCE(g.cover_image, (
+                        SELECT fs.encrypted_id FROM gallery_images gi2
+                        JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
+                        WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at ASC LIMIT 1
+                    )) AS cover_image
                 FROM galleries g {where}
                 ORDER BY g.updated_at DESC
                 LIMIT ? OFFSET ?
@@ -2354,13 +2679,20 @@ def admin_remove_images_from_gallery(gallery_id: int, encrypted_ids: List[str]) 
     try:
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute('SELECT 1 FROM galleries WHERE id = ?', (gallery_id,))
-            if not cur.fetchone():
+            cur.execute('SELECT id, cover_image FROM galleries WHERE id = ?', (gallery_id,))
+            row = cur.fetchone()
+            if not row:
                 return 0
+            current_cover = row['cover_image']
             placeholders = ','.join('?' * len(encrypted_ids))
             cur.execute(f'DELETE FROM gallery_images WHERE gallery_id = ? AND encrypted_id IN ({placeholders})', [gallery_id] + encrypted_ids)
             removed = cur.rowcount
-            cur.execute('UPDATE galleries SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (gallery_id,))
+            # 如果移除了当前封面，清除封面设置
+            if current_cover and current_cover in encrypted_ids:
+                cur.execute('UPDATE galleries SET cover_image = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?', (gallery_id,))
+                logger.info(f"封面图片被移除，清除封面设置: gallery_id={gallery_id}")
+            else:
+                cur.execute('UPDATE galleries SET updated_at = CURRENT_TIMESTAMP WHERE id = ?', (gallery_id,))
             return removed
     except Exception as e:
         logger.error(f"Admin 从画集移除图片失败: {e}")
