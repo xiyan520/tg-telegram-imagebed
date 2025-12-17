@@ -271,6 +271,7 @@ def record_existing_telegram_file(
     auth_token: Optional[str] = None,
     is_group_upload: bool = False,
     group_message_id: Optional[int] = None,
+    file_unique_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     直接记录已存在于 Telegram 的文件（不做二次上传）
@@ -312,6 +313,7 @@ def record_existing_telegram_file(
             'file_path': file_path,
             'recorded_at': upload_time,
             'existing_telegram_file': True,
+            'file_unique_id': file_unique_id,
         },
     }
     save_file_info(encrypted_id, file_data)

@@ -10,14 +10,20 @@
       </div>
       <div class="flex items-center gap-2">
         <UButton
+          icon="heroicons:globe-alt"
+          :color="shareAllLink?.enabled ? 'green' : 'gray'"
+          variant="outline"
+          @click="openShareAllModal"
+        >
+          {{ shareAllLink?.enabled ? '全部分享中' : '全部分享' }}
+        </UButton>
+        <UButton
           icon="heroicons:arrow-path"
           color="gray"
-          variant="outline"
+          variant="ghost"
           :loading="loading"
           @click="loadGalleries"
-        >
-          刷新
-        </UButton>
+        />
         <UButton
           icon="heroicons:plus"
           color="primary"
@@ -92,6 +98,64 @@
         </div>
       </template>
     </UCard>
+
+    <!-- 全部分享管理模态框 -->
+    <UModal v-model="shareAllModalOpen">
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">全部分享管理</h3>
+            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="shareAllModalOpen = false" />
+          </div>
+        </template>
+
+        <div class="space-y-4">
+          <p class="text-sm text-stone-600 dark:text-stone-400">
+            开启后，所有已分享的画集将通过一个链接统一展示。新创建并分享的画集会自动加入。
+          </p>
+
+          <div v-if="shareAllLink?.enabled && shareAllLink?.share_url" class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+            <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">全部分享链接</p>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 text-xs p-2 bg-white dark:bg-neutral-900 rounded break-all">{{ shareAllLink.share_url }}</code>
+              <UButton icon="heroicons:clipboard-document" color="primary" variant="soft" size="sm" @click="copyShareAllUrl">复制</UButton>
+            </div>
+          </div>
+
+          <div v-if="!shareAllLink?.enabled" class="text-center py-4">
+            <div class="w-16 h-16 bg-stone-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-3">
+              <UIcon name="heroicons:globe-alt" class="w-8 h-8 text-stone-400" />
+            </div>
+            <p class="text-stone-600 dark:text-stone-400">点击下方按钮开启全部分享</p>
+          </div>
+
+          <UAlert v-if="shareAllLink?.enabled" color="amber" variant="soft" icon="heroicons:information-circle">
+            <template #description>
+              仅显示已开启分享且未隐藏的画集。设置为"仅管理员可见"或"隐藏"的画集不会出现在列表中。
+            </template>
+          </UAlert>
+        </div>
+
+        <template #footer>
+          <div class="flex justify-between">
+            <div>
+              <UButton v-if="shareAllLink?.enabled" color="red" variant="soft" :loading="shareAllAction" @click="disableShareAll">
+                关闭分享
+              </UButton>
+            </div>
+            <div class="flex gap-2">
+              <UButton v-if="shareAllLink?.enabled" color="gray" variant="outline" :loading="shareAllAction" @click="rotateShareAll">
+                更换链接
+              </UButton>
+              <UButton v-if="!shareAllLink?.enabled" color="primary" :loading="shareAllAction" @click="enableShareAll">
+                开启全部分享
+              </UButton>
+              <UButton v-else color="gray" variant="ghost" @click="shareAllModalOpen = false">关闭</UButton>
+            </div>
+          </div>
+        </template>
+      </UCard>
+    </UModal>
 
     <!-- 创建画集模态框 -->
     <UModal v-model="createModalOpen">
@@ -169,6 +233,11 @@ const createModalOpen = ref(false)
 const creating = ref(false)
 const createForm = ref({ name: '', description: '' })
 
+// 全部分享
+const shareAllModalOpen = ref(false)
+const shareAllLink = ref<{ enabled: boolean; share_url?: string; share_token?: string } | null>(null)
+const shareAllAction = ref(false)
+
 const loadGalleries = async () => {
   loading.value = true
   try {
@@ -202,7 +271,95 @@ const createGallery = async () => {
   }
 }
 
+// 全部分享功能
+const config = useRuntimeConfig()
+
+const loadShareAllLink = async () => {
+  try {
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/share-all`, {
+      credentials: 'include'
+    })
+    if (response.success) {
+      shareAllLink.value = response.data.link
+    }
+  } catch (error) {
+    console.error('加载全部分享链接失败:', error)
+  }
+}
+
+const openShareAllModal = () => {
+  shareAllModalOpen.value = true
+}
+
+const enableShareAll = async () => {
+  shareAllAction.value = true
+  try {
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/share-all`, {
+      method: 'POST',
+      credentials: 'include',
+      body: { enabled: true }
+    })
+    if (response.success) {
+      shareAllLink.value = response.data.link
+      notification.success('开启成功', '全部分享已开启')
+    }
+  } catch (error: any) {
+    notification.error('操作失败', error.data?.error || '无法开启全部分享')
+  } finally {
+    shareAllAction.value = false
+  }
+}
+
+const disableShareAll = async () => {
+  shareAllAction.value = true
+  try {
+    await $fetch<any>(`${config.public.apiBase}/api/admin/share-all`, {
+      method: 'DELETE',
+      credentials: 'include'
+    })
+    shareAllLink.value = null
+    notification.success('已关闭', '全部分享已关闭')
+    shareAllModalOpen.value = false
+  } catch (error: any) {
+    notification.error('操作失败', error.data?.error || '无法关闭全部分享')
+  } finally {
+    shareAllAction.value = false
+  }
+}
+
+const rotateShareAll = async () => {
+  shareAllAction.value = true
+  try {
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/share-all`, {
+      method: 'POST',
+      credentials: 'include',
+      body: { enabled: true, rotate: true }
+    })
+    if (response.success) {
+      shareAllLink.value = response.data.link
+      notification.success('已更换', '分享链接已更换')
+    }
+  } catch (error: any) {
+    notification.error('操作失败', error.data?.error || '无法更换链接')
+  } finally {
+    shareAllAction.value = false
+  }
+}
+
+const copyShareAllUrl = async () => {
+  if (!shareAllLink.value?.share_url) return
+  try {
+    await navigator.clipboard.writeText(shareAllLink.value.share_url)
+    notification.success('已复制', '链接已复制到剪贴板')
+  } catch {
+    notification.error('复制失败', '请手动复制链接')
+  }
+}
+
 watch(page, loadGalleries)
 
-onMounted(loadGalleries)
+onMounted(() => {
+  loadGalleries()
+  loadShareAllLink()
+})
 </script>

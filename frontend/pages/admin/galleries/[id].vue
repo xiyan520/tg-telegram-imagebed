@@ -143,11 +143,12 @@
       <UCard>
         <template #header>
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">分享画集</h3>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">分享设置</h3>
             <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="shareModalOpen = false" />
           </div>
         </template>
         <div class="space-y-4">
+          <!-- 分享链接 -->
           <div v-if="gallery?.share_enabled && gallery?.share_url" class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
             <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">分享链接</p>
             <div class="flex items-center gap-2">
@@ -158,6 +159,37 @@
           <div v-else class="text-center py-4">
             <p class="text-stone-600 dark:text-stone-400">点击下方按钮开启分享</p>
           </div>
+
+          <!-- 访问控制设置（仅分享开启时显示） -->
+          <template v-if="gallery?.share_enabled">
+            <UDivider label="访问控制" />
+
+            <UFormGroup label="访问模式">
+              <USelectMenu
+                v-model="accessForm.mode"
+                :options="accessModeOptions"
+                value-attribute="value"
+                option-attribute="label"
+              />
+            </UFormGroup>
+
+            <UFormGroup v-if="accessForm.mode === 'password'" label="访问密码" required>
+              <UInput v-model="accessForm.password" type="password" placeholder="设置访问密码" />
+            </UFormGroup>
+
+            <UCheckbox v-model="accessForm.hideFromShareAll" label="在全部分享中隐藏此画集" />
+
+            <UButton
+              color="primary"
+              variant="soft"
+              block
+              :loading="savingAccess"
+              :disabled="accessForm.mode === 'password' && !accessForm.password"
+              @click="saveAccessSettings"
+            >
+              保存访问设置
+            </UButton>
+          </template>
         </div>
         <template #footer>
           <div class="flex justify-between">
@@ -266,6 +298,13 @@ const saving = ref(false)
 
 const shareModalOpen = ref(false)
 const sharingAction = ref(false)
+const savingAccess = ref(false)
+const accessForm = ref({ mode: 'public', password: '', hideFromShareAll: false })
+const accessModeOptions = [
+  { value: 'public', label: '公开访问' },
+  { value: 'password', label: '密码保护' },
+  { value: 'admin_only', label: '仅管理员可见' }
+]
 
 const deleteModalOpen = ref(false)
 const deleting = ref(false)
@@ -345,7 +384,43 @@ const saveEdit = async () => {
   }
 }
 
-const openShareModal = () => { shareModalOpen.value = true }
+const openShareModal = () => {
+  accessForm.value = {
+    mode: gallery.value?.access_mode || 'public',
+    password: '',
+    hideFromShareAll: gallery.value?.hide_from_share_all || false
+  }
+  shareModalOpen.value = true
+}
+
+const saveAccessSettings = async () => {
+  savingAccess.value = true
+  try {
+    const body: any = {
+      access_mode: accessForm.value.mode,
+      hide_from_share_all: accessForm.value.hideFromShareAll
+    }
+    if (accessForm.value.mode === 'password' && accessForm.value.password) {
+      body.password = accessForm.value.password
+    }
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/galleries/${galleryId.value}/access`, {
+      method: 'PATCH',
+      credentials: 'include',
+      body
+    })
+    if (response.success) {
+      gallery.value = { ...gallery.value, ...response.data.gallery }
+      notification.success('保存成功', '访问设置已更新')
+      accessForm.value.password = ''
+    } else {
+      throw new Error(response.error)
+    }
+  } catch (error: any) {
+    notification.error('保存失败', error.data?.error || error.message || '无法保存访问设置')
+  } finally {
+    savingAccess.value = false
+  }
+}
 
 const enableShare = async () => {
   sharingAction.value = true

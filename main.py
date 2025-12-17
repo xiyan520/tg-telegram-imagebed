@@ -308,6 +308,7 @@ def run_telegram_bot():
                 # 群组/频道：不做二次上传，直接记录原始 file_id/file_path
                 result = record_existing_telegram_file(
                     file_id=photo.file_id,
+                    file_unique_id=photo.file_unique_id,
                     file_path=getattr(file_info, 'file_path', '') or '',
                     file_content=bytes(file_bytes),
                     filename=filename,

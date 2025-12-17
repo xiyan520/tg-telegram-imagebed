@@ -259,6 +259,32 @@ def init_database() -> None:
                 )
             ''')
 
+            # 创建全部分享链接表（管理员专属）
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS share_all_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    share_token TEXT NOT NULL UNIQUE,
+                    enabled INTEGER DEFAULT 1,
+                    expires_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # 迁移：为 galleries 表添加访问控制字段
+            cursor.execute("PRAGMA table_info(galleries)")
+            gallery_columns = [col[1] for col in cursor.fetchall()]
+
+            gallery_new_columns = [
+                ('access_mode', "TEXT DEFAULT 'public'"),
+                ('password_hash', 'TEXT'),
+                ('hide_from_share_all', 'INTEGER DEFAULT 0'),
+            ]
+            for col_name, col_type in gallery_new_columns:
+                if col_name not in gallery_columns:
+                    logger.info(f"添加 {col_name} 列到 galleries")
+                    cursor.execute(f'ALTER TABLE galleries ADD COLUMN {col_name} {col_type}')
+
             # 创建索引
             indexes = [
                 ('idx_file_storage_created', 'file_storage(created_at)'),
@@ -273,7 +299,10 @@ def init_database() -> None:
                 ('idx_auth_tokens_active', 'auth_tokens(is_active)'),
                 ('idx_galleries_owner', 'galleries(owner_token)'),
                 ('idx_galleries_share_token', 'galleries(share_token)'),
+                ('idx_galleries_access_mode', 'galleries(access_mode)'),
+                ('idx_galleries_hide_share_all', 'galleries(hide_from_share_all)'),
                 ('idx_gallery_images_gallery', 'gallery_images(gallery_id, added_at DESC)'),
+                ('idx_share_all_token', 'share_all_links(share_token)'),
             ]
 
             for idx_name, idx_def in indexes:
@@ -1964,6 +1993,178 @@ def get_shared_gallery(share_token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# ===================== 画集访问控制 =====================
+def update_gallery_access(
+    gallery_id: int,
+    owner_token: Optional[str] = None,
+    access_mode: Optional[str] = None,
+    password: Optional[str] = None,
+    hide_from_share_all: Optional[bool] = None,
+    is_admin: bool = False
+) -> Optional[Dict[str, Any]]:
+    """更新画集访问控制设置"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 验证权限
+            if is_admin:
+                cursor.execute('SELECT * FROM galleries WHERE id = ?', (gallery_id,))
+            else:
+                cursor.execute('SELECT * FROM galleries WHERE id = ? AND owner_token = ?', (gallery_id, owner_token))
+            if not cursor.fetchone():
+                return None
+
+            updates = []
+            params = []
+            if access_mode is not None:
+                if access_mode not in ('public', 'password', 'admin_only'):
+                    return None
+                updates.append('access_mode = ?')
+                params.append(access_mode)
+                # 清除密码（如果切换到非密码模式）
+                if access_mode != 'password':
+                    updates.append('password_hash = NULL')
+            if password is not None and access_mode == 'password':
+                from werkzeug.security import generate_password_hash
+                updates.append('password_hash = ?')
+                params.append(generate_password_hash(password))
+            if hide_from_share_all is not None:
+                updates.append('hide_from_share_all = ?')
+                params.append(1 if hide_from_share_all else 0)
+
+            if not updates:
+                return None
+
+            updates.append('updated_at = CURRENT_TIMESTAMP')
+            params.append(gallery_id)
+            cursor.execute(f"UPDATE galleries SET {', '.join(updates)} WHERE id = ?", params)
+            conn.commit()
+
+            if is_admin:
+                return admin_get_gallery(gallery_id)
+            return get_gallery(gallery_id, owner_token)
+    except Exception as e:
+        logger.error(f"更新画集访问控制失败: {e}")
+        return None
+
+
+def verify_gallery_password(gallery_id: int, password: str) -> bool:
+    """验证画集密码"""
+    try:
+        from werkzeug.security import check_password_hash
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT password_hash FROM galleries WHERE id = ? AND access_mode = ?', (gallery_id, 'password'))
+            row = cursor.fetchone()
+            if not row or not row['password_hash']:
+                return False
+            return check_password_hash(row['password_hash'], password)
+    except Exception as e:
+        logger.error(f"验证画集密码失败: {e}")
+        return False
+
+
+# ===================== 全部分享链接（管理员专属） =====================
+def get_share_all_link() -> Optional[Dict[str, Any]]:
+    """获取全部分享链接"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM share_all_links WHERE enabled = 1 ORDER BY id DESC LIMIT 1')
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"获取全部分享链接失败: {e}")
+        return None
+
+
+def create_or_update_share_all_link(enabled: bool = True, expires_at: Optional[str] = None, rotate: bool = False) -> Optional[Dict[str, Any]]:
+    """创建或更新全部分享链接"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM share_all_links ORDER BY id DESC LIMIT 1')
+            existing = cursor.fetchone()
+
+            expires_value = _parse_datetime(expires_at) if expires_at else None
+
+            if existing and not rotate:
+                # 更新现有链接
+                cursor.execute('''
+                    UPDATE share_all_links
+                    SET enabled = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (1 if enabled else 0, expires_value, existing['id']))
+                conn.commit()
+                cursor.execute('SELECT * FROM share_all_links WHERE id = ?', (existing['id'],))
+            else:
+                # 创建新链接（或轮换）
+                share_token = secrets.token_urlsafe(24)
+                if existing:
+                    # 禁用旧链接
+                    cursor.execute('UPDATE share_all_links SET enabled = 0 WHERE id = ?', (existing['id'],))
+                cursor.execute('''
+                    INSERT INTO share_all_links (share_token, enabled, expires_at)
+                    VALUES (?, ?, ?)
+                ''', (share_token, 1 if enabled else 0, expires_value))
+                conn.commit()
+                cursor.execute('SELECT * FROM share_all_links WHERE share_token = ?', (share_token,))
+
+            row = cursor.fetchone()
+            return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"创建/更新全部分享链接失败: {e}")
+        return None
+
+
+def get_share_all_galleries(share_token: str, page: int = 1, limit: int = 50) -> Optional[Dict[str, Any]]:
+    """通过全部分享链接获取画集列表（排除隐藏和仅管理员可见的画集）"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 验证分享链接
+            cursor.execute('''
+                SELECT * FROM share_all_links
+                WHERE share_token = ? AND enabled = 1
+                AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+            ''', (share_token,))
+            if not cursor.fetchone():
+                return None
+
+            offset = (page - 1) * limit
+            # 获取画集列表（排除隐藏和仅管理员可见），只返回安全字段
+            cursor.execute('''
+                SELECT g.id, g.name, g.description, g.share_token, g.access_mode,
+                       g.created_at, g.updated_at,
+                       (SELECT COUNT(*) FROM gallery_images WHERE gallery_id = g.id) as image_count
+                FROM galleries g
+                WHERE g.hide_from_share_all = 0
+                AND g.access_mode != 'admin_only'
+                AND g.share_enabled = 1
+                ORDER BY g.updated_at DESC
+                LIMIT ? OFFSET ?
+            ''', (limit, offset))
+            items = [dict(row) for row in cursor.fetchall()]
+
+            # 获取总数
+            cursor.execute('''
+                SELECT COUNT(*) FROM galleries
+                WHERE hide_from_share_all = 0 AND access_mode != 'admin_only' AND share_enabled = 1
+            ''')
+            total = cursor.fetchone()[0]
+
+            return {
+                'items': items,
+                'total': total,
+                'page': page,
+                'limit': limit,
+                'has_more': page * limit < total
+            }
+    except Exception as e:
+        logger.error(f"获取全部分享画集列表失败: {e}")
+        return None
+
+
 __all__ = [
     # 连接管理
     'get_connection',
@@ -1993,6 +2194,10 @@ __all__ = [
     'create_gallery', 'get_gallery', 'list_galleries', 'update_gallery', 'delete_gallery',
     'add_images_to_gallery', 'remove_images_from_gallery', 'get_gallery_images',
     'update_gallery_share', 'get_shared_gallery',
+    # 画集访问控制
+    'update_gallery_access', 'verify_gallery_password',
+    # 全部分享链接
+    'get_share_all_link', 'create_or_update_share_all_link', 'get_share_all_galleries',
     # 管理员画集
     'admin_create_gallery', 'admin_get_gallery', 'admin_list_galleries',
     'admin_update_gallery', 'admin_delete_gallery',
