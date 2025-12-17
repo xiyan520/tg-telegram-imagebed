@@ -1,3 +1,5 @@
+import { useGuestTokenStore } from '~/stores/guestToken'
+
 export interface Gallery {
   id: number
   name: string
@@ -28,10 +30,15 @@ export interface GalleryImage {
 export const useGalleryApi = () => {
   const config = useRuntimeConfig()
   const baseURL = config.public.apiBase
-  const guestStore = useGuestStore()
+
+  let _guestStore: ReturnType<typeof useGuestTokenStore> | null = null
+  const getGuestStore = () => {
+    if (!_guestStore) _guestStore = useGuestTokenStore()
+    return _guestStore
+  }
 
   const getAuthHeaders = () => {
-    const token = guestStore.token
+    const token = getGuestStore().token
     return token ? { Authorization: `Bearer ${token}` } : {}
   }
 

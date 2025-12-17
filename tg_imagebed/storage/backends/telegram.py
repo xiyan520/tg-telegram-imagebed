@@ -19,7 +19,7 @@ from ...config import logger
 class TelegramBackend(StorageBackend):
     """Telegram Cloud 存储后端"""
 
-    def __init__(self, *, name: str, bot_token: str, chat_id: int):
+    def __init__(self, *, name: str, bot_token: str, chat_id: int, proxy_url: Optional[str] = None):
         """
         初始化 Telegram 存储后端
 
@@ -27,13 +27,25 @@ class TelegramBackend(StorageBackend):
             name: 后端名称
             bot_token: Telegram Bot Token
             chat_id: 存储频道/群组 ID
+            proxy_url: 可选代理 URL
         """
         self.name = name
         self._bot_token = bot_token
         self._chat_id = chat_id
         self._session = requests.Session()
         self._session.trust_env = True
-        logger.info(f"Telegram 存储后端初始化: chat_id={chat_id}")
+        proxy_url_norm = (proxy_url or "").strip()
+        if proxy_url_norm:
+            if "://" not in proxy_url_norm:
+                proxy_url_norm = f"http://{proxy_url_norm}"
+            self._session.proxies = {"http": proxy_url_norm, "https": proxy_url_norm}
+            # 掩码代理凭据避免日志泄露
+            masked = proxy_url_norm
+            if "@" in masked:
+                masked = masked.split("://")[0] + "://" + "***@" + masked.split("@")[-1]
+            logger.info(f"Telegram 存储后端初始化: chat_id={chat_id}, proxy={masked}")
+        else:
+            logger.info(f"Telegram 存储后端初始化: chat_id={chat_id}")
 
     def _get_file_path(self, file_id: str) -> Optional[str]:
         """通过 Telegram API 获取文件路径"""
