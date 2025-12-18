@@ -79,6 +79,7 @@ def init_database() -> None:
                     last_file_path_update TIMESTAMP,
                     is_group_upload BOOLEAN DEFAULT 0,
                     group_message_id INTEGER,
+                    group_chat_id INTEGER,
                     auth_token TEXT,
                     storage_backend TEXT,
                     storage_key TEXT,
@@ -156,6 +157,7 @@ def init_database() -> None:
             new_columns = [
                 ('is_group_upload', 'BOOLEAN DEFAULT 0'),
                 ('group_message_id', 'INTEGER'),
+                ('group_chat_id', 'INTEGER'),
                 ('last_file_path_update', 'TIMESTAMP'),
                 ('etag', 'TEXT'),
                 ('file_hash', 'TEXT'),
@@ -375,9 +377,9 @@ def save_file_info(encrypted_id: str, file_info: Dict[str, Any]) -> None:
                 user_id, username, file_size, source,
                 original_filename, mime_type, etag, file_hash,
                 cdn_url, cdn_cached, is_group_upload, group_message_id,
-                auth_token, storage_backend, storage_key, storage_meta,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                group_chat_id, auth_token, storage_backend, storage_key,
+                storage_meta, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             encrypted_id,
             file_info['file_id'],
@@ -395,6 +397,7 @@ def save_file_info(encrypted_id: str, file_info: Dict[str, Any]) -> None:
             0,  # cdn_cached
             1 if file_info.get('is_group_upload') else 0,
             file_info.get('group_message_id'),
+            file_info.get('group_chat_id'),
             file_info.get('auth_token'),
             storage_backend,
             storage_key,
@@ -955,6 +958,8 @@ DEFAULT_SYSTEM_SETTINGS = {
     'group_admin_ids': '',
     'group_upload_reply': '1',
     'group_upload_delete_delay': '0',
+    # TG 同步删除
+    'tg_sync_delete_enabled': '1',
 }
 
 # 环境变量迁移标记（避免每次启动重复覆盖管理员修改）
@@ -1076,6 +1081,8 @@ def _get_env_config_value(db_key: str):
         'group_admin_ids': ('GROUP_ADMIN_IDS', 'str'),
         'group_upload_reply': ('GROUP_UPLOAD_REPLY', 'bool'),
         'group_upload_delete_delay': ('GROUP_UPLOAD_DELETE_DELAY', 'int'),
+        # TG 同步删除
+        'tg_sync_delete_enabled': ('TG_SYNC_DELETE_ENABLED', 'bool'),
     }
 
     if db_key not in mapping:

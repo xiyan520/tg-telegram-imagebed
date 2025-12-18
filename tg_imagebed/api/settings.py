@@ -86,6 +86,8 @@ def _format_settings_for_response(settings: dict) -> dict:
         'group_admin_ids': settings.get('group_admin_ids', ''),
         'group_upload_reply': settings.get('group_upload_reply', '1') == '1',
         'group_upload_delete_delay': _safe_int(settings.get('group_upload_delete_delay'), 0, 0),
+        # TG 同步删除
+        'tg_sync_delete_enabled': settings.get('tg_sync_delete_enabled', '1') == '1',
     }
 
 
@@ -286,6 +288,10 @@ def admin_system_settings():
             if 'group_upload_delete_delay' in data:
                 delay = _safe_int(data['group_upload_delete_delay'], 0)
                 settings_to_update['group_upload_delete_delay'] = str(max(0, delay))
+
+            # TG 同步删除
+            if 'tg_sync_delete_enabled' in data:
+                settings_to_update['tg_sync_delete_enabled'] = '1' if data['tg_sync_delete_enabled'] else '0'
 
             # 有错误则返回
             if errors:

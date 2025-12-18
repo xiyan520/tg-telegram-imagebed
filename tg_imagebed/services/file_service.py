@@ -273,6 +273,7 @@ def record_existing_telegram_file(
     auth_token: Optional[str] = None,
     is_group_upload: bool = False,
     group_message_id: Optional[int] = None,
+    group_chat_id: Optional[int] = None,
     file_unique_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -308,6 +309,7 @@ def record_existing_telegram_file(
         'file_hash': file_hash,
         'is_group_upload': is_group_upload,
         'group_message_id': group_message_id,
+        'group_chat_id': group_chat_id,
         'auth_token': auth_token,
         'storage_backend': 'telegram',
         'storage_key': file_id,

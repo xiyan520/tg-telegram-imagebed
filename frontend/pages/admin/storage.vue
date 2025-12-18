@@ -354,6 +354,14 @@
                   <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">回复删除延迟（秒）</label>
                   <UInput v-model.number="groupUpload.delete_delay" type="number" min="0" placeholder="0 表示不自动删除" />
                 </div>
+
+                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">同步删除 TG 消息</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">后台删除图片时同步删除 Telegram 群组中的消息</p>
+                  </div>
+                  <UToggle v-model="groupUpload.sync_delete" />
+                </div>
               </div>
             </div>
           </template>
@@ -499,7 +507,8 @@ const groupUpload = ref({
   admin_only: false,
   admin_ids: '',
   reply: true,
-  delete_delay: 0
+  delete_delay: 0,
+  sync_delete: true
 })
 
 // 上传相关
@@ -634,7 +643,8 @@ const loadAll = async () => {
         admin_only: d.group_upload_admin_only ?? false,
         admin_ids: d.group_admin_ids ?? '',
         reply: d.group_upload_reply ?? true,
-        delete_delay: d.group_upload_delete_delay ?? 0
+        delete_delay: d.group_upload_delete_delay ?? 0,
+        sync_delete: d.tg_sync_delete_enabled ?? true
       }
     }
   } catch (e: any) {
@@ -694,7 +704,8 @@ const saveGroupUpload = async (silent = false) => {
       group_upload_admin_only: groupUpload.value.admin_only,
       group_admin_ids: groupUpload.value.admin_ids,
       group_upload_reply: groupUpload.value.reply,
-      group_upload_delete_delay: groupUpload.value.delete_delay
+      group_upload_delete_delay: groupUpload.value.delete_delay,
+      tg_sync_delete_enabled: groupUpload.value.sync_delete
     }
     const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
       method: 'PUT',

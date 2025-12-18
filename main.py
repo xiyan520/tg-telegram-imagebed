@@ -317,6 +317,7 @@ def run_telegram_bot():
                     source='telegram_group',
                     is_group_upload=True,
                     group_message_id=message.message_id,
+                    group_chat_id=chat.id,
                 )
             else:
                 # 私聊：保持原有上传流程

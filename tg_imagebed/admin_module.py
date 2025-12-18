@@ -10,6 +10,7 @@ import hashlib
 import secrets
 import logging
 import time
+import requests
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import session, request, jsonify, render_template, make_response, redirect, url_for
@@ -241,7 +242,11 @@ def init_database_admin_update(DATABASE_PATH):
         if 'group_message_id' not in columns:
             logger.info("管理模块：添加 group_message_id 列")
             cursor.execute('ALTER TABLE file_storage ADD COLUMN group_message_id INTEGER')
-        
+
+        if 'group_chat_id' not in columns:
+            logger.info("管理模块：添加 group_chat_id 列")
+            cursor.execute('ALTER TABLE file_storage ADD COLUMN group_chat_id INTEGER')
+
         # 添加文件名索引以加速搜索
         cursor.execute('''
             CREATE INDEX IF NOT EXISTS idx_original_filename 
@@ -708,47 +713,112 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
     @app.route('/api/admin/delete', methods=['POST', 'OPTIONS'])
     @login_required
     def admin_delete_images():
-        """删除图片"""
-        data = request.get_json()
+        """删除图片，同时同步删除TG群组消息"""
+        data = request.get_json(silent=True) or {}
         ids = data.get('ids', [])
 
+        if not isinstance(ids, list) or not ids:
+            return jsonify({'success': False, 'message': '没有选择要删除的图片'}), 400
+
+        ids = [str(x).strip() for x in ids if x is not None and str(x).strip()]
+        ids = list(dict.fromkeys(ids))
         if not ids:
             return jsonify({'success': False, 'message': '没有选择要删除的图片'}), 400
-        
+
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
-        
+
         deleted_count = 0
         deleted_size = 0
-        
+        tg_deleted_count = 0
+
+        def _chunked(seq, size=900):
+            for i in range(0, len(seq), size):
+                yield seq[i:i + size]
+
         try:
-            # 构建占位符
-            placeholders = ','.join('?' * len(ids))
-            
-            # 先获取要删除的文件信息（用于统计）
-            cursor.execute(f'''
-                SELECT SUM(file_size) FROM file_storage 
-                WHERE encrypted_id IN ({placeholders})
-            ''', ids)
-            result = cursor.fetchone()
-            if result and result[0]:
-                deleted_size = result[0]
-            
-            # 删除记录
-            cursor.execute(f'''
-                DELETE FROM file_storage 
-                WHERE encrypted_id IN ({placeholders})
-            ''', ids)
-            
-            deleted_count = cursor.rowcount
-            
+            files_to_delete = []
+            for chunk in _chunked(ids):
+                placeholders = ','.join('?' * len(chunk))
+                try:
+                    cursor.execute(f'''
+                        SELECT encrypted_id, file_size, group_chat_id, group_message_id
+                        FROM file_storage
+                        WHERE encrypted_id IN ({placeholders})
+                    ''', chunk)
+                except sqlite3.OperationalError as e:
+                    if 'no such column' in str(e).lower():
+                        cursor.execute(f'''
+                            SELECT encrypted_id, file_size, NULL, NULL
+                            FROM file_storage
+                            WHERE encrypted_id IN ({placeholders})
+                        ''', chunk)
+                    else:
+                        raise
+                files_to_delete.extend(cursor.fetchall())
+
+            for row in files_to_delete:
+                if row[1]:
+                    deleted_size += row[1]
+
+            # 检查是否启用TG同步删除
+            tg_sync_delete_enabled = True
+            try:
+                from .database import get_system_setting
+                tg_sync_delete_enabled = str(get_system_setting('tg_sync_delete_enabled') or '1') == '1'
+            except Exception:
+                pass
+
+            # 同步删除TG群组消息（静默忽略失败）
+            if tg_sync_delete_enabled:
+                try:
+                    from .bot_control import get_effective_bot_token
+                    bot_token, _ = get_effective_bot_token()
+                    if bot_token:
+                        seen = set()
+                        for row in files_to_delete:
+                            chat_id, message_id = row[2], row[3]
+                            if chat_id is None or message_id is None:
+                                continue
+                            key = (chat_id, message_id)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            try:
+                                url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+                                resp = requests.post(url, data={
+                                    'chat_id': chat_id,
+                                    'message_id': message_id
+                                }, timeout=5)
+                                if resp.ok:
+                                    try:
+                                        payload = resp.json()
+                                        if payload.get('ok') is True:
+                                            tg_deleted_count += 1
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                pass
+                except Exception as e:
+                    logger.debug(f"TG消息删除跳过: {e}")
+
+            # 删除数据库记录（分块处理）
+            for chunk in _chunked(ids):
+                placeholders = ','.join('?' * len(chunk))
+                cursor.execute(f'''
+                    DELETE FROM file_storage
+                    WHERE encrypted_id IN ({placeholders})
+                ''', chunk)
+                deleted_count += cursor.rowcount
+
             conn.commit()
-            logger.info(f"管理员删除了 {deleted_count} 张图片")
-            
+            logger.info(f"管理员删除了 {deleted_count} 张图片，TG消息同步删除 {tg_deleted_count} 条")
+
             return jsonify({
                 'success': True,
                 'data': {
                     'deleted': deleted_count,
+                    'tg_deleted': tg_deleted_count,
                     'message': f'成功删除 {deleted_count} 张图片'
                 }
             })
