@@ -75,13 +75,9 @@ def purge_cdn_cache():
 @admin_module.login_required
 def admin_cdn_probe():
     """实时探测 CDN 状态（管理员）"""
+    # OPTIONS 预检请求由 Flask-CORS 统一处理
     if request.method == 'OPTIONS':
-        response = Response()
-        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return add_cache_headers(response, 'no-cache')
+        return add_cache_headers(Response(), 'no-cache')
 
     data = request.get_json() or {}
     encrypted_ids = data.get('encrypted_ids') or []

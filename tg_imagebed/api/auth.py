@@ -17,6 +17,7 @@ from ..database import (
 )
 from ..services.auth_service import create_token, get_token_upload_history
 from ..services.file_service import process_upload
+from .upload import validate_image_magic
 
 
 def _extract_bearer_token() -> str:
@@ -233,7 +234,16 @@ def upload_with_token():
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 400
 
-    if not file.content_type.startswith('image/'):
+    content_type = (file.content_type or '').strip().lower()
+
+    # 阻止 SVG 上传（XSS 风险）
+    if 'svg' in content_type or (file.filename and file.filename.lower().endswith('.svg')):
+        response = jsonify({'success': False, 'error': 'SVG 文件不允许上传'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(response, 'no-cache'), 400
+
+    # 初步检查 Content-Type
+    if content_type and not content_type.startswith('image/'):
         response = jsonify({'success': False, 'error': '只允许上传图片文件'})
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 400
@@ -253,6 +263,13 @@ def upload_with_token():
 
     try:
         file_content = file.read()
+
+        # 魔数校验：验证文件实际类型
+        detected_mime = validate_image_magic(file_content)
+        if not detected_mime:
+            response = jsonify({'success': False, 'error': '无效的图片文件格式'})
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return add_cache_headers(response, 'no-cache'), 400
 
         result = process_upload(
             file_content=file_content,

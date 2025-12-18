@@ -11,11 +11,12 @@ from typing import Optional, Dict, Any
 
 import requests
 
-from ..config import BOT_TOKEN, STORAGE_CHAT_ID, CLOUDFLARE_CDN_DOMAIN, logger
+from ..config import STORAGE_CHAT_ID, CLOUDFLARE_CDN_DOMAIN, logger
 from ..database import save_file_info, get_file_info, update_file_path_in_db
 from ..utils import encrypt_file_id, get_mime_type
 from .cdn_service import add_to_cdn_monitor
 from ..storage.router import get_storage_router
+from ..bot_control import get_effective_bot_token
 
 
 def get_fresh_file_path(file_id: str) -> Optional[str]:
@@ -28,12 +29,13 @@ def get_fresh_file_path(file_id: str) -> Optional[str]:
     Returns:
         文件路径字符串，失败返回 None
     """
-    if not BOT_TOKEN or not file_id:
+    bot_token, _ = get_effective_bot_token()
+    if not bot_token or not file_id:
         return None
 
     try:
         response = requests.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/getFile",
+            f"https://api.telegram.org/bot{bot_token}/getFile",
             params={'file_id': file_id},
             timeout=10
         )

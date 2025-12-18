@@ -55,6 +55,8 @@
           v-for="gallery in galleries"
           :key="gallery.id"
           :to="`/galleries/${shareToken}/${gallery.id}`"
+          :prefetch="false"
+          style="content-visibility: auto; contain-intrinsic-size: 320px 240px;"
           class="group relative aspect-[4/3] rounded-2xl overflow-hidden border border-stone-200 dark:border-neutral-700 hover:border-amber-400 dark:hover:border-amber-500 transition-all hover:shadow-xl bg-white dark:bg-neutral-900"
         >
           <!-- 封面图 -->
@@ -62,6 +64,8 @@
             v-if="gallery.cover_url"
             :src="gallery.cover_url"
             :alt="gallery.name"
+            loading="lazy"
+            decoding="async"
             class="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-500"
           />
           <div
@@ -108,6 +112,8 @@
 </template>
 
 <script setup lang="ts">
+import { useInfiniteScroll } from '@vueuse/core'
+
 definePageMeta({ layout: false })
 
 const route = useRoute()
@@ -179,5 +185,24 @@ const copyLink = async () => {
   copiedTimer = setTimeout(() => { copied.value = false }, 1500)
 }
 
+// 监听路由参数变化
+watch(shareToken, () => {
+  page.value = 1
+  galleries.value = []
+  loadGalleries()
+})
+
+// 无限滚动
+if (import.meta.client) {
+  useInfiniteScroll(window, loadMore, {
+    distance: 800,
+    canLoadMore: () => hasMore.value && !loadingMore.value && !loading.value && !error.value
+  })
+}
+
 onMounted(loadGalleries)
+
+onBeforeUnmount(() => {
+  if (copiedTimer) clearTimeout(copiedTimer)
+})
 </script>

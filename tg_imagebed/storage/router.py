@@ -18,7 +18,8 @@ from .backends.local import LocalBackend
 from .backends.rclone import RcloneBackend
 from .backends.s3 import S3Backend
 
-from ..config import BOT_TOKEN, PROXY_URL, logger
+from ..config import PROXY_URL, logger
+from ..bot_control import get_effective_bot_token
 
 
 def _resolve_env_ref(value: Any) -> Any:
@@ -71,7 +72,8 @@ class StorageRouter:
         driver = (cfg2.get("driver") or name).strip()
 
         if driver == "telegram":
-            bot_token = str(cfg2.get("bot_token") or BOT_TOKEN)
+            effective_token, _ = get_effective_bot_token()
+            bot_token = str(cfg2.get("bot_token") or effective_token or "")
             chat_id = int(cfg2.get("chat_id") or 0)
             proxy_url = str(cfg2.get("proxy_url") or PROXY_URL or "").strip() or None
             return TelegramBackend(name=name, bot_token=bot_token, chat_id=chat_id, proxy_url=proxy_url)

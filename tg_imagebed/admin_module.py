@@ -212,21 +212,13 @@ def login_required(f):
     """需要登录的装饰器"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # 处理OPTIONS预检请求
+        # OPTIONS 预检请求由 Flask-CORS 统一处理，此处直接放行
         if request.method == 'OPTIONS':
-            response = make_response()
-            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response
+            return make_response()
 
         if 'admin_logged_in' not in session or not session['admin_logged_in']:
             if request.path.startswith('/api/'):
-                response = jsonify({'error': 'Unauthorized'})
-                response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-                response.headers['Access-Control-Allow-Credentials'] = 'true'
-                return response, 401
+                return jsonify({'error': 'Unauthorized'}), 401
             return redirect(url_for('admin_login'))
         return f(*args, **kwargs)
     return decorated_function

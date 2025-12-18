@@ -12,6 +12,28 @@ from ..utils import add_cache_headers, format_size, get_domain
 from ..services.file_service import process_upload
 from ..database import is_guest_upload_allowed, get_system_setting_int, get_upload_count_today
 
+# 图片魔数签名
+IMAGE_SIGNATURES = {
+    b'\x89PNG\r\n\x1a\n': 'image/png',
+    b'\xff\xd8\xff': 'image/jpeg',
+    b'GIF87a': 'image/gif',
+    b'GIF89a': 'image/gif',
+    b'RIFF': 'image/webp',  # WebP (需额外检查 WEBP 标识)
+    b'BM': 'image/bmp',
+}
+
+
+def validate_image_magic(content: bytes) -> str | None:
+    """基于魔数验证图片类型，返回 MIME 类型或 None"""
+    if len(content) < 12:
+        return None
+    for sig, mime in IMAGE_SIGNATURES.items():
+        if content.startswith(sig):
+            if sig == b'RIFF' and content[8:12] != b'WEBP':
+                continue
+            return mime
+    return None
+
 
 @upload_bp.route('/api/upload', methods=['POST', 'OPTIONS'])
 @upload_bp.route('/upload', methods=['POST', 'OPTIONS'])
@@ -45,8 +67,16 @@ def upload_file():
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 400
 
-    content_type = (file.content_type or '').strip()
-    if not content_type.startswith('image/'):
+    content_type = (file.content_type or '').strip().lower()
+
+    # 阻止 SVG 上传（XSS 风险）
+    if 'svg' in content_type or (file.filename and file.filename.lower().endswith('.svg')):
+        response = jsonify({'success': False, 'error': 'SVG 文件不允许上传'})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(response, 'no-cache'), 400
+
+    # 初步检查 Content-Type
+    if content_type and not content_type.startswith('image/'):
         response = jsonify({'success': False, 'error': '只允许上传图片文件'})
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 400
@@ -75,6 +105,13 @@ def upload_file():
 
     try:
         file_content = file.read()
+
+        # 魔数校验：验证文件实际类型
+        detected_mime = validate_image_magic(file_content)
+        if not detected_mime:
+            response = jsonify({'success': False, 'error': '无效的图片文件格式'})
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return add_cache_headers(response, 'no-cache'), 400
 
         # 处理上传
         result = process_upload(

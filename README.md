@@ -91,7 +91,7 @@ docker-compose up -d
 
 - 前端界面: `http://你的服务器IP:18793`
 - 管理后台: `http://你的服务器IP:18793/admin`
-- 默认账号: `admin` / `admin123` ⚠️ **请立即修改密码！**
+- 默认账号: `admin` / 密码通过环境变量 `ADMIN_PASSWORD` 设置，或首次启动时随机生成（查看日志获取）
 
 ---
 

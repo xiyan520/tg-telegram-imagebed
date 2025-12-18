@@ -126,6 +126,7 @@
             v-for="(image, index) in galleryData.images"
             :key="image.encrypted_id"
             type="button"
+            style="content-visibility: auto; contain-intrinsic-size: 360px 240px;"
             class="group mb-4 w-full break-inside-avoid rounded-xl overflow-hidden border border-stone-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:shadow-lg transition-shadow text-left block"
             @click="openLightbox(index)"
           >
@@ -158,102 +159,13 @@
     </main>
 
     <!-- 全屏灯箱 -->
-    <Teleport to="body">
-      <Transition
-        enter-active-class="transition duration-200 ease-out"
-        enter-from-class="opacity-0"
-        enter-to-class="opacity-100"
-        leave-active-class="transition duration-150 ease-in"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0"
-      >
-        <div
-          v-if="lightboxOpen"
-          ref="lightboxEl"
-          class="fixed inset-0 z-[100] bg-black/95 overscroll-contain"
-          :style="{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }"
-          role="dialog"
-          aria-modal="true"
-          aria-label="图片查看器"
-          tabindex="-1"
-          @click.self="onBackdropClick"
-        >
-          <div class="h-full flex flex-col">
-            <!-- 顶部栏 -->
-            <div class="shrink-0 bg-black/50 backdrop-blur px-4 py-3 text-white">
-              <div class="flex items-center justify-between gap-3">
-                <div class="min-w-0 flex-1">
-                  <p class="text-sm font-medium truncate">{{ currentImage?.original_filename }}</p>
-                  <p v-if="galleryData" class="text-xs text-white/60">{{ lightboxIndex + 1 }} / {{ galleryData.images.length }}</p>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                  <UButton icon="heroicons:arrow-down-tray" color="white" variant="solid" size="sm" aria-label="下载图片" @click="downloadImage" />
-                  <UButton icon="heroicons:x-mark" color="white" variant="solid" size="sm" aria-label="关闭" @click="closeLightbox" />
-                </div>
-              </div>
-            </div>
-
-            <!-- 图片区域 -->
-            <div
-              ref="swipeAreaEl"
-              class="relative flex-1 flex items-center justify-center px-2 py-4 select-none touch-none overflow-hidden"
-            >
-              <!-- 左右切换按钮 -->
-              <div class="absolute inset-y-0 left-0 flex items-center px-1 sm:px-2 z-10">
-                <UButton
-                  icon="heroicons:chevron-left"
-                  color="white"
-                  variant="ghost"
-                  size="lg"
-                  aria-label="上一张"
-                  :disabled="!hasPrev"
-                  :class="{ 'opacity-30': !hasPrev }"
-                  @click.stop="goPrev"
-                />
-              </div>
-              <div class="absolute inset-y-0 right-0 flex items-center px-1 sm:px-2 z-10">
-                <UButton
-                  icon="heroicons:chevron-right"
-                  color="white"
-                  variant="ghost"
-                  size="lg"
-                  aria-label="下一张"
-                  :disabled="!hasNext"
-                  :class="{ 'opacity-30': !hasNext }"
-                  @click.stop="goNext"
-                />
-              </div>
-
-              <!-- 图片 -->
-              <Transition
-                mode="out-in"
-                enter-active-class="transition duration-200 ease-out"
-                enter-from-class="opacity-0 scale-[0.98]"
-                enter-to-class="opacity-100 scale-100"
-                leave-active-class="transition duration-150 ease-in"
-                leave-from-class="opacity-100 scale-100"
-                leave-to-class="opacity-0 scale-[0.98]"
-              >
-                <img
-                  v-if="currentImage"
-                  :key="currentImage.encrypted_id"
-                  :src="currentImage.image_url"
-                  :alt="currentImage.original_filename"
-                  class="max-h-full max-w-full object-contain"
-                  draggable="false"
-                />
-              </Transition>
-
-              <!-- 操作提示 -->
-              <div class="absolute bottom-3 inset-x-0 text-center pointer-events-none">
-                <p class="text-xs text-white/50 hidden sm:block">← → 切换图片 · ESC 关闭</p>
-                <p class="text-xs text-white/50 sm:hidden">滑动切换 · 向下滑动关闭</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+    <GalleryLightbox
+      :open="lightboxOpen"
+      :index="lightboxIndex"
+      :images="galleryData?.images || []"
+      @update:open="lightboxOpen = $event"
+      @update:index="lightboxIndex = $event"
+    />
 
     <!-- 底部 -->
     <footer class="py-6 text-center">
@@ -279,7 +191,7 @@
 
 <script setup lang="ts">
 import type { GalleryImage } from '~/composables/useGalleryApi'
-import { usePointerSwipe } from '@vueuse/core'
+import { useInfiniteScroll } from '@vueuse/core'
 
 definePageMeta({ layout: false })
 
@@ -314,6 +226,7 @@ const showLoginModal = ref(false)
 
 const page = ref(1)
 const loadingMore = ref(false)
+let loadSeq = 0
 
 // 页头状态
 const galleryTitle = computed(() => {
@@ -371,40 +284,31 @@ const downloadAllImages = async () => {
 // 灯箱状态
 const lightboxOpen = ref(false)
 const lightboxIndex = ref(0)
-const lightboxEl = ref<HTMLElement | null>(null)
-const swipeAreaEl = ref<HTMLElement | null>(null)
-
-const currentImage = computed(() => {
-  if (!galleryData.value) return null
-  const idx = lightboxIndex.value
-  if (idx < 0 || idx >= galleryData.value.images.length) return null
-  return galleryData.value.images[idx]
-})
-
-const hasPrev = computed(() => lightboxIndex.value > 0)
-const hasNext = computed(() => {
-  if (!galleryData.value) return false
-  return lightboxIndex.value < galleryData.value.images.length - 1
-})
 
 // 加载画集
 const loadGallery = async () => {
+  const seq = ++loadSeq
+  const token = shareAllToken.value
+  const id = galleryId.value
   loading.value = true
   error.value = ''
   requiresPassword.value = false
   requiresToken.value = false
 
   // 验证 galleryId 有效性
-  if (isNaN(galleryId.value) || galleryId.value <= 0) {
+  if (isNaN(id) || id <= 0) {
     error.value = '无效的画集 ID'
     loading.value = false
     return
   }
 
   try {
-    galleryData.value = await galleryApi.getShareAllGallery(shareAllToken.value, galleryId.value, 1, 50)
+    const data = await galleryApi.getShareAllGallery(token, id, 1, 50)
+    if (seq !== loadSeq || token !== shareAllToken.value || id !== galleryId.value) return
+    galleryData.value = data
     page.value = 1
   } catch (e: any) {
+    if (seq !== loadSeq) return
     if (e.requires_password) {
       requiresPassword.value = true
       lockedGalleryName.value = e.gallery_name || ''
@@ -415,7 +319,7 @@ const loadGallery = async () => {
       error.value = e.message || '画集不存在或分享已关闭'
     }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -444,91 +348,31 @@ const onLoginSuccess = async () => {
 
 const loadMore = async () => {
   if (!galleryData.value?.has_more || loadingMore.value) return
+  const seq = loadSeq
+  const token = shareAllToken.value
+  const id = galleryId.value
   loadingMore.value = true
   try {
     const nextPage = page.value + 1
-    const result = await galleryApi.getShareAllGallery(shareAllToken.value, galleryId.value, nextPage, 50)
+    const result = await galleryApi.getShareAllGallery(token, id, nextPage, 50)
+    if (seq !== loadSeq || token !== shareAllToken.value || id !== galleryId.value || !galleryData.value) return
     galleryData.value.images.push(...result.images)
     galleryData.value.has_more = result.has_more
     page.value = nextPage
   } catch (e: any) {
     console.error('加载更多失败:', e)
   } finally {
-    loadingMore.value = false
+    if (seq === loadSeq) loadingMore.value = false
   }
 }
 
 // 灯箱操作
 const openLightbox = (index: number) => {
-  lightboxIndex.value = index
+  const count = galleryData.value?.images?.length || 0
+  if (!count) return
+  lightboxIndex.value = Math.min(Math.max(index, 0), count - 1)
   lightboxOpen.value = true
 }
-
-const closeLightbox = () => {
-  lightboxOpen.value = false
-}
-
-const goPrev = () => {
-  if (hasPrev.value) lightboxIndex.value--
-}
-
-const goNext = () => {
-  if (hasNext.value) lightboxIndex.value++
-}
-
-const downloadImage = () => {
-  if (!currentImage.value) return
-  const link = document.createElement('a')
-  link.href = currentImage.value.image_url
-  link.download = currentImage.value.original_filename || 'image'
-  link.target = '_blank'
-  link.click()
-}
-
-// 键盘导航
-const onKeydown = (e: KeyboardEvent) => {
-  if (!lightboxOpen.value) return
-  switch (e.key) {
-    case 'Escape':
-      e.preventDefault()
-      closeLightbox()
-      break
-    case 'ArrowLeft':
-      e.preventDefault()
-      goPrev()
-      break
-    case 'ArrowRight':
-      e.preventDefault()
-      goNext()
-      break
-  }
-}
-
-// 触摸手势
-const { isSwiping } = usePointerSwipe(swipeAreaEl, {
-  threshold: 60,
-  onSwipeEnd: (_e, direction) => {
-    if (!lightboxOpen.value) return
-    if (direction === 'left') goNext()
-    else if (direction === 'right') goPrev()
-    else if (direction === 'down') closeLightbox()
-  }
-})
-
-const onBackdropClick = () => {
-  if (isSwiping.value) return
-  closeLightbox()
-}
-
-// 锁定背景滚动
-watch(lightboxOpen, async (open) => {
-  if (typeof document === 'undefined') return
-  document.body.style.overflow = open ? 'hidden' : ''
-  if (open) {
-    await nextTick()
-    lightboxEl.value?.focus()
-  }
-})
 
 // 当需要 Token 验证时自动弹出登录弹窗
 watch(requiresToken, (needsToken) => {
@@ -537,17 +381,23 @@ watch(requiresToken, (needsToken) => {
 
 // 监听路由参数变化
 watch([shareAllToken, galleryId], () => {
-  closeLightbox()
+  lightboxOpen.value = false
   loadGallery()
 })
+
+// 无限滚动
+if (import.meta.client) {
+  useInfiniteScroll(window, loadMore, {
+    distance: 800,
+    canLoadMore: () => !!galleryData.value?.has_more && !loadingMore.value && !loading.value && !error.value
+  })
+}
 
 onMounted(() => {
   loadGallery()
-  window.addEventListener('keydown', onKeydown)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = ''
+  if (copiedTimer) clearTimeout(copiedTimer)
 })
 </script>

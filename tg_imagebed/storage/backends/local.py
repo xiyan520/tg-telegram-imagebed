@@ -88,7 +88,7 @@ class LocalBackend(StorageBackend):
             path = (self._root / key).resolve()
 
             # 安全检查：确保路径在根目录内
-            if not str(path).startswith(str(self._root)):
+            if not path.is_relative_to(self._root.resolve()):
                 logger.error(f"路径安全检查失败: {path}")
                 return None
 

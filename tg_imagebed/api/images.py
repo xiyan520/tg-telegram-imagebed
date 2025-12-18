@@ -7,7 +7,7 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime
-from flask import request, jsonify, Response, send_file, redirect, make_response
+from flask import request, jsonify, Response, send_file, redirect, make_response, send_from_directory
 
 from . import images_bp
 from ..config import (
@@ -383,22 +383,36 @@ def catch_all(path):
     if path.startswith('api/') or path.startswith('image/') or path.startswith('upload'):
         return jsonify({'error': 'Not found'}), 404
 
-    file_path = os.path.join(STATIC_FOLDER, path)
+    # 安全检查：拒绝包含 .. 或绝对路径的请求
+    if '..' in path or path.startswith('/') or path.startswith('\\'):
+        return jsonify({'error': 'Invalid path'}), 400
 
-    if os.path.exists(file_path) and os.path.isfile(file_path):
-        return send_file(file_path)
+    try:
+        # 使用 send_from_directory 防止目录穿越
+        static_path = Path(STATIC_FOLDER).resolve()
+        target = (static_path / path).resolve()
 
-    if os.path.exists(file_path) and os.path.isdir(file_path):
-        index_in_dir = os.path.join(file_path, 'index.html')
-        if os.path.exists(index_in_dir):
-            return send_file(index_in_dir)
+        if not target.is_relative_to(static_path):
+            return jsonify({'error': 'Invalid path'}), 400
 
-    fallback_path = os.path.join(STATIC_FOLDER, '200.html')
-    if os.path.exists(fallback_path):
-        return send_file(fallback_path)
+        if target.is_file():
+            return send_from_directory(STATIC_FOLDER, path)
 
-    index_path = os.path.join(STATIC_FOLDER, 'index.html')
-    if os.path.exists(index_path):
-        return send_file(index_path)
+        if target.is_dir():
+            index_in_dir = target / 'index.html'
+            if index_in_dir.is_file():
+                return send_from_directory(STATIC_FOLDER, f"{path}/index.html")
+
+    except (ValueError, OSError):
+        pass
+
+    # SPA 回退
+    fallback = Path(STATIC_FOLDER) / '200.html'
+    if fallback.is_file():
+        return send_from_directory(STATIC_FOLDER, '200.html')
+
+    index = Path(STATIC_FOLDER) / 'index.html'
+    if index.is_file():
+        return send_from_directory(STATIC_FOLDER, 'index.html')
 
     return jsonify({'error': 'Not found'}), 404
