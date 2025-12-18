@@ -91,7 +91,7 @@
           @click="toggleSelection(image.encrypted_id)"
         >
           <img
-            :src="image.image_url"
+            :src="getGalleryImageSrc(image)"
             :alt="image.original_filename"
             loading="lazy"
             class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-300"
@@ -255,7 +255,7 @@
     </UModal>
 
     <!-- 添加图片模态框 -->
-    <UModal v-model="addModalOpen" :ui="{ width: 'sm:max-w-3xl' }">
+    <UModal v-model="addModalOpen" :ui="{ width: 'sm:max-w-4xl' }">
       <UCard>
         <template #header>
           <div class="flex items-center justify-between">
@@ -264,30 +264,96 @@
           </div>
         </template>
         <div class="space-y-4">
-          <p class="text-sm text-stone-600 dark:text-stone-400">选择要添加到画集的图片（仅显示您上传的图片）</p>
+          <!-- 搜索和筛选栏 -->
+          <div class="space-y-3">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <UInput
+                v-model="userImagesSearch"
+                class="flex-1"
+                icon="heroicons:magnifying-glass"
+                placeholder="搜索文件名/用户名"
+                :disabled="loadingUserImages"
+              />
+              <div class="flex items-center gap-2">
+                <USelectMenu
+                  v-model="userImagesFilter"
+                  :options="userImagesFilterOptions"
+                  value-attribute="value"
+                  option-attribute="label"
+                  :disabled="loadingUserImages"
+                  class="w-28"
+                />
+                <USelectMenu
+                  v-model="userImagesPageSize"
+                  :options="userImagesPageSizeOptions"
+                  value-attribute="value"
+                  option-attribute="label"
+                  :disabled="loadingUserImages"
+                  class="w-24"
+                />
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+              <span>共 {{ userImagesTotal }} 张图片</span>
+              <div class="flex items-center gap-2">
+                <UButton
+                  size="xs"
+                  color="gray"
+                  variant="ghost"
+                  :disabled="loadingUserImages || userImages.length === 0"
+                  @click="toggleSelectAllOnUserImagesPage"
+                >
+                  {{ allSelectableOnPageSelected ? '取消本页全选' : '全选本页' }}
+                </UButton>
+                <UButton
+                  size="xs"
+                  color="gray"
+                  variant="ghost"
+                  :disabled="selectedToAdd.length === 0"
+                  @click="clearAddSelection"
+                >
+                  清空选择
+                </UButton>
+              </div>
+            </div>
+          </div>
+
           <div v-if="loadingUserImages" class="flex justify-center py-8">
             <div class="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
           </div>
           <div v-else-if="userImages.length === 0" class="text-center py-8">
             <p class="text-stone-500">暂无可添加的图片</p>
           </div>
-          <div v-else class="grid grid-cols-4 md:grid-cols-6 gap-2 max-h-96 overflow-y-auto">
+          <div v-else class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 max-h-[400px] overflow-y-auto">
             <div
               v-for="img in userImages"
               :key="img.encrypted_id"
               class="relative aspect-square rounded-lg overflow-hidden border-2 cursor-pointer transition-all"
               :class="[
-                selectedToAdd.includes(img.encrypted_id)
-                  ? 'border-amber-500 ring-2 ring-amber-500'
-                  : 'border-stone-200 dark:border-neutral-700 hover:border-amber-400'
+                isAlreadyInGallery(img.encrypted_id)
+                  ? 'border-stone-200 dark:border-neutral-700 opacity-50 cursor-not-allowed'
+                  : selectedToAdd.includes(img.encrypted_id)
+                    ? 'border-amber-500 ring-2 ring-amber-500'
+                    : 'border-stone-200 dark:border-neutral-700 hover:border-amber-400'
               ]"
               @click="toggleAddSelection(img.encrypted_id)"
             >
-              <img :src="img.image_url" :alt="img.original_filename" class="w-full h-full object-cover" />
-              <div v-if="selectedToAdd.includes(img.encrypted_id)" class="absolute inset-0 bg-amber-500/20 flex items-center justify-center">
+              <img :src="getUserImageSrc(img)" :alt="img.original_filename" loading="lazy" class="w-full h-full object-cover" />
+              <div v-if="isAlreadyInGallery(img.encrypted_id)" class="absolute inset-0 bg-black/40 flex items-center justify-center">
+                <span class="text-white text-xs font-medium">已添加</span>
+              </div>
+              <div
+                v-if="selectedToAdd.includes(img.encrypted_id) && !isAlreadyInGallery(img.encrypted_id)"
+                class="absolute inset-0 bg-amber-500/20 flex items-center justify-center"
+              >
                 <UIcon name="heroicons:check-circle" class="w-8 h-8 text-amber-500" />
               </div>
             </div>
+          </div>
+
+          <!-- 分页 -->
+          <div v-if="userImagesTotalPages > 1" class="flex justify-center pt-2">
+            <UPagination v-model="userImagesPage" :total="userImagesTotal" :page-count="userImagesPageSize" />
           </div>
         </div>
         <template #footer>
@@ -394,10 +460,64 @@ const deleteModalOpen = ref(false)
 const deleting = ref(false)
 
 const addModalOpen = ref(false)
-const userImages = ref<any[]>([])
 const loadingUserImages = ref(false)
 const selectedToAdd = ref<string[]>([])
 const adding = ref(false)
+
+// 图片选择模态框状态
+type AdminImageListItem = {
+  encrypted_id: string
+  original_filename: string
+  url?: string
+  cdn_url?: string
+  cdn_cached?: boolean
+}
+
+const userImages = ref<AdminImageListItem[]>([])
+const userImagesTotal = ref(0)
+const userImagesPage = ref(1)
+const userImagesPageSize = ref(60)
+const userImagesSearch = ref('')
+const userImagesFilter = ref<'all' | 'cached' | 'uncached' | 'group'>('all')
+const userImagesTotalPages = computed(() => Math.max(1, Math.ceil(userImagesTotal.value / userImagesPageSize.value)))
+
+const userImagesFilterOptions = [
+  { label: '全部', value: 'all' },
+  { label: '已缓存', value: 'cached' },
+  { label: '未缓存', value: 'uncached' },
+  { label: '群组上传', value: 'group' }
+]
+
+const userImagesPageSizeOptions = [
+  { label: '24/页', value: 24 },
+  { label: '60/页', value: 60 },
+  { label: '120/页', value: 120 }
+]
+
+const existingGalleryImageIds = ref<Set<string>>(new Set())
+const isAlreadyInGallery = (encryptedId: string) => existingGalleryImageIds.value.has(encryptedId)
+
+// URL处理函数
+const joinUrl = (base: string, path: string) => `${String(base || '').replace(/\/$/, '')}${path}`
+
+const normalizeImageSrc = (raw: string) => {
+  if (!raw) return raw
+  if (!import.meta.client) return raw
+  try {
+    const u = new URL(raw, window.location.origin)
+    const loc = window.location
+    if (loc.protocol === 'https:' && u.protocol === 'http:' && u.host === loc.host) u.protocol = loc.protocol
+    return u.toString()
+  } catch {
+    return raw
+  }
+}
+
+const getGalleryImageSrc = (image: GalleryImage) =>
+  normalizeImageSrc(image.cdn_url || joinUrl(config.public.apiBase, `/image/${image.encrypted_id}`) || image.image_url)
+
+const getUserImageSrc = (img: AdminImageListItem) =>
+  normalizeImageSrc(img.cdn_url || joinUrl(config.public.apiBase, `/image/${img.encrypted_id}`) || img.url)
 
 // Token 授权管理状态
 const tokenAccessList = ref<any[]>([])
@@ -584,37 +704,141 @@ const confirmDelete = async () => {
   }
 }
 
+// 加载所有已在画集中的图片ID（用于添加图片时的去重）
+const loadingGalleryIds = ref(false)
+const loadAllGalleryImageIds = async () => {
+  loadingGalleryIds.value = true
+  const ids = new Set<string>()
+  let page = 1
+  const limit = 200
+  while (true) {
+    try {
+      const result = await galleryApi.getGalleryImages(galleryId.value, page, limit)
+      for (const item of result.items) ids.add(item.encrypted_id)
+      if (page * limit >= result.total) break
+      page++
+    } catch {
+      break
+    }
+  }
+  existingGalleryImageIds.value = ids
+  loadingGalleryIds.value = false
+}
+
+let suppressUserImagesWatch = false
+
 const openAddModal = async () => {
   addModalOpen.value = true
   selectedToAdd.value = []
+  suppressUserImagesWatch = true
+  userImagesPage.value = 1
+  userImagesSearch.value = ''
+  userImagesFilter.value = 'all'
+  suppressUserImagesWatch = false
   loadingUserImages.value = true
-  try {
-    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/images`, {
-      params: { limit: 200, page: 1 },
-      credentials: 'include'
-    })
-    if (!response?.success) throw new Error(response?.error || '加载失败')
-    const existingIds = new Set(images.value.map(i => i.encrypted_id))
-    const imgs = response.data?.images || []
-    userImages.value = imgs
-      .map((img: any) => ({
-        encrypted_id: img.encrypted_id,
-        image_url: img.url,
-        original_filename: img.original_filename || img.filename || img.encrypted_id
-      }))
-      .filter((u: any) => u.encrypted_id && !existingIds.has(u.encrypted_id))
-  } catch (error: any) {
-    notification.error('加载失败', error.message)
-  } finally {
-    loadingUserImages.value = false
-  }
+  await loadAllGalleryImageIds()
+  await loadUserImages()
 }
 
+// 关闭模态框时清理
+watch(addModalOpen, (isOpen) => {
+  if (!isOpen) {
+    if (searchDebounceTimer) {
+      clearTimeout(searchDebounceTimer)
+      searchDebounceTimer = undefined
+    }
+    userImagesRequestSeq++
+  }
+})
+
 const toggleAddSelection = (id: string) => {
+  if (isAlreadyInGallery(id)) return
   const idx = selectedToAdd.value.indexOf(id)
   if (idx > -1) selectedToAdd.value.splice(idx, 1)
   else selectedToAdd.value.push(id)
 }
+
+const clearAddSelection = () => { selectedToAdd.value = [] }
+
+const selectableUserImagesOnPage = computed(() =>
+  userImages.value.map(i => i.encrypted_id).filter(id => id && !isAlreadyInGallery(id))
+)
+
+const allSelectableOnPageSelected = computed(() => {
+  const selectable = selectableUserImagesOnPage.value
+  if (selectable.length === 0) return false
+  const selected = new Set(selectedToAdd.value)
+  return selectable.every(id => selected.has(id))
+})
+
+const toggleSelectAllOnUserImagesPage = () => {
+  const selectable = selectableUserImagesOnPage.value
+  const selected = new Set(selectedToAdd.value)
+  if (allSelectableOnPageSelected.value) {
+    for (const id of selectable) selected.delete(id)
+  } else {
+    for (const id of selectable) selected.add(id)
+  }
+  selectedToAdd.value = Array.from(selected)
+}
+
+let userImagesRequestSeq = 0
+const loadUserImages = async () => {
+  const req = ++userImagesRequestSeq
+  loadingUserImages.value = true
+  try {
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/images`, {
+      params: {
+        limit: userImagesPageSize.value,
+        page: userImagesPage.value,
+        search: userImagesSearch.value.trim(),
+        filter: userImagesFilter.value
+      },
+      credentials: 'include'
+    })
+    if (req !== userImagesRequestSeq) return
+    if (!response?.success) throw new Error(response?.error || '加载失败')
+    const imgs = response.data?.images || []
+    userImages.value = imgs
+      .map((img: any) => ({
+        encrypted_id: img.encrypted_id,
+        url: img.url,
+        cdn_url: img.cdn_url,
+        cdn_cached: Boolean(img.cdn_cached ?? img.cached),
+        original_filename: img.original_filename || img.filename || img.encrypted_id
+      }))
+      .filter((u: any) => u.encrypted_id)
+    userImagesTotal.value = Number(response.data?.total || 0)
+  } catch (error: any) {
+    if (req === userImagesRequestSeq) notification.error('加载失败', error.message)
+  } finally {
+    if (req === userImagesRequestSeq) loadingUserImages.value = false
+  }
+}
+
+let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined
+watch(userImagesSearch, () => {
+  if (!addModalOpen.value || suppressUserImagesWatch) return
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    if (!addModalOpen.value) return
+    const needReset = userImagesPage.value !== 1
+    userImagesPage.value = 1
+    if (!needReset) void loadUserImages()
+  }, 300)
+})
+
+watch(userImagesPage, () => {
+  if (!addModalOpen.value || suppressUserImagesWatch) return
+  void loadUserImages()
+})
+
+watch([userImagesPageSize, userImagesFilter], () => {
+  if (!addModalOpen.value || suppressUserImagesWatch) return
+  const needReset = userImagesPage.value !== 1
+  userImagesPage.value = 1
+  if (!needReset) void loadUserImages()
+})
 
 const addImages = async () => {
   if (selectedToAdd.value.length === 0) return
