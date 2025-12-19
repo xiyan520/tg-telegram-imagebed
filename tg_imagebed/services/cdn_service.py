@@ -11,10 +11,11 @@ CDN 服务模块 - Cloudflare CDN 管理
 """
 import time
 import queue
+import random
 import itertools
 import threading
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Any
+from typing import List, Optional, Tuple, Any, Dict
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -320,75 +321,113 @@ cloudflare_cdn = CloudflareCDN()
 
 # CDN 缓存监控队列（使用 PriorityQueue 实现非阻塞延迟调度）
 cdn_monitor_queue: queue.PriorityQueue = queue.PriorityQueue(maxsize=CDN_MONITOR_QUEUE_SIZE)
-_cdn_monitor_seq = itertools.count()  # 用于保证相同优先级时的 FIFO 顺序
+_cdn_monitor_seq = itertools.count()
 _cdn_monitor_thread: Optional[threading.Thread] = None
 _cdn_monitor_running = False
 _cdn_monitor_stop_event = threading.Event()
 
+# 去重Map：记录每个encrypted_id的调度token，实现"latest schedule wins"
+_cdn_schedule_map: Dict[str, int] = {}
+_cdn_schedule_lock = threading.Lock()
+_cdn_schedule_token = itertools.count()
+
+# 指数退避配置
+CDN_BACKOFF_BASE = 5.0
+CDN_BACKOFF_MAX = 120.0
+CDN_BACKOFF_JITTER = 0.2
+
 
 def _cdn_cache_monitor_worker():
-    """CDN缓存监控工作线程（非阻塞调度）"""
+    """CDN缓存监控工作线程（优化版：单探测+去重+指数退避）"""
     global _cdn_monitor_running
 
     logger.info('CDN缓存监控线程启动')
 
     while _cdn_monitor_running:
         try:
-            # 从队列获取任务（阻塞最多1秒）
             try:
                 run_at, _seq, task = cdn_monitor_queue.get(timeout=1)
             except queue.Empty:
                 continue
 
-            if task is None:  # 停止信号
+            if task is None:
                 break
 
             now = time.time()
             if run_at > now:
-                # 未到执行时间：放回队列并等待
+                # 未到执行时间：等待后重新入队
+                wait_time = min(run_at - now, 1.0)
+                _cdn_monitor_stop_event.wait(timeout=wait_time)
                 try:
-                    cdn_monitor_queue.put((run_at, next(_cdn_monitor_seq), task), block=False)
+                    cdn_monitor_queue.put((run_at, next(_cdn_monitor_seq), task), block=True, timeout=0.5)
                 except queue.Full:
-                    logger.warning('CDN监控队列已满，丢弃延迟任务')
-                _cdn_monitor_stop_event.wait(timeout=min(run_at - now, 1.0))
+                    logger.warning(f'CDN监控队列已满，丢弃延迟任务 {task.get("encrypted_id")}')
                 continue
 
             encrypted_id = task['encrypted_id']
+            task_token = task.get('token', -1)
             retries = task.get('retries', 0)
 
-            # 首次检查时尝试主动预热（DB 控制）
-            if retries == 0:
-                cloudflare_cdn.warm_cache_sync(encrypted_id)
+            # Token-based去重：若当前token不是最新，跳过
+            with _cdn_schedule_lock:
+                current_token = _cdn_schedule_map.get(encrypted_id)
+                if current_token is not None and current_token != task_token:
+                    continue
 
-            # 检查是否已经缓存
+            # 检查DB标记
             file_info = get_file_info(encrypted_id)
             if file_info and file_info.get('cdn_cached'):
-                logger.debug(f'图片 {encrypted_id} 已标记为缓存，跳过检查')
+                with _cdn_schedule_lock:
+                    if _cdn_schedule_map.get(encrypted_id) == task_token:
+                        _cdn_schedule_map.pop(encrypted_id, None)
                 continue
 
-            # 检查CDN缓存状态
-            is_cached = cloudflare_cdn.check_cdn_status(encrypted_id)
+            # 单次探测
+            probe = cloudflare_cdn.probe_encrypted_id(encrypted_id)
+            is_cached = probe.cached and probe.status_code in (200, 206, 304)
 
             if is_cached:
                 update_cdn_cache_status(encrypted_id, True)
+                with _cdn_schedule_lock:
+                    if _cdn_schedule_map.get(encrypted_id) == task_token:
+                        _cdn_schedule_map.pop(encrypted_id, None)
                 logger.info(f'✅ 图片 {encrypted_id} 已被CDN缓存（第{retries + 1}次检查）')
             else:
                 if retries < CDN_MONITOR_MAX_RETRIES:
+                    delay = min(CDN_BACKOFF_BASE * (2 ** retries), CDN_BACKOFF_MAX)
+                    delay *= random.uniform(1 - CDN_BACKOFF_JITTER, 1 + CDN_BACKOFF_JITTER)
+                    next_run = time.time() + delay
                     task['retries'] = retries + 1
-                    try:
-                        next_run = time.time() + CDN_MONITOR_INTERVAL
-                        cdn_monitor_queue.put((next_run, next(_cdn_monitor_seq), task), block=False)
-                        logger.debug(f'图片 {encrypted_id} 第{retries + 1}次检查未缓存，继续监测...')
-                    except queue.Full:
-                        logger.warning(f'CDN监控队列已满，放弃监控 {encrypted_id}')
+                    _schedule_cdn_task(encrypted_id, next_run, task)
+                    logger.debug(f'图片 {encrypted_id} 第{retries + 1}次检查未缓存，{delay:.1f}秒后重试')
                 else:
-                    logger.warning(f'图片 {encrypted_id} 在{CDN_MONITOR_MAX_RETRIES * CDN_MONITOR_INTERVAL}秒内未被缓存')
+                    with _cdn_schedule_lock:
+                        if _cdn_schedule_map.get(encrypted_id) == task_token:
+                            _cdn_schedule_map.pop(encrypted_id, None)
+                    logger.warning(f'图片 {encrypted_id} 超过最大重试次数')
 
         except Exception as e:
             logger.error(f'CDN监控线程错误: {e}')
             _cdn_monitor_stop_event.wait(timeout=1)
 
     logger.info('CDN缓存监控线程已停止')
+
+
+def _schedule_cdn_task(encrypted_id: str, run_at: float, task: dict) -> bool:
+    """调度CDN监控任务（Token-based去重）"""
+    token = next(_cdn_schedule_token)
+    task['token'] = token
+    with _cdn_schedule_lock:
+        _cdn_schedule_map[encrypted_id] = token
+    try:
+        cdn_monitor_queue.put((run_at, next(_cdn_monitor_seq), task), block=True, timeout=1.0)
+        return True
+    except queue.Full:
+        with _cdn_schedule_lock:
+            if _cdn_schedule_map.get(encrypted_id) == token:
+                _cdn_schedule_map.pop(encrypted_id, None)
+        logger.warning(f'CDN监控队列已满，丢弃任务 {encrypted_id}')
+        return False
 
 
 def start_cdn_monitor():
@@ -437,8 +476,7 @@ def stop_cdn_monitor():
 
 
 def add_to_cdn_monitor(encrypted_id: str, upload_time: Optional[int] = None, delay_seconds: int = 0):
-    """添加图片到CDN监控队列"""
-    # 必须同时满足：CDN启用、CDN域名配置、监控启用
+    """添加图片到CDN监控队列（带去重）"""
     cdn_enabled, monitor_enabled, cdn_domain, _api_token, _zone_id, _cache_warming = _get_effective_cdn_settings()
     if not cdn_enabled or not monitor_enabled or not cdn_domain:
         return
@@ -449,12 +487,9 @@ def add_to_cdn_monitor(encrypted_id: str, upload_time: Optional[int] = None, del
         'retries': 0
     }
 
-    try:
-        run_at = time.time() + max(0, int(delay_seconds))
-        cdn_monitor_queue.put((run_at, next(_cdn_monitor_seq), task), block=False)
+    run_at = time.time() + max(0, int(delay_seconds))
+    if _schedule_cdn_task(encrypted_id, run_at, task):
         logger.info(f'图片 {encrypted_id} 已加入CDN监控队列')
-    except queue.Full:
-        logger.warning(f'CDN监控队列已满，无法添加 {encrypted_id}')
 
 
 def _restore_cdn_monitor_tasks():

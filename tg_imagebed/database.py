@@ -14,12 +14,14 @@
 """
 import sqlite3
 import time
+import random
 import hashlib
 import json
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
+from functools import wraps
 
 from .config import (
     DATABASE_PATH, CDN_ENABLED, CLOUDFLARE_CDN_DOMAIN,
@@ -44,6 +46,30 @@ def get_connection():
         raise
     finally:
         conn.close()
+
+
+def db_retry(max_attempts: int = 3, base_delay: float = 0.1, max_delay: float = 2.0):
+    """SQLite操作重试装饰器，处理数据库锁定等瞬态错误"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(max_attempts):
+                try:
+                    return func(*args, **kwargs)
+                except sqlite3.OperationalError as e:
+                    err_msg = str(e).lower()
+                    if 'locked' in err_msg or 'busy' in err_msg:
+                        last_error = e
+                        delay = min(base_delay * (2 ** attempt), max_delay)
+                        delay *= random.uniform(0.8, 1.2)
+                        logger.debug(f"DB locked, retry {attempt + 1}/{max_attempts} after {delay:.2f}s")
+                        time.sleep(delay)
+                    else:
+                        raise
+            raise last_error
+        return wrapper
+    return decorator
 
 
 # ===================== 数据库初始化 =====================
@@ -344,8 +370,9 @@ def get_file_info(encrypted_id: str) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
 
 
+@db_retry(max_attempts=3, base_delay=0.1, max_delay=2.0)
 def save_file_info(encrypted_id: str, file_info: Dict[str, Any]) -> None:
-    """保存文件信息到数据库"""
+    """保存文件信息到数据库（带重试）"""
     with get_connection() as conn:
         cursor = conn.cursor()
 
@@ -420,8 +447,9 @@ def update_file_path_in_db(encrypted_id: str, new_file_path: str) -> None:
         logger.debug(f"更新file_path: {encrypted_id} -> {new_file_path}")
 
 
+@db_retry(max_attempts=3, base_delay=0.1, max_delay=2.0)
 def update_cdn_cache_status(encrypted_id: str, cached: bool) -> None:
-    """更新CDN缓存状态"""
+    """更新CDN缓存状态（带重试）"""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute('''
