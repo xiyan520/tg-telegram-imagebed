@@ -1305,8 +1305,16 @@ def admin_gallery_images(gallery_id: int):
         limit = max(1, min(200, limit))
         result = admin_get_gallery_images(gallery_id, page, limit)
         base_url = get_domain(request)
+        # 根据当前配置动态生成 URL（覆盖数据库中可能存储的旧 cdn_url）
+        cdn_domain = _get_cdn_domain()
+        cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
         for item in result['items']:
             item['image_url'] = f"{base_url}/image/{item['encrypted_id']}"
+            # 覆盖数据库中的旧 cdn_url
+            if cdn_enabled and cdn_domain:
+                item['cdn_url'] = f"https://{cdn_domain}/image/{item['encrypted_id']}"
+            else:
+                item['cdn_url'] = None
         return _admin_json({'success': True, 'data': result})
 
     data = request.get_json(silent=True) or {}

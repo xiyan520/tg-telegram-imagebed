@@ -9,7 +9,7 @@ from flask import request, jsonify, make_response
 
 from . import admin_bp, images_bp
 from ..config import logger
-from ..utils import add_cache_headers
+from ..utils import add_cache_headers, clear_domain_cache
 from ..database import (
     get_public_settings, get_all_system_settings, update_system_settings,
     disable_guest_tokens, disable_all_tokens
@@ -220,6 +220,7 @@ def admin_system_settings():
             if 'cloudflare_cdn_domain' in data:
                 domain = _normalize_cdn_domain(data['cloudflare_cdn_domain'])
                 settings_to_update['cloudflare_cdn_domain'] = domain
+                logger.info(f"准备保存域名配置: 原始值={data['cloudflare_cdn_domain']}, 标准化后={domain}")
 
             if 'cloudflare_api_token' in data:
                 token = str(data.get('cloudflare_api_token') or '').strip()
@@ -303,6 +304,9 @@ def admin_system_settings():
                 if not update_system_settings(settings_to_update):
                     response = jsonify({'success': False, 'error': '更新设置失败'})
                     return _set_admin_cors_headers(response), 500
+                # 清除域名缓存，确保设置立即生效
+                if any(k in settings_to_update for k in ('cloudflare_cdn_domain', 'cdn_enabled')):
+                    clear_domain_cache()
 
             # 获取更新后的有效配置
             updated_settings = get_all_system_settings()

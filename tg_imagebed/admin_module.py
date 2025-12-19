@@ -50,33 +50,18 @@ except ImportError:
 
 
 def _get_config_status_from_db() -> dict:
-    """从数据库读取配置状态（回退到环境变量）"""
-    cdn_enabled = os.getenv('CDN_ENABLED', 'false').lower() == 'true'
-    cdn_monitor_enabled = os.getenv('CDN_MONITOR_ENABLED', 'false').lower() == 'true'
-    cdn_domain = (os.getenv('CLOUDFLARE_CDN_DOMAIN') or '').strip()
+    """从数据库读取配置状态（使用 system_settings 表）"""
+    cdn_enabled = False
+    cdn_monitor_enabled = False
+    cdn_domain = ''
 
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT value FROM admin_config WHERE key = ?", ('cdn_enabled',))
-        row = cursor.fetchone()
-        if row is not None:
-            cdn_enabled = str(row[0]) == '1'
-
-        cursor.execute("SELECT value FROM admin_config WHERE key = ?", ('cdn_monitor_enabled',))
-        row = cursor.fetchone()
-        if row is not None:
-            cdn_monitor_enabled = str(row[0]) == '1'
-
-        cursor.execute("SELECT value FROM admin_config WHERE key = ?", ('cloudflare_cdn_domain',))
-        row = cursor.fetchone()
-        if row is not None:
-            cdn_domain = str(row[0] or '').strip()
-
-        conn.close()
+        from .database import get_system_setting
+        cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
+        cdn_monitor_enabled = str(get_system_setting('cdn_monitor_enabled') or '0') == '1'
+        cdn_domain = str(get_system_setting('cloudflare_cdn_domain') or '').strip()
     except Exception as e:
-        logger.debug(f"从数据库读取系统设置失败（回退到环境变量）: {e}")
+        logger.debug(f"从数据库读取系统设置失败: {e}")
 
     # CDN 监控只有在 CDN 启用时才有意义
     cdn_monitor_display = '已启用' if (cdn_enabled and cdn_monitor_enabled) else '已关闭'
@@ -669,12 +654,20 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
             # 构建图片 URL（使用 get_domain 处理反向代理/CDN 场景）
             base_url = get_domain(request).rstrip('/')
-            cdn_domain = os.getenv('CLOUDFLARE_CDN_DOMAIN', '')
+
+            # 从 system_settings 读取 CDN 域名配置（与 settings.py 保持一致）
+            cdn_domain = ''
+            cdn_enabled = False
+            try:
+                from .database import get_system_setting
+                cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
+                cdn_domain = str(get_system_setting('cloudflare_cdn_domain') or '').strip()
+            except Exception as e:
+                logger.debug(f"读取 CDN 域名配置失败: {e}")
 
             for img in images:
                 img['url'] = f"{base_url}/image/{img['encrypted_id']}"
-                if cdn_domain:
-                    img['cdn_url'] = f"https://{cdn_domain}/image/{img['encrypted_id']}"
+                img['cdn_url'] = f"https://{cdn_domain}/image/{img['encrypted_id']}" if (cdn_enabled and cdn_domain) else None
                 img['id'] = img['encrypted_id']
                 img['filename'] = img.get('original_filename', '未知文件')
                 img['size'] = img.get('file_size', 0)

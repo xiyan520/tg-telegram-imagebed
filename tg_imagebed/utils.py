@@ -235,6 +235,13 @@ def format_size(size_bytes: int) -> str:
 _DOMAIN_SETTINGS_CACHE = {"ts": 0.0, "domain": "", "cdn_enabled": False}
 
 
+def clear_domain_cache() -> None:
+    """清除域名设置缓存，使设置立即生效"""
+    _DOMAIN_SETTINGS_CACHE["ts"] = 0.0
+    _DOMAIN_SETTINGS_CACHE["domain"] = ""
+    _DOMAIN_SETTINGS_CACHE["cdn_enabled"] = False
+
+
 def _get_effective_domain_settings():
     """
     从数据库读取域名/cdn_enabled 设置。
@@ -242,7 +249,8 @@ def _get_effective_domain_settings():
     """
     import time as _time
     now = _time.time()
-    if now - _DOMAIN_SETTINGS_CACHE["ts"] < 1.0:
+    age = now - _DOMAIN_SETTINGS_CACHE["ts"]
+    if 0.0 <= age < 1.0:
         return _DOMAIN_SETTINGS_CACHE["domain"], _DOMAIN_SETTINGS_CACHE["cdn_enabled"]
 
     domain = ""
@@ -251,9 +259,11 @@ def _get_effective_domain_settings():
         from .database import get_system_setting
         domain = str(get_system_setting("cloudflare_cdn_domain") or "").strip()
         cdn_enabled = str(get_system_setting("cdn_enabled") or "0") == "1"
-    except Exception:
+        logger.info(f"[域名配置] 从数据库读取: domain='{domain}', cdn_enabled={cdn_enabled}")
+    except Exception as e:
         domain = str(CLOUDFLARE_CDN_DOMAIN or "").strip()
         cdn_enabled = bool(CDN_ENABLED)
+        logger.warning(f"[域名配置] 数据库读取失败，使用环境变量: domain='{domain}', cdn_enabled={cdn_enabled}, error={e}")
 
     _DOMAIN_SETTINGS_CACHE["ts"] = now
     _DOMAIN_SETTINGS_CACHE["domain"] = domain
@@ -353,6 +363,7 @@ __all__ = [
     'format_size',
     # 域名
     'get_domain',
+    'clear_domain_cache',
     # 静态文件版本
     'get_static_file_version',
 ]

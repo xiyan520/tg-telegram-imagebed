@@ -1821,6 +1821,7 @@ def list_galleries(owner_token: str, page: int = 1, limit: int = 50) -> Dict[str
             cursor.execute('SELECT COUNT(*) FROM galleries WHERE owner_token = ?', (owner_token,))
             total = cursor.fetchone()[0]
             # 优先使用手动设置的封面，否则取第一张图（按添加时间 ASC）
+            # 注意：使用 resolved_cover_image 避免与 g.* 中的 cover_image 列名冲突
             cursor.execute('''
                 SELECT g.*,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count,
@@ -1828,13 +1829,15 @@ def list_galleries(owner_token: str, page: int = 1, limit: int = 50) -> Dict[str
                         SELECT fs.encrypted_id FROM gallery_images gi2
                         JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
                         WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at ASC LIMIT 1
-                    )) AS cover_image
+                    )) AS resolved_cover_image
                 FROM galleries g
                 WHERE g.owner_token = ?
                 ORDER BY g.updated_at DESC
                 LIMIT ? OFFSET ?
             ''', (owner_token, limit, offset))
             items = [dict(row) for row in cursor.fetchall()]
+            for item in items:
+                item['cover_image'] = item.pop('resolved_cover_image', None)
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
     except Exception as e:
         logger.error(f"获取画集列表失败: {e}")
@@ -2590,6 +2593,7 @@ def admin_list_galleries(page: int = 1, limit: int = 50) -> Dict[str, Any]:
             total = cur.fetchone()[0]
             offset = (page - 1) * limit
             # 优先使用手动设置的封面，否则取第一张图（按添加时间 ASC）
+            # 注意：使用 resolved_cover_image 避免与 g.* 中的 cover_image 列名冲突
             cur.execute(f'''
                 SELECT g.*,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count,
@@ -2597,12 +2601,14 @@ def admin_list_galleries(page: int = 1, limit: int = 50) -> Dict[str, Any]:
                         SELECT fs.encrypted_id FROM gallery_images gi2
                         JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
                         WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at ASC LIMIT 1
-                    )) AS cover_image
+                    )) AS resolved_cover_image
                 FROM galleries g {where}
                 ORDER BY g.updated_at DESC
                 LIMIT ? OFFSET ?
             ''', params + [limit, offset])
             items = [dict(r) for r in cur.fetchall()]
+            for item in items:
+                item['cover_image'] = item.pop('resolved_cover_image', None)
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
     except Exception as e:
         logger.error(f"Admin 获取画集列表失败: {e}")
