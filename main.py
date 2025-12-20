@@ -13,7 +13,9 @@ Telegram 图床机器人 - 模块化重构版入口文件
 import sys
 import time
 import threading
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -46,6 +48,188 @@ _BOT_STATUS = {
     "next_retry_in_seconds": None,
     "proxy_enabled": bool(PROXY_URL),
 }
+
+# ===================== 批量图片处理（media_group）=====================
+@dataclass
+class _MediaBatch:
+    """群组/频道批量图片上传的累加器"""
+    chat_id: int
+    media_group_id: str
+    items: List[Dict[str, Any]] = field(default_factory=list)
+    status_message_id: Optional[int] = None
+    first_message_id: Optional[int] = None
+    message_thread_id: Optional[int] = None
+    delete_delay: int = 0
+    flush_task: Optional[Any] = None
+    updated_at: float = field(default_factory=time.monotonic)
+
+_media_group_batches: Dict[Tuple[int, str], _MediaBatch] = {}
+
+
+def _format_batch_summary(
+    urls: List[str],
+    success_count: int,
+    total_count: int,
+    total_size_bytes: int,
+    failure_count: int,
+) -> str:
+    """格式化批量上传汇总消息（自动截断以避免超过4096字符）"""
+    def _human_size(size_bytes: int) -> str:
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        else:
+            return f"{size_bytes / 1024 / 1024:.2f} MB"
+
+    lines = [f"✅ *批量上传完成* (成功: {success_count} / 总数: {total_count})"]
+
+    if urls:
+        lines.append("")
+        # 超过10张时使用紧凑模式
+        if len(urls) <= 10:
+            for i, url in enumerate(urls, 1):
+                lines.append(f"{i}. `{url}`")
+        else:
+            # 紧凑模式：只显示前8条 + 省略提示
+            for i, url in enumerate(urls[:8], 1):
+                lines.append(f"{i}. `{url}`")
+            lines.append(f"... 及其他 {len(urls) - 8} 张")
+
+    lines.append("")
+    lines.append(f"📦 *总大小:* {_human_size(total_size_bytes)}")
+    if failure_count:
+        lines.append(f"❌ *失败:* {failure_count} 张")
+    lines.append("💡 链接永久有效")
+    return "\n".join(lines)
+
+
+async def _flush_media_group(
+    batch_key: Tuple[int, str],
+    bot: Any,
+    debounce_seconds: float = 1.5,
+) -> None:
+    """延迟处理批量图片并发送汇总消息"""
+    import asyncio
+    from tg_imagebed.services.file_service import record_existing_telegram_file
+    from tg_imagebed.utils import get_domain
+
+    try:
+        await asyncio.sleep(debounce_seconds)
+    except asyncio.CancelledError:
+        return
+
+    batch = _media_group_batches.get(batch_key)
+    if not batch:
+        return
+
+    # 确保是当前任务在执行
+    current_task = asyncio.current_task()
+    if batch.flush_task is not None and batch.flush_task is not current_task:
+        return
+
+    # 竞态校验：如果在 sleep 期间有新图片到达，重新调度
+    elapsed = time.monotonic() - batch.updated_at
+    if elapsed < debounce_seconds:
+        # 新图片刚到达，让新的 flush_task 处理
+        return
+
+    _media_group_batches.pop(batch_key, None)
+
+    base_url = get_domain(None)
+    urls: List[str] = []
+    total_size_bytes = 0
+    total_count = len(batch.items)
+    failure_count = 0
+
+    # 按消息ID排序处理
+    for item in sorted(batch.items, key=lambda x: x.get("message_id", 0)):
+        try:
+            file_id = item.get("file_id")
+            if not file_id:
+                failure_count += 1
+                continue
+
+            file_info = await bot.get_file(file_id)
+            file_bytes = await file_info.download_as_bytearray()
+
+            result = record_existing_telegram_file(
+                file_id=file_id,
+                file_unique_id=item.get("file_unique_id"),
+                file_path=getattr(file_info, "file_path", "") or "",
+                file_content=bytes(file_bytes),
+                filename=item.get("filename", ""),
+                content_type=item.get("content_type", "image/jpeg"),
+                username=item.get("username", ""),
+                source="telegram_group",
+                is_group_upload=True,
+                group_message_id=item.get("message_id"),
+                group_chat_id=batch.chat_id,
+            )
+
+            if not result:
+                failure_count += 1
+                continue
+
+            urls.append(f"{base_url}/image/{result['encrypted_id']}")
+            total_size_bytes += int(result.get("file_size", 0) or 0)
+        except Exception as e:
+            failure_count += 1
+            logger.error(f"批量处理图片失败: {e}")
+
+    success_count = len(urls)
+    failure_count = total_count - success_count
+    summary_text = _format_batch_summary(
+        urls, success_count, total_count, total_size_bytes, failure_count
+    )
+
+    reply_msg_id: Optional[int] = None
+
+    # 优先编辑已有的状态消息
+    if batch.status_message_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=batch.chat_id,
+                message_id=batch.status_message_id,
+                text=summary_text,
+                parse_mode="Markdown",
+            )
+            reply_msg_id = batch.status_message_id
+        except Exception:
+            pass
+
+    # 如果编辑失败，发送新消息
+    if reply_msg_id is None:
+        send_kwargs: Dict[str, Any] = {
+            "chat_id": batch.chat_id,
+            "text": summary_text,
+            "parse_mode": "Markdown",
+        }
+        if batch.message_thread_id is not None:
+            send_kwargs["message_thread_id"] = batch.message_thread_id
+        if batch.first_message_id is not None:
+            send_kwargs["reply_to_message_id"] = batch.first_message_id
+
+        try:
+            sent = await bot.send_message(**send_kwargs)
+            reply_msg_id = getattr(sent, "message_id", None)
+        except Exception:
+            send_kwargs.pop("reply_to_message_id", None)
+            try:
+                sent = await bot.send_message(**send_kwargs)
+                reply_msg_id = getattr(sent, "message_id", None)
+            except Exception as e:
+                logger.error(f"发送批量汇总消息失败: {e}")
+
+    # 延迟删除回复
+    if batch.delete_delay > 0 and reply_msg_id:
+        async def delayed_delete():
+            try:
+                await asyncio.sleep(batch.delete_delay)
+                await bot.delete_message(chat_id=batch.chat_id, message_id=reply_msg_id)
+            except Exception as e:
+                logger.debug(f"删除回复消息失败: {e}")
+        asyncio.create_task(delayed_delete())
 
 
 def _utc_iso(ts: float = None) -> str:
@@ -285,34 +469,107 @@ def run_telegram_bot():
         else:
             username = getattr(chat, 'title', '') or 'channel'
 
-        # 发送处理中消息
+        # 检测批量上传（media_group_id）
+        media_group_id = getattr(message, 'media_group_id', None)
+        use_batch = bool(is_group and reply_enabled and media_group_id)
+
+        # 发送处理中消息（批量模式下延迟到首张图片时发送）
         status_msg = None
-        if reply_enabled:
+        if reply_enabled and not use_batch:
             try:
                 status_msg = await message.reply_text("⏳ 正在处理图片...")
             except Exception:
                 pass
 
         try:
-            if not message.photo:
+            # 提取图片：优先photo，其次document（文件形式发送的图片）
+            from tg_imagebed.utils import get_mime_type as _get_mime_type
+
+            tg_file = None
+            filename = ""
+            content_type = "image/jpeg"
+            file_unique_id = None
+
+            if message.photo:
+                tg_file = message.photo[-1]
+                file_unique_id = tg_file.file_unique_id
+                filename = f"telegram_{file_unique_id}.jpg"
+                content_type = "image/jpeg"
+            elif message.document:
+                doc = message.document
+                mime = (doc.mime_type or "").lower()
+                doc_name = (doc.file_name or "").lower()
+                is_image = mime.startswith("image/") or any(
+                    doc_name.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp")
+                )
+                if is_image:
+                    tg_file = doc
+                    file_unique_id = doc.file_unique_id
+                    filename = doc.file_name or f"telegram_{file_unique_id}"
+                    content_type = doc.mime_type or _get_mime_type(filename)
+
+            if not tg_file:
                 if status_msg:
                     await status_msg.edit_text("❌ 请发送图片文件")
+                elif reply_enabled:
+                    try:
+                        await message.reply_text("❌ 请发送图片文件")
+                    except Exception:
+                        pass
                 return
 
-            photo = message.photo[-1]
-            file_info = await context.bot.get_file(photo.file_id)
+            # 批量模式：添加到累加器，延迟统一处理
+            if use_batch:
+                batch_key = (chat.id, str(media_group_id))
+                batch = _media_group_batches.get(batch_key)
+                if not batch:
+                    batch = _MediaBatch(
+                        chat_id=chat.id,
+                        media_group_id=str(media_group_id),
+                        message_thread_id=getattr(message, 'message_thread_id', None),
+                        delete_delay=delete_delay,
+                    )
+                    _media_group_batches[batch_key] = batch
+
+                batch.items.append({
+                    "file_id": tg_file.file_id,
+                    "file_unique_id": file_unique_id,
+                    "filename": filename,
+                    "content_type": content_type,
+                    "message_id": message.message_id,
+                    "username": username,
+                })
+                batch.updated_at = time.monotonic()
+                if batch.first_message_id is None or message.message_id < batch.first_message_id:
+                    batch.first_message_id = message.message_id
+
+                # 首张图片时发送状态消息
+                if batch.status_message_id is None:
+                    try:
+                        status_msg = await message.reply_text("⏳ 正在处理相册图片，请稍候...")
+                        batch.status_message_id = status_msg.message_id
+                    except Exception:
+                        pass
+
+                # 重置 debounce 定时器
+                if batch.flush_task:
+                    batch.flush_task.cancel()
+                batch.flush_task = asyncio.create_task(
+                    _flush_media_group(batch_key, context.bot, debounce_seconds=1.5)
+                )
+                return
+
+            file_info = await context.bot.get_file(tg_file.file_id)
             file_bytes = await file_info.download_as_bytearray()
-            filename = f"telegram_{photo.file_id[:12]}.jpg"
 
             if is_group:
-                # 群组/频道：不做二次上传，直接记录原始 file_id/file_path
                 result = record_existing_telegram_file(
-                    file_id=photo.file_id,
-                    file_unique_id=photo.file_unique_id,
+                    file_id=tg_file.file_id,
+                    file_unique_id=file_unique_id,
                     file_path=getattr(file_info, 'file_path', '') or '',
                     file_content=bytes(file_bytes),
                     filename=filename,
-                    content_type='image/jpeg',
+                    content_type=content_type,
                     username=username,
                     source='telegram_group',
                     is_group_upload=True,
@@ -320,11 +577,10 @@ def run_telegram_bot():
                     group_chat_id=chat.id,
                 )
             else:
-                # 私聊：保持原有上传流程
                 result = process_upload(
                     file_content=bytes(file_bytes),
                     filename=filename,
-                    content_type='image/jpeg',
+                    content_type=content_type,
                     username=username,
                     source='telegram_bot',
                     is_group_upload=False,
@@ -499,7 +755,10 @@ def run_telegram_bot():
 
                 # 添加处理器
                 telegram_app.add_handler(CommandHandler("start", start))
-                telegram_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+                telegram_app.add_handler(MessageHandler(
+                    filters.PHOTO | filters.Document.ALL,
+                    handle_photo
+                ))
                 telegram_app.add_error_handler(application_error_handler)
 
                 logger.info("Telegram 机器人启动中...")
