@@ -85,9 +85,10 @@ class TelegramBackend(StorageBackend):
             return None
 
         try:
-            # 根据文件大小选择上传方式
-            # Telegram 对 sendPhoto 有 10MB 限制，超过使用 sendDocument
-            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
+            # 根据文件大小和类型选择上传方式
+            # sendPhoto 不支持 SVG，SVG 必须通过 sendDocument 上传
+            is_svg = content_type == 'image/svg+xml'
+            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/') and not is_svg:
                 files = {'photo': (filename, file_content, content_type)}
                 data = {'chat_id': self._chat_id, 'caption': caption or ''}
                 resp = self._session.post(
@@ -118,7 +119,7 @@ class TelegramBackend(StorageBackend):
             result = payload.get('result') or {}
 
             # 获取 file_id
-            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
+            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/') and not is_svg:
                 photos = result.get('photo') or []
                 if not photos:
                     logger.error("Telegram 上传失败: 无法获取 photo")

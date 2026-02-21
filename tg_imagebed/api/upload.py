@@ -22,16 +22,25 @@ IMAGE_SIGNATURES = {
     b'BM': 'image/bmp',
 }
 
+# SVG 文本特征（去除 BOM 后匹配）
+_SVG_PREFIXES = (b'<?xml', b'<svg', b'<SVG')
+
 
 def validate_image_magic(content: bytes) -> str | None:
     """基于魔数验证图片类型，返回 MIME 类型或 None"""
-    if len(content) < 12:
+    if len(content) < 5:
         return None
     for sig, mime in IMAGE_SIGNATURES.items():
         if content.startswith(sig):
             if sig == b'RIFF' and content[8:12] != b'WEBP':
                 continue
             return mime
+    # SVG 是基于文本的 XML，无二进制魔数，单独检测
+    # 去除可能的 UTF-8 BOM (0xEF 0xBB 0xBF)
+    stripped = content[3:] if content.startswith(b'\xef\xbb\xbf') else content
+    stripped = stripped.lstrip()
+    if stripped.startswith(_SVG_PREFIXES):
+        return 'image/svg+xml'
     return None
 
 
@@ -68,12 +77,6 @@ def upload_file():
         return add_cache_headers(response, 'no-cache'), 400
 
     content_type = (file.content_type or '').strip().lower()
-
-    # 阻止 SVG 上传（XSS 风险）
-    if 'svg' in content_type or (file.filename and file.filename.lower().endswith('.svg')):
-        response = jsonify({'success': False, 'error': 'SVG 文件不允许上传'})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(response, 'no-cache'), 400
 
     # 初步检查 Content-Type
     if content_type and not content_type.startswith('image/'):

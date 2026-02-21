@@ -173,7 +173,12 @@ def serve_image(encrypted_id):
         filename = f"image_{encrypted_id[:12]}{file_ext}"
 
         resp_headers = dict(dl.headers or {})
-        resp_headers.setdefault('Content-Disposition', f'inline; filename="{filename}"')
+        # SVG 以附件形式下载，防止浏览器内联渲染执行嵌入脚本（XSS 防护）
+        mime_for_disp = (dl.content_type or file_info.get('mime_type') or '').lower()
+        if mime_for_disp == 'image/svg+xml' or file_ext.lower() == '.svg':
+            resp_headers.setdefault('Content-Disposition', f'attachment; filename="{filename}"')
+        else:
+            resp_headers.setdefault('Content-Disposition', f'inline; filename="{filename}"')
         resp_headers.setdefault('X-Content-Type-Options', 'nosniff')
         resp_headers.setdefault('Accept-Ranges', 'bytes')
         resp_headers['ETag'] = etag
