@@ -5,8 +5,8 @@
 基于 Telegram 云存储 + Cloudflare CDN 的现代化图床解决方案
 
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://hub.docker.com/)
-[![Python](https://img.shields.io/badge/Python-3.8+-green)](https://www.python.org/)
-[![Nuxt](https://img.shields.io/badge/Nuxt-3.x-00DC82)](https://nuxt.com/)
+[![Python](https://img.shields.io/badge/Python-3.11+-green)](https://www.python.org/)
+[![Nuxt](https://img.shields.io/badge/Nuxt-3.13-00DC82)](https://nuxt.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 [功能特性](#-功能特性) • [快速开始](#-快速开始) • [部署指南](#-部署指南) • [配置说明](#-配置说明)
@@ -28,23 +28,30 @@
 ## ✨ 功能特性
 
 ### 核心功能
-- 🚀 **Telegram 云存储** - 利用 Telegram 无限存储空间
-- ⚡ **Cloudflare CDN** - 全球加速，智能路由优化
-- 🎨 **现代化前端** - 基于 Nuxt 3 + Vue 3 + Nuxt UI
-- 📱 **响应式设计** - 完美适配桌面端和移动端
-- 🌙 **深色模式** - 内置深色主题支持
+- 🚀 **Telegram 云存储** — 利用 Telegram 无限存储空间，零成本图片托管
+- ⚡ **Cloudflare CDN** — 全球加速，智能路由，缓存预热
+- 🎨 **现代化前端** — Nuxt 3 + Vue 3 + Nuxt UI，拖拽/粘贴/点击上传
+- 📱 **响应式设计** — 完美适配桌面端和移动端
+- 🌙 **深色模式** — 内置深色主题支持
 
-### 高级特性
-- 🔄 **智能路由** - 自动选择最优 CDN 节点
-- 🔥 **缓存预热** - 多地域主动预热 CDN 缓存
-- 📊 **CDN 监控** - 实时监控缓存状态
-- 👥 **群组上传** - 支持 Telegram 群组/频道上传
-- 🔐 **管理后台** - 完整的管理员功能
-- 📈 **数据统计** - 实时统计和监控
-- 🖼️ **图片画廊** - 优雅的图片浏览体验
-- 📚 **API 文档** - 完整的 RESTful API
-- 🗄️ **多存储支持** - Telegram / S3 / 本地 / Rclone 四种存储驱动
-- 🎫 **Token 系统** - 游客 Token 上传，支持配额和有效期管理
+### 存储与分发
+- 🗄️ **多存储后端** — Telegram / S3 / 本地 / Rclone 四种存储驱动，按场景路由
+- 🔄 **CDN 智能路由** — 自动选择最优节点，ETag/304 缓存，Range 分片传输
+- 🔥 **缓存预热** — 多地域主动预热 CDN 缓存，实时监控缓存状态
+
+### Token 与相册
+- 🎫 **Token 系统** — 游客 Token 上传，支持配额和有效期管理
+- 🔑 **Token Vault** — 多 Token 本地管理，一键切换，自动验证与无效清理
+- 🖼️ **画集系统** — 创建画集、管理图片、设置封面，支持四种访问模式
+- 🔗 **分享链接** — 单画集分享 / 全部分享，支持密码保护和 Token 授权
+
+### 管理与安全
+- 🔐 **管理后台** — 完整的管理员功能，首次启动引导式设置
+- 📈 **数据统计** — 实时统计和监控仪表板
+- 👥 **群组上传** — 支持 Telegram 群组/频道上传，自动回复链接
+- 📚 **交互式 API 文档** — 内置 `/docs` 页面，多语言代码示例
+- 📢 **系统公告** — 管理员可发布公告通知用户
+- 🛡️ **登录安全** — 渐进式锁定（5次失败 → 5/15/30分钟锁定）
 
 ---
 
@@ -53,45 +60,40 @@
 ### 前置要求
 
 - Docker & Docker Compose（推荐）
-- 或 Python 3.8+ & Node.js 18+
-- Telegram Bot Token
-- Cloudflare 账号（可选，用于 CDN 加速）
+- 或 Python 3.11+ & Node.js 20+
+- Telegram Bot Token + 频道 ID
 
-### 5 分钟快速部署
+### 3 分钟快速部署
 
-#### 1. 下载配置文件
+#### 1. 创建 docker-compose.yml
 
-```bash
-wget https://raw.githubusercontent.com/xiyan520/tg-telegram-imagebed/main/.env.example -O .env
-wget https://raw.githubusercontent.com/xiyan520/tg-telegram-imagebed/main/docker-compose.yml
+```yaml
+services:
+  telegram-imagebed:
+    image: xiyan520/tg-telegram-imagebed:latest
+    container_name: telegram-imagebed
+    ports:
+      - "18793:18793"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
 ```
 
-#### 2. 编辑 `.env` 文件
-
-```bash
-nano .env
-```
-
-填入必要配置（详见[配置说明](#-配置说明)）：
-```env
-BOT_TOKEN=你的_Bot_Token
-STORAGE_CHAT_ID=你的_频道_ID
-CLOUDFLARE_CDN_DOMAIN=你的域名
-CLOUDFLARE_API_TOKEN=你的_API_Token
-CLOUDFLARE_ZONE_ID=你的_Zone_ID
-```
-
-#### 3. 启动服务
+#### 2. 启动服务
 
 ```bash
 docker-compose up -d
 ```
 
-#### 4. 访问应用
+#### 3. 首次设置
 
-- 前端界面: `http://你的服务器IP:18793`
-- 管理后台: `http://你的服务器IP:18793/admin`
-- 默认账号: `admin` / 密码通过环境变量 `ADMIN_PASSWORD` 设置，或首次启动时随机生成（查看日志获取）
+访问 `http://你的服务器IP:18793`，系统自动跳转到设置页面：
+
+1. **设置管理员账号** — 输入用户名和密码（≥8字符，含大小写/数字/特殊字符）
+2. **配置 Telegram Bot** — 在管理后台 → Bot 配置中填入 Bot Token 和频道 ID
+3. **开始使用** — 返回首页即可上传图片
+
+> 所有业务配置（Bot Token、CDN、存储、上传策略等）均通过管理后台设置，无需 `.env` 文件。
 
 ---
 
@@ -108,7 +110,6 @@ services:
     container_name: telegram-imagebed
     ports:
       - "18793:18793"
-    env_file: .env
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -124,7 +125,6 @@ docker-compose up -d
 docker run -d \
   --name telegram-imagebed \
   -p 18793:18793 \
-  --env-file .env \
   -v ./data:/app/data \
   --restart unless-stopped \
   xiyan520/tg-telegram-imagebed:latest
@@ -142,11 +142,7 @@ cd tg-telegram-imagebed
 # 2. 安装依赖
 pip install -r requirements.txt
 
-# 3. 配置环境变量
-cp .env.example .env
-nano .env
-
-# 4. 启动后端
+# 3. 启动后端
 python main.py
 ```
 
@@ -159,236 +155,141 @@ cd frontend
 # 2. 安装依赖
 npm install
 
-# 3. 配置环境变量
-cp .env.example .env
-nano .env
+# 3. 构建静态文件
+npm run generate
 
-# 4. 构建生产版本
-npm run build
-
-# 5. 启动服务
-npm run preview
+# 4. 将 .output/public/ 下的文件部署到后端 static/ 目录
 ```
+
+> Docker 多阶段构建会自动完成前端构建和集成，手动部署仅用于开发调试。
+
+### 数据持久化
+
+所有数据存储在 `./data/` 目录下：
+
+| 文件 | 说明 |
+|------|------|
+| `telegram_imagebed.db` | SQLite 数据库（WAL 模式） |
+| `telegram_imagebed.log` | 运行日志 |
+| `.secret_key` | 加密密钥（首次自动生成） |
+| `.instance_lock` | 单实例锁文件 |
 
 ---
 
 ## ⚙️ 配置说明
 
-### 必需配置
+### 配置方式
 
-#### 1. 获取 Telegram Bot Token
+本项目采用 **管理后台配置** 模式，所有业务配置通过 Web 界面管理，存储在数据库 `system_settings` 表中。无需 `.env` 文件。
 
-1. 在 Telegram 中与 [@BotFather](https://t.me/BotFather) 对话
-2. 发送 `/newbot` 创建新机器人
-3. 按提示设置名称和用户名
-4. 获取 `BOT_TOKEN`
+首次启动后，在管理后台中配置以下内容：
+
+### 1. Telegram Bot 配置
+
+1. 在 Telegram 中与 [@BotFather](https://t.me/BotFather) 对话，发送 `/newbot` 创建机器人
+2. 获取 Bot Token
+3. 创建一个 Telegram 频道，将 Bot 添加为管理员
+4. 通过 [@VersaToolsBot](https://t.me/VersaToolsBot) 获取频道 ID
+5. 在管理后台 → Bot 配置中填入 Bot Token 和频道 ID
 
 ![BotFather Token](https://github.com/user-attachments/assets/04f01289-205c-43e0-ba03-d9ab3465e349)
 
-#### 2. 获取频道 Chat ID
+### 2. Cloudflare CDN 配置（可选）
 
-1. 创建一个 Telegram 频道（Channel）
-2. 将 Bot 添加为频道管理员
-3. 通过 [@VersaToolsBot](https://t.me/VersaToolsBot) 或 [@GetTheirIDBot](https://t.me/GetTheirIDBot) 获取频道 ID
+在管理后台 → 系统设置中启用 CDN 并填入：
+- CDN 域名（不含 `https://`）
+- Cloudflare API Token（需要 Cache Purge + Zone Read 权限）
 
-![Add Admin](https://github.com/user-attachments/assets/cedea4c7-8b31-42e0-98a1-8a72ff69528f)
+#### Cloudflare 缓存规则
 
-![Chat ID](https://github.com/user-attachments/assets/59fe8b20-c969-4d13-8e46-e58c0e8b9e79)
+在 Cloudflare Dashboard 中配置缓存规则，确保 `/image/*` 路径被缓存：
 
-### Cloudflare CDN 配置（推荐）
+**方法一：Page Rules**
+- URL 模式：`你的域名/image/*`
+- Cache Level: Cache Everything
+- Edge Cache TTL: 1 month
 
-#### 1. 创建 API Token
+**方法二：Cache Rules（新版）**
+```
+When: URI Path contains "/image/"
+Then: Eligible for cache, Edge TTL 30 days
+```
 
-1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
-2. 进入 **My Profile** → **API Tokens**
-3. 点击 **Create Token**
-4. 选择 **Edit zone DNS** 模板或自定义权限：
-   - Zone - Cache Purge - Purge
-   - Zone - Zone - Read
-5. 复制生成的 Token
+#### DNS 配置
 
-![Create Token](https://img.jivon.de/image/QWdBQ0FnVUFBeGtCcbe0c6fe)
+添加 A 记录指向服务器 IP，确保 Proxy status 为橙色云朵（已代理）。
 
-#### 2. 获取 Zone ID
+### 3. 管理后台可配置项
 
-1. 在 Cloudflare Dashboard 选择你的域名
-2. 在右侧找到 **Zone ID**
-3. 复制 Zone ID
+| 分类 | 配置项 | 默认值 | 说明 |
+|------|--------|--------|------|
+| Bot | Telegram Bot Token | — | Bot Token |
+| Bot | 存储频道 ID | — | 频道/群组 ID |
+| 上传策略 | 游客上传策略 | `open` | `open` / `token_only` / `admin_only` |
+| 上传策略 | 最大文件大小 | 20 MB | 1–1024 MB |
+| 上传策略 | 每日上传限制 | 0（无限） | 按来源或 Token 统计 |
+| Token | Token 生成开关 | 开启 | 是否允许游客创建 Token |
+| Token | 最大上传数 | 1000 | 单个 Token 最大上传次数 |
+| Token | 最大有效期 | 365 天 | 单个 Token 最大有效天数 |
+| 存储 | 活跃存储后端 | telegram | telegram / s3 / local / rclone |
+| 存储 | 上传场景路由 | — | 游客/Token/群组/管理员 → 不同后端 |
+| CDN | CDN 开关 | 关闭 | Cloudflare CDN |
+| CDN | CDN 域名 | — | 不含 `https://` |
+| CDN | CDN 重定向 | 关闭 | 自动重定向到 CDN |
+| 群组 | 群组上传仅管理员 | 否 | 限制群组上传权限 |
+| 群组 | 管理员 ID 列表 | — | 逗号分隔 |
+| 同步 | 删除同步 TG 消息 | 开启 | 删除图片时同步删除 TG 消息 |
 
-#### 3. 配置 Cloudflare 缓存规则（重要！）
+### 4. 环境变量（仅基础设施）
 
-为了让 CDN 正常工作，需要在 Cloudflare 中设置缓存规则：
-
-##### 方法一：使用 Page Rules（推荐）
-
-1. 进入域名管理页面
-2. 点击 **Rules** → **Page Rules**
-3. 创建新规则，URL 模式：`你的域名/image/*`
-4. 添加以下设置：
-   - **Cache Level**: Cache Everything
-   - **Edge Cache TTL**: 1 month
-   - **Browser Cache TTL**: 4 hours
-5. 保存规则
-
-##### 方法二：使用 Cache Rules（新版）
-
-1. 进入域名管理页面
-2. 点击 **Caching** → **Cache Rules**
-3. 创建新规则：
-   ```
-   When incoming requests match:
-   - URI Path contains "/image/"
-
-   Then:
-   - Cache eligibility: Eligible for cache
-   - Edge TTL: 30 days
-   - Browser TTL: 4 hours
-   ```
-
-##### 方法三：使用 Transform Rules（可选）
-
-如果需要自定义缓存头，可以添加 Transform Rules：
-
-1. 进入 **Rules** → **Transform Rules** → **Modify Response Header**
-2. 创建规则：
-   ```
-   When incoming requests match:
-   - URI Path contains "/image/"
-
-   Then:
-   - Set static: Cache-Control = public, max-age=2592000
-   ```
-
-#### 4. 配置 DNS（如果使用自定义域名）
-
-1. 添加 A 记录指向你的服务器 IP
-2. 确保 **Proxy status** 为橙色云朵（已代理）
-3. 等待 DNS 生效
-
-### 环境变量完整列表
-
-#### Telegram 配置
-
-| 变量名 | 必需 | 说明 | 示例值 |
-|--------|------|------|--------|
-| `BOT_TOKEN` | ✅ | Bot Token | `123456:ABCdefGHIjkl` |
-| `STORAGE_CHAT_ID` | ✅ | 频道/群组 ID | `-1001234567890` |
-
-#### Cloudflare CDN 配置
-
-| 变量名 | 必需 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `CLOUDFLARE_CDN_DOMAIN` | ⭐ | - | CDN 域名（不含 https://） |
-| `CLOUDFLARE_API_TOKEN` | ⭐ | - | API Token |
-| `CLOUDFLARE_ZONE_ID` | ⭐ | - | Zone ID |
-| `CDN_ENABLED` | ❌ | `true` | 是否启用 CDN |
-| `CLOUDFLARE_CACHE_LEVEL` | ❌ | `aggressive` | 缓存级别 |
-| `CLOUDFLARE_BROWSER_TTL` | ❌ | `14400` | 浏览器缓存时间（秒） |
-| `CLOUDFLARE_EDGE_TTL` | ❌ | `2592000` | 边缘缓存时间（秒） |
-| `ENABLE_SMART_ROUTING` | ❌ | `true` | 智能路由 |
-| `ENABLE_CACHE_WARMING` | ❌ | `true` | 缓存预热 |
-| `CACHE_WARMING_DELAY` | ❌ | `5` | 预热延迟（秒） |
-
-#### 群组上传配置
+项目仅使用少量环境变量用于基础设施配置：
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `ENABLE_GROUP_UPLOAD` | `true` | 是否启用群组上传 |
-| `GROUP_UPLOAD_ADMIN_ONLY` | `false` | 是否仅管理员可上传 |
-| `GROUP_ADMIN_IDS` | - | 管理员 ID 列表（逗号分隔） |
-| `GROUP_UPLOAD_REPLY` | `true` | 是否自动回复 CDN 链接 |
-| `GROUP_UPLOAD_DELETE_DELAY` | `0` | 回复消息删除延迟（秒），0 表示不删除 |
+| `HTTP_PROXY` / `HTTPS_PROXY` | — | 系统代理（可选） |
 
-#### 多存储配置
+> 所有业务配置（Bot Token、CDN、存储、上传策略等）均通过管理后台设置，不通过环境变量。
 
-系统支持四种存储驱动，可通过环境变量或管理后台配置：
+### 5. 多存储配置
 
-| 变量名 | 说明 |
-|--------|------|
-| `STORAGE_CONFIG_JSON` | JSON 格式的存储配置（优先级最高，设置后无法通过界面修改） |
-
-**存储配置示例：**
-
-```json
-{
-  "telegram": {
-    "driver": "telegram",
-    "bot_token": "123456:ABC...",
-    "chat_id": "-1001234567890"
-  },
-  "my-s3": {
-    "driver": "s3",
-    "endpoint": "https://s3.amazonaws.com",
-    "bucket": "my-bucket",
-    "access_key": "AKIAXXXXXXXX",
-    "secret_key": "xxxxxxxx",
-    "region": "us-east-1",
-    "public_url_prefix": "https://cdn.example.com"
-  },
-  "local": {
-    "driver": "local",
-    "root_dir": "/data/uploads"
-  },
-  "rclone-remote": {
-    "driver": "rclone",
-    "remote": "myremote",
-    "base_path": "/images"
-  }
-}
-```
-
-**支持的存储驱动：**
+系统支持四种存储驱动，在管理后台 → 存储配置中可视化管理：
 
 | 驱动 | 说明 | 必需参数 |
 |------|------|----------|
-| `telegram` | Telegram 频道存储 | `bot_token`, `chat_id`（可从环境变量继承） |
-| `s3` | S3 兼容存储 | `endpoint`, `bucket`, `access_key`, `secret_key` |
-| `local` | 本地文件系统 | `root_dir` |
-| `rclone` | Rclone 远程存储 | `remote` |
+| `telegram` | Telegram 频道存储（默认） | Bot Token, 频道 ID |
+| `s3` | S3 兼容存储（AWS/MinIO 等） | endpoint, bucket, access_key, secret_key |
+| `local` | 本地文件系统 | root_dir |
+| `rclone` | Rclone 远程存储 | remote |
 
-#### Token 配置
-
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `GUEST_TOKEN_GENERATION_ENABLED` | `true` | 是否允许游客创建 Token |
-| `GUEST_TOKEN_MAX_UPLOAD_LIMIT` | `1000` | Token 最大上传次数上限 |
-| `GUEST_TOKEN_MAX_EXPIRES_DAYS` | `365` | Token 最大有效天数 |
-
-#### 上传策略配置
-
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `GUEST_UPLOAD_POLICY` | `open` | 游客上传策略：`open` / `token_only` / `admin_only` |
-| `MAX_FILE_SIZE_MB` | `20` | 单文件最大大小（MB） |
-| `DAILY_UPLOAD_LIMIT` | `0` | 每日上传限制（0 表示不限制） |
-
-#### 其他配置
-
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `SECRET_KEY` | - | 加密密钥（请使用强密码） |
-| `PORT` | `18793` | Web 服务端口 |
-| `DATABASE_PATH` | `./telegram_imagebed.db` | 数据库路径 |
-| `LOG_LEVEL` | `INFO` | 日志级别 |
-| `DEFAULT_ADMIN_USERNAME` | `admin` | 默认管理员用户名 |
-| `DEFAULT_ADMIN_PASSWORD` | `admin123` | 默认管理员密码 |
+支持按上传场景路由到不同后端（游客 → Telegram，管理员 → S3 等）。
 
 ---
 
 ## 🏗️ 技术栈
 
 ### 后端
-- **框架**: Flask
-- **存储**: Telegram Bot API + SQLite
-- **CDN**: Cloudflare API
-- **语言**: Python 3.8+
+| 组件 | 技术 | 版本 |
+|------|------|------|
+| 框架 | Flask + Flask-CORS | 3.0 |
+| 生产服务器 | waitress | 3.0 |
+| 数据库 | SQLite3（WAL 模式） | 内置 |
+| Bot SDK | python-telegram-bot | 21.0.1 |
+| HTTP | requests + aiohttp | 2.31 / 3.9 |
+| 语言 | Python | 3.11+ |
 
 ### 前端
-- **框架**: Nuxt.js 3
-- **UI 库**: Nuxt UI (Tailwind CSS)
-- **状态管理**: Pinia
-- **工具库**: VueUse
-- **语言**: TypeScript
+| 组件 | 技术 | 版本 |
+|------|------|------|
+| 框架 | Nuxt 3（SPA, ssr=false） | 3.13 |
+| UI 库 | Nuxt UI（Tailwind CSS） | 2.18 |
+| 状态管理 | Pinia | 2.2 |
+| 工具库 | VueUse | 11.0 |
+| 语言 | TypeScript | — |
+
+### 部署
+- Docker 多阶段构建：node:20-alpine（前端 generate）→ python:3.11-slim（后端）
+- 单容器多线程，端口 18793，waitress 4 线程
+- 健康检查：`GET /api/health`（30 秒间隔）
 
 ---
 
@@ -401,61 +302,63 @@ npm run preview
 #### 匿名上传
 
 ```bash
-POST /api/upload
-Content-Type: multipart/form-data
-
-file: <图片文件>
+curl -X POST http://your-domain/api/upload \
+  -F "file=@image.jpg"
 ```
 
 #### Token 上传
 
 ```bash
-POST /api/auth/upload
-Authorization: Bearer <token>
-Content-Type: multipart/form-data
-
-file: <图片文件>
+curl -X POST http://your-domain/api/auth/upload \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@image.jpg"
 ```
 
 #### 创建 Token
 
 ```bash
-POST /api/auth/token/generate
-Content-Type: application/json
-
-{
-  "upload_limit": 100,
-  "expires_days": 30,
-  "description": "my client"
-}
+curl -X POST http://your-domain/api/auth/token/generate \
+  -H "Content-Type: application/json" \
+  -d '{"upload_limit": 100, "expires_days": 30, "description": "my album"}'
 ```
 
 #### 验证 Token
 
 ```bash
-POST /api/auth/token/verify
-Authorization: Bearer <token>
+curl -X POST http://your-domain/api/auth/token/verify \
+  -H "Authorization: Bearer <token>"
 ```
 
 #### 获取图片
 
 ```bash
-GET /image/<encrypted_id>
+curl http://your-domain/image/<encrypted_id>
 ```
 
 #### 获取统计信息
 
 ```bash
-GET /api/stats
+curl http://your-domain/api/stats
 ```
 
-#### 获取最近上传
+#### 画集相关
 
 ```bash
-GET /api/recent?page=1&limit=12
+# 获取 Token 的画集列表
+curl http://your-domain/api/auth/galleries \
+  -H "Authorization: Bearer <token>"
+
+# 创建画集
+curl -X POST http://your-domain/api/auth/galleries \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "我的画集", "access_mode": "public"}'
+
+# 访问分享画集
+curl http://your-domain/api/shared/galleries/<share_token>
 ```
 
-**响应示例：**
+**响应格式：**
 ```json
 {
   "success": true,
@@ -463,7 +366,8 @@ GET /api/recent?page=1&limit=12
     "url": "https://your-domain.com/image/xxx",
     "filename": "image.jpg",
     "size": "1.2 MB",
-    "upload_time": "2025-01-01 12:00:00"
+    "upload_time": "2025-01-01 12:00:00",
+    "remaining_uploads": 99
   }
 }
 ```
@@ -472,30 +376,36 @@ GET /api/recent?page=1&limit=12
 
 ## 🔧 常见问题
 
+### Q: 首次启动后如何配置？
+A: 访问 `http://服务器IP:18793`，系统自动跳转到设置页面。设置管理员账号后，在管理后台配置 Bot Token 和频道 ID。
+
 ### Q: 图片无法访问？
-A: 检查 Telegram Bot 是否有频道管理员权限，确保 `STORAGE_CHAT_ID` 配置正确。
+A: 检查 Telegram Bot 是否有频道管理员权限，在管理后台确认 Bot Token 和频道 ID 配置正确。
 
 ### Q: CDN 不生效？
 A:
-1. 确认 Cloudflare 缓存规则已正确配置
-2. 检查 `CLOUDFLARE_CDN_DOMAIN` 是否正确（不含 https://）
-3. 验证 API Token 权限是否足够
+1. 确认管理后台已启用 CDN 并填入正确的域名
+2. 检查 Cloudflare 缓存规则是否已配置（`/image/*` 路径）
+3. 验证 API Token 权限是否足够（Cache Purge + Zone Read）
 4. 查看后端日志确认 CDN 状态
 
 ### Q: 如何修改管理员密码？
-A: 登录管理后台后，在设置页面修改密码。
+A: 登录管理后台，在系统设置页面修改密码。
 
 ### Q: Docker 容器无法启动？
 A:
-1. 检查 `.env` 文件配置是否正确
-2. 确保端口 18793 未被占用
+1. 确保端口 18793 未被占用
+2. 确保 `./data` 目录有写入权限
 3. 查看容器日志：`docker logs telegram-imagebed`
 
 ### Q: 群组上传不工作？
 A:
 1. 确保 Bot 已添加到群组并有管理员权限
-2. 检查 `ENABLE_GROUP_UPLOAD` 是否为 `true`
-3. 如果设置了 `GROUP_UPLOAD_ADMIN_ONLY`，确认用户 ID 在 `GROUP_ADMIN_IDS` 中
+2. 在管理后台检查群组上传是否已启用
+3. 如果设置了仅管理员上传，确认用户 ID 在管理员列表中
+
+### Q: Token 上传记录不显示？
+A: 确保上传时使用的是 Token 模式（Bearer Token 认证）。当同时登录管理员和持有 Token 时，系统优先使用 Token 模式上传以确保记录关联正确。
 
 ---
 
@@ -503,29 +413,48 @@ A:
 
 ### 最新更新
 
+#### 首页组件重构
+- ✅ `pages/index.vue` 从 846 行精简为 ~70 行容器组件
+- ✅ 拆分为 4 个子组件：HomeUploadZone / HomeUploadResults / HomeUploadHistory / HomeImagePreview
+- ✅ 新增 `useClipboardCopy` composable，兼容非 HTTPS 环境
+- ✅ 上传模式优先级修正：Token 优先于 Admin，确保上传记录正确关联
+
+#### Token Vault 多 Token 管理
+- ✅ 支持多个 Token 本地管理，localStorage 持久化
+- ✅ 一键切换活跃 Token，自动验证有效性
+- ✅ 旧版单 Token 自动迁移到 Vault
+- ✅ 智能清理：仅在后端确认无效时移除，网络错误不移除
+
+#### 画集表重构
+- ✅ `galleries` 表新增 `owner_type` 列（`admin` / `token`），移除 FK 约束
+- ✅ 管理员画集直接 `owner_type='admin'`，无需虚拟 token
+- ✅ 自动迁移：旧表重建 + admin token 行转换 + 清理虚拟记录
+
+#### 数据库模块重构
+- ✅ `database.py`（2800行）拆分为 `database/` 包结构（6 个子模块）
+- ✅ 按职责划分：连接管理、文件 CRUD、Token、系统设置、画集、管理员画集
+- ✅ 通过 `__init__.py` 重导出，外部 import 零改动
+
 #### 多存储支持
 - ✅ 支持 Telegram / S3 / 本地 / Rclone 四种存储驱动
 - ✅ 管理后台可视化配置存储
-- ✅ 支持上传场景路由（游客/Token/群组/管理员）
+- ✅ 支持上传场景路由（游客/Token/群组/管理员 → 不同后端）
 - ✅ 存储健康状态监控
 
 #### Token 系统
-- ✅ 游客可创建上传 Token
-- ✅ Token 配额和有效期管理
+- ✅ 游客可创建上传 Token，支持配额和有效期
 - ✅ Token 上传记录查询
-- ✅ 管理后台 Token 管理
+- ✅ 管理后台 Token 管理（批量操作 + 影响范围查询 + 级联删除）
 
 #### API 文档重构
 - ✅ 数据驱动的组件化文档页面
-- ✅ 多语言代码示例（cURL/JavaScript/Python/PHP）
+- ✅ 多语言代码示例（cURL / JavaScript / Python / PHP）
 - ✅ 侧边栏导航与滚动定位
-- ✅ 响应式移动端适配
 
 #### 群组上传功能
 - ✅ 支持 Telegram 群组/频道直接上传
 - ✅ 可配置仅管理员上传
 - ✅ 自动回复 CDN 链接
-- ✅ 可设置回复消息自动删除
 
 ---
 

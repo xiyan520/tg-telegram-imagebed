@@ -128,82 +128,8 @@
       </NuxtLink>
     </div>
 
-    <!-- 系统配置 -->
-    <UCard>
-      <template #header>
-        <div class="flex items-center gap-3">
-          <div class="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center">
-            <UIcon name="heroicons:server" class="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">系统状态</h3>
-            <p class="text-xs text-stone-500 dark:text-stone-400">当前系统运行状态</p>
-          </div>
-        </div>
-      </template>
-
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-        <div class="p-4 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-xl border border-green-200 dark:border-green-800">
-          <div class="flex items-center gap-2 mb-2">
-            <UIcon name="heroicons:signal" class="w-4 h-4 text-green-600 dark:text-green-400" />
-            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">CDN状态</p>
-          </div>
-          <p class="text-lg font-bold text-stone-900 dark:text-white">
-            {{ systemConfig.cdnStatus || '--' }}
-          </p>
-        </div>
-
-        <div class="p-4 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-          <div class="flex items-center gap-2 mb-2">
-            <UIcon name="heroicons:globe-alt" class="w-4 h-4 text-blue-600 dark:text-blue-400" />
-            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">域名</p>
-          </div>
-          <p class="text-lg font-bold text-stone-900 dark:text-white truncate">
-            {{ systemConfig.cdnDomain || '--' }}
-          </p>
-        </div>
-
-        <div class="p-4 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
-          <div class="flex items-center gap-2 mb-2">
-            <UIcon name="heroicons:server" class="w-4 h-4 text-purple-600 dark:text-purple-400" />
-            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">存储类型</p>
-          </div>
-          <p class="text-lg font-bold text-stone-900 dark:text-white">
-            Telegram Cloud
-          </p>
-        </div>
-
-        <div class="p-4 bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 rounded-xl border border-orange-200 dark:border-orange-800">
-          <div class="flex items-center gap-2 mb-2">
-            <UIcon name="heroicons:clock" class="w-4 h-4 text-orange-600 dark:text-orange-400" />
-            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">运行时间</p>
-          </div>
-          <p class="text-lg font-bold text-stone-900 dark:text-white">
-            {{ systemConfig.uptime || '--' }}
-          </p>
-        </div>
-
-        <div class="p-4 bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 rounded-xl border border-indigo-200 dark:border-indigo-800">
-          <div class="flex items-center gap-2 mb-2">
-            <UIcon name="heroicons:user-group" class="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">群组上传</p>
-          </div>
-          <p class="text-lg font-bold text-stone-900 dark:text-white">
-            {{ systemConfig.groupUpload || '--' }}
-          </p>
-        </div>
-
-        <div class="p-4 bg-gradient-to-br from-teal-50 to-cyan-50 dark:from-teal-900/20 dark:to-cyan-900/20 rounded-xl border border-teal-200 dark:border-teal-800">
-          <div class="flex items-center gap-2 mb-2">
-            <UIcon name="heroicons:chart-bar" class="w-4 h-4 text-teal-600 dark:text-teal-400" />
-            <p class="text-sm font-medium text-stone-600 dark:text-stone-400">CDN监控</p>
-          </div>
-          <p class="text-lg font-bold text-stone-900 dark:text-white">
-            {{ systemConfig.cdnMonitor || '--' }}
-          </p>
-        </div>
-      </div>
-    </UCard>
+    <!-- 系统状态 -->
+    <AdminSystemStatus :config="systemConfig" />
   </div>
 </template>
 

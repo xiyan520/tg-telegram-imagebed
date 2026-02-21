@@ -4,7 +4,7 @@
 上传路由模块 - 处理文件上传 API
 """
 import time
-from flask import request, jsonify, make_response
+from flask import request, jsonify
 
 from . import upload_bp
 from ..config import logger
@@ -35,60 +35,53 @@ def validate_image_magic(content: bytes) -> str | None:
     return None
 
 
-@upload_bp.route('/api/upload', methods=['POST', 'OPTIONS'])
-@upload_bp.route('/upload', methods=['POST', 'OPTIONS'])
+def is_extension_allowed(filename: str) -> bool:
+    """检查文件扩展名是否在允许列表中"""
+    from ..config import get_allowed_extensions
+    if not filename:
+        return True  # 无文件名时跳过扩展名检查，依赖魔数校验
+    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    if not ext:
+        return True  # 无扩展名时跳过，依赖魔数校验
+    return ext in get_allowed_extensions()
+
+
+@upload_bp.route('/api/upload', methods=['POST'])
+@upload_bp.route('/upload', methods=['POST'])
 def upload_file():
     """处理前端文件上传（匿名上传）"""
-    if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        return add_cache_headers(response, 'no-cache')
-
     # 检查游客上传权限
     if not is_guest_upload_allowed():
-        response = jsonify({
+        return add_cache_headers(jsonify({
             'success': False,
             'error': '匿名上传已关闭，请使用 Token 上传或联系管理员'
-        })
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(response, 'no-cache'), 403
+        }), 'no-cache'), 403
 
     # 检查文件
     if 'file' not in request.files:
-        response = jsonify({'error': 'No file provided'})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(response, 'no-cache'), 400
+        return add_cache_headers(jsonify({'error': 'No file provided'}), 'no-cache'), 400
 
     file = request.files['file']
     if file.filename == '':
-        response = jsonify({'error': 'No file selected'})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(response, 'no-cache'), 400
+        return add_cache_headers(jsonify({'error': 'No file selected'}), 'no-cache'), 400
 
     content_type = (file.content_type or '').strip().lower()
 
-    # 阻止 SVG 上传（XSS 风险）
-    if 'svg' in content_type or (file.filename and file.filename.lower().endswith('.svg')):
-        response = jsonify({'success': False, 'error': 'SVG 文件不允许上传'})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(response, 'no-cache'), 400
+    # 检查文件扩展名是否在允许列表中（SVG 等危险格式由白名单统一控制）
+    if not is_extension_allowed(file.filename):
+        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in (file.filename or '') else ''
+        return add_cache_headers(jsonify({'success': False, 'error': f'不支持的文件格式: .{ext}'}), 'no-cache'), 400
 
     # 初步检查 Content-Type
     if content_type and not content_type.startswith('image/'):
-        response = jsonify({'success': False, 'error': '只允许上传图片文件'})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(response, 'no-cache'), 400
+        return add_cache_headers(jsonify({'success': False, 'error': '只允许上传图片文件'}), 'no-cache'), 400
 
     # 检查每日上传限制（匿名上传按来源全局限制）
     daily_limit = get_system_setting_int('daily_upload_limit', 0, minimum=0, maximum=1000000)
     if daily_limit > 0:
         uploaded_today = get_upload_count_today(source='web_upload')
         if uploaded_today >= daily_limit:
-            response = jsonify({'success': False, 'error': f'已达到每日上传限制({daily_limit}张)'})
-            response.headers['Access-Control-Allow-Origin'] = '*'
-            return add_cache_headers(response, 'no-cache'), 429
+            return add_cache_headers(jsonify({'success': False, 'error': f'已达到每日上传限制({daily_limit}张)'}), 'no-cache'), 429
 
     # 检查文件大小（使用动态配置）
     file.seek(0, 2)
@@ -99,9 +92,7 @@ def upload_file():
     max_size_bytes = max_size_mb * 1024 * 1024
 
     if file_size > max_size_bytes:
-        response = jsonify({'success': False, 'error': f'文件大小超过 {max_size_mb}MB 限制'})
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(response, 'no-cache'), 400
+        return add_cache_headers(jsonify({'success': False, 'error': f'文件大小超过 {max_size_mb}MB 限制'}), 'no-cache'), 400
 
     try:
         file_content = file.read()
@@ -109,9 +100,7 @@ def upload_file():
         # 魔数校验：验证文件实际类型
         detected_mime = validate_image_magic(file_content)
         if not detected_mime:
-            response = jsonify({'success': False, 'error': '无效的图片文件格式'})
-            response.headers['Access-Control-Allow-Origin'] = '*'
-            return add_cache_headers(response, 'no-cache'), 400
+            return add_cache_headers(jsonify({'success': False, 'error': '无效的图片文件格式'}), 'no-cache'), 400
 
         # 处理上传
         result = process_upload(
@@ -123,9 +112,7 @@ def upload_file():
         )
 
         if not result:
-            resp = jsonify({'error': 'Failed to upload to Telegram'})
-            resp.headers['Access-Control-Allow-Origin'] = '*'
-            return add_cache_headers(resp, 'no-cache'), 500
+            return add_cache_headers(jsonify({'error': 'Failed to upload to Telegram'}), 'no-cache'), 500
 
         # 生成 URL
         base_url = get_domain(request)
@@ -133,7 +120,7 @@ def upload_file():
 
         logger.info(f"Web上传完成: {file.filename} -> {result['encrypted_id']}")
 
-        resp = jsonify({
+        return add_cache_headers(jsonify({
             'success': True,
             'data': {
                 'url': permanent_url,
@@ -141,13 +128,8 @@ def upload_file():
                 'size': format_size(result['file_size']),
                 'upload_time': time.strftime('%Y-%m-%d %H:%M:%S')
             }
-        })
-
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(resp, 'no-cache')
+        }), 'no-cache')
 
     except Exception as e:
         logger.error(f"Upload error: {e}")
-        resp = jsonify({'error': str(e)})
-        resp.headers['Access-Control-Allow-Origin'] = '*'
-        return add_cache_headers(resp, 'no-cache'), 500
+        return add_cache_headers(jsonify({'error': str(e)}), 'no-cache'), 500

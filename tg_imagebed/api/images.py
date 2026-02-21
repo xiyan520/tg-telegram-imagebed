@@ -11,7 +11,6 @@ from flask import request, jsonify, Response, send_file, redirect, make_response
 
 from . import images_bp
 from ..config import (
-    CDN_REDIRECT_CACHE_TIME,
     STATIC_FOLDER, STATIC_VERSION, START_TIME, PORT,
     logger
 )
@@ -116,8 +115,9 @@ def serve_image(encrypted_id):
             if cdn_url not in request_url:
                 logger.info(f"图片已缓存，重定向到CDN: {encrypted_id} -> {cdn_url}")
                 update_access_count(encrypted_id, access_type)
+                cdn_redirect_cache_time = get_system_setting_int('cdn_redirect_cache_time', 300, minimum=0)
                 response = redirect(cdn_url, code=302)
-                response.headers['Cache-Control'] = f'public, max-age={CDN_REDIRECT_CACHE_TIME}'
+                response.headers['Cache-Control'] = f'public, max-age={cdn_redirect_cache_time}'
                 response.headers['X-CDN-Redirect'] = 'true'
                 response.headers['X-Redirect-Count'] = str(redirect_count + 1)
                 return response

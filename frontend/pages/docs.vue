@@ -8,9 +8,10 @@
       <p class="text-stone-600 dark:text-stone-400">
         使用我们的 API 轻松集成图片上传功能
       </p>
-      <div class="flex items-center justify-center gap-2">
-        <span class="text-sm text-stone-500 dark:text-stone-400">基础 URL:</span>
-        <code class="px-2 py-1 bg-stone-100 dark:bg-stone-800 rounded text-sm font-mono">
+      <!-- 基础 URL 卡片 -->
+      <div class="inline-flex items-center gap-3 px-5 py-3 bg-white dark:bg-neutral-800 border border-stone-200 dark:border-stone-700 rounded-xl shadow-sm">
+        <span class="text-xs font-medium text-stone-400 uppercase tracking-wider">Base URL</span>
+        <code class="px-3 py-1.5 bg-stone-100 dark:bg-stone-900 rounded-lg text-sm font-mono text-amber-600 dark:text-amber-400">
           {{ baseUrl }}
         </code>
         <UButton
@@ -20,6 +21,21 @@
           size="xs"
           @click="copyBaseUrl"
         />
+      </div>
+      <!-- curl 快速示例 -->
+      <div class="max-w-xl mx-auto text-left">
+        <p class="text-xs text-stone-400 mb-1.5 ml-1">快速上传示例</p>
+        <div class="relative group">
+          <code class="block px-4 py-3 bg-stone-900 dark:bg-stone-950 text-green-400 text-xs font-mono rounded-lg overflow-x-auto">curl -F "file=@image.jpg" {{ baseUrl }}/api/upload</code>
+          <UButton
+            icon="heroicons:clipboard-document"
+            color="gray"
+            variant="ghost"
+            size="xs"
+            class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+            @click="copyCurlExample"
+          />
+        </div>
       </div>
     </div>
 
@@ -46,17 +62,27 @@
             </p>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="p-4 bg-stone-50 dark:bg-stone-800/50 rounded-lg">
-                <h4 class="font-semibold text-stone-900 dark:text-white mb-2">支持格式</h4>
-                <p class="text-sm text-stone-600 dark:text-stone-400">
-                  JPG、PNG、GIF、WebP、AVIF、SVG
-                </p>
+              <div class="flex items-start gap-3 p-4 bg-stone-50 dark:bg-stone-800/50 rounded-lg">
+                <div class="w-8 h-8 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <UIcon name="heroicons:photo" class="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <h4 class="font-semibold text-stone-900 dark:text-white mb-1">支持格式</h4>
+                  <p class="text-sm text-stone-600 dark:text-stone-400">
+                    JPG、PNG、GIF、WebP、AVIF、SVG
+                  </p>
+                </div>
               </div>
-              <div class="p-4 bg-stone-50 dark:bg-stone-800/50 rounded-lg">
-                <h4 class="font-semibold text-stone-900 dark:text-white mb-2">文件限制</h4>
-                <p class="text-sm text-stone-600 dark:text-stone-400">
-                  单文件最大 20MB
-                </p>
+              <div class="flex items-start gap-3 p-4 bg-stone-50 dark:bg-stone-800/50 rounded-lg">
+                <div class="w-8 h-8 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <UIcon name="heroicons:arrow-up-tray" class="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <h4 class="font-semibold text-stone-900 dark:text-white mb-1">文件限制</h4>
+                  <p class="text-sm text-stone-600 dark:text-stone-400">
+                    单文件最大 20MB
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -155,6 +181,17 @@
               选择一张图片测试 API 上传功能
             </p>
 
+            <!-- Token 输入（可选） -->
+            <div class="flex items-center gap-3">
+              <UInput
+                v-model="testToken"
+                placeholder="Token（可选，留空则匿名上传）"
+                size="sm"
+                class="flex-1"
+                :ui="{ base: 'font-mono text-xs' }"
+              />
+            </div>
+
             <div>
               <input
                 ref="testFileInput"
@@ -174,10 +211,23 @@
               </UButton>
             </div>
 
-            <div v-if="testResult" class="p-4 rounded-lg" :class="testResult.success ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'">
-              <h4 class="font-semibold mb-2" :class="testResult.success ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200'">
-                {{ testResult.success ? '测试成功' : '测试失败' }}
-              </h4>
+            <!-- 上传成功预览 -->
+            <div v-if="testResult && testResult.success && testResult.data" class="flex items-start gap-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+              <img
+                :src="testResult.data.url"
+                :alt="testResult.data.filename"
+                class="w-20 h-20 object-cover rounded-lg border border-green-300 dark:border-green-700 flex-shrink-0"
+              />
+              <div class="flex-1 min-w-0">
+                <h4 class="font-semibold text-green-800 dark:text-green-200 mb-1">测试成功</h4>
+                <p class="text-xs text-green-700 dark:text-green-300 truncate font-mono">{{ testResult.data.url }}</p>
+                <DocsCodeBlock :code="JSON.stringify(testResult, null, 2)" language="json" class="mt-2" />
+              </div>
+            </div>
+
+            <!-- 上传失败 -->
+            <div v-else-if="testResult && !testResult.success" class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <h4 class="font-semibold mb-2 text-red-800 dark:text-red-200">测试失败</h4>
               <DocsCodeBlock :code="JSON.stringify(testResult, null, 2)" language="json" />
             </div>
           </div>
@@ -191,7 +241,8 @@
 import { apiSections } from '~/data/apiDocs'
 
 const config = useRuntimeConfig()
-const toast = useToast()
+const toast = useLightToast()
+const { copy: clipboardCopy } = useClipboardCopy()
 const { uploadImages } = useImageApi()
 
 const baseUrl = computed(() => config.public.apiBase || window.location.origin)
@@ -199,6 +250,7 @@ const baseUrl = computed(() => config.public.apiBase || window.location.origin)
 const testFileInput = ref<HTMLInputElement>()
 const testUploading = ref(false)
 const testResult = ref<any>(null)
+const testToken = ref('')
 
 const errorCodes = [
   { status: 200, description: '请求成功' },
@@ -212,24 +264,19 @@ const errorCodes = [
   { status: 500, description: '服务器错误' },
 ]
 
-const copyBaseUrl = async () => {
-  try {
-    await navigator.clipboard.writeText(baseUrl.value)
-    toast.add({
-      title: '已复制',
-      description: '基础 URL 已复制到剪贴板',
-      color: 'green',
-    })
-  } catch (err) {
-    console.error('复制失败:', err)
-  }
+const copyBaseUrl = () => {
+  clipboardCopy(baseUrl.value, '基础 URL 已复制')
 }
 
-const getStatusColor = (status: number): string => {
-  if (status >= 200 && status < 300) return 'green'
-  if (status >= 300 && status < 400) return 'blue'
-  if (status >= 400 && status < 500) return 'amber'
-  return 'red'
+const copyCurlExample = () => {
+  clipboardCopy(`curl -F "file=@image.jpg" ${baseUrl.value}/api/upload`, '已复制 curl 命令')
+}
+
+const getStatusColor = (status: number) => {
+  if (status >= 200 && status < 300) return 'green' as const
+  if (status >= 300 && status < 400) return 'blue' as const
+  if (status >= 400 && status < 500) return 'amber' as const
+  return 'red' as const
 }
 
 const handleTestUpload = async (event: Event) => {
@@ -240,32 +287,39 @@ const handleTestUpload = async (event: Event) => {
   testResult.value = null
 
   try {
-    const results = await uploadImages([target.files[0]])
+    // 根据是否填写 Token 选择不同的上传端点
+    const file = target.files[0]
+    const fd = new FormData()
+    fd.append('file', file)
+
+    const headers: Record<string, string> = {}
+    let url = `${baseUrl.value}/api/upload`
+
+    if (testToken.value.trim()) {
+      url = `${baseUrl.value}/api/auth/upload`
+      headers['Authorization'] = `Bearer ${testToken.value.trim()}`
+    }
+
+    const resp = await $fetch<any>(url, {
+      method: 'POST',
+      body: fd,
+      headers,
+    })
+
     testResult.value = {
       success: true,
-      data: results[0],
+      data: resp.data || resp,
     }
-    toast.add({
-      title: '测试成功',
-      description: '图片上传成功',
-      color: 'green',
-    })
+    toast.success('测试成功', '图片上传成功')
   } catch (error: any) {
     testResult.value = {
       success: false,
-      error: error.message,
+      error: error.data?.error || error.message,
     }
-    toast.add({
-      title: '测试失败',
-      description: error.message,
-      color: 'red',
-    })
+    toast.error('测试失败', error.data?.error || error.message)
   } finally {
     testUploading.value = false
-    // 清空文件选择
-    if (target) {
-      target.value = ''
-    }
+    if (target) target.value = ''
   }
 }
 </script>

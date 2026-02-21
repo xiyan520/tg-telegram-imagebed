@@ -211,7 +211,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Gallery } from '~/composables/useAdminGalleryApi'
+import type { Gallery } from '~/composables/useGalleryApi'
 
 definePageMeta({
   layout: 'admin',

@@ -1,6 +1,18 @@
 export default defineNuxtRouteMiddleware(async (to, from) => {
   const authStore = useAuthStore()
 
+  // 检查是否需要首次设置
+  if (process.client) {
+    try {
+      const res = await $fetch<{ need_setup: boolean }>('/api/setup/status')
+      if (res.need_setup) {
+        return navigateTo('/setup')
+      }
+    } catch {
+      // 接口异常时继续正常认证流程
+    }
+  }
+
   // 恢复并验证认证状态
   if (process.client && !authStore.isAuthenticated) {
     await authStore.restoreAuth()

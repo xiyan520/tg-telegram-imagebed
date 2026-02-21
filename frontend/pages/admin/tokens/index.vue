@@ -41,6 +41,17 @@
           />
         </div>
 
+        <!-- 批量操作按钮 -->
+        <div v-if="selectedIds.length > 0" class="flex items-center gap-2">
+          <span class="text-sm text-amber-600 dark:text-amber-400 font-medium">
+            已选 {{ selectedIds.length }} 项
+          </span>
+          <UButton size="sm" color="green" variant="soft" @click="batchAction('enable')">批量启用</UButton>
+          <UButton size="sm" color="gray" variant="soft" @click="batchAction('disable')">批量禁用</UButton>
+          <UButton size="sm" color="red" variant="soft" @click="batchAction('delete')">批量删除</UButton>
+          <UButton size="sm" color="gray" variant="ghost" @click="clearSelection">取消选择</UButton>
+        </div>
+
         <div class="md:ml-auto text-xs text-stone-500 dark:text-stone-400">
           固定按创建时间倒序排序
         </div>
@@ -66,6 +77,15 @@
         <table class="min-w-full text-sm">
           <thead>
             <tr class="text-left text-stone-600 dark:text-stone-300 border-b border-stone-200/60 dark:border-neutral-700/60">
+              <th class="py-3 pr-2 font-medium w-10">
+                <input
+                  type="checkbox"
+                  :checked="isAllSelected"
+                  :indeterminate="isPartialSelected"
+                  class="rounded border-stone-300 dark:border-neutral-600 text-amber-500 focus:ring-amber-500"
+                  @change="toggleSelectAll"
+                />
+              </th>
               <th class="py-3 pr-4 font-medium">ID</th>
               <th class="py-3 pr-4 font-medium">Token</th>
               <th class="py-3 pr-4 font-medium">描述</th>
@@ -81,14 +101,25 @@
               v-for="t in tokens"
               :key="t.id"
               class="text-stone-800 dark:text-stone-100"
+              :class="{ 'bg-amber-50/50 dark:bg-amber-900/10': selectedIds.includes(t.id) }"
             >
+              <td class="py-3 pr-2">
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.includes(t.id)"
+                  class="rounded border-stone-300 dark:border-neutral-600 text-amber-500 focus:ring-amber-500"
+                  @change="toggleSelect(t.id)"
+                />
+              </td>
               <td class="py-3 pr-4">
                 <span class="font-mono text-xs text-stone-700 dark:text-stone-300">{{ t.id }}</span>
               </td>
               <td class="py-3 pr-4">
-                <code class="font-mono text-xs px-2 py-1 rounded bg-stone-100 dark:bg-neutral-800">
-                  {{ t.token_masked }}
-                </code>
+                <NuxtLink :to="`/admin/tokens/${t.id}`" class="hover:underline">
+                  <code class="font-mono text-xs px-2 py-1 rounded bg-stone-100 dark:bg-neutral-800 cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
+                    {{ t.token_masked }}
+                  </code>
+                </NuxtLink>
               </td>
               <td class="py-3 pr-4 max-w-[18rem]">
                 <span class="text-stone-700 dark:text-stone-300 truncate block">
@@ -139,13 +170,22 @@
                 </div>
               </td>
               <td class="py-3 text-right">
-                <UButton
-                  icon="heroicons:trash"
-                  color="red"
-                  variant="ghost"
-                  size="sm"
-                  @click="askDelete(t)"
-                />
+                <div class="flex items-center justify-end gap-1">
+                  <UButton
+                    icon="heroicons:eye"
+                    color="gray"
+                    variant="ghost"
+                    size="sm"
+                    :to="`/admin/tokens/${t.id}`"
+                  />
+                  <UButton
+                    icon="heroicons:trash"
+                    color="red"
+                    variant="ghost"
+                    size="sm"
+                    @click="askDelete(t)"
+                  />
+                </div>
               </td>
             </tr>
           </tbody>
@@ -165,7 +205,6 @@
         </div>
       </template>
     </UCard>
-
     <!-- 创建Token模态框 -->
     <UModal v-model="createModalOpen">
       <UCard>
@@ -218,7 +257,6 @@
             </div>
             <UToggle v-model="createForm.is_active" size="lg" />
           </div>
-
           <div v-if="createdToken" class="p-4 border border-amber-200 dark:border-amber-900/40 bg-amber-50 dark:bg-amber-900/20 rounded-xl space-y-3">
             <div class="flex items-start gap-3">
               <UIcon name="heroicons:exclamation-triangle" class="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
@@ -275,13 +313,24 @@
           <h3 class="text-lg font-semibold text-red-600">确认删除</h3>
         </template>
 
-        <div class="space-y-2">
+        <div class="space-y-3">
           <p class="text-stone-700 dark:text-stone-300">
             确定要删除该Token吗？此操作不可恢复。
           </p>
           <div v-if="deletingToken" class="text-xs text-stone-600 dark:text-stone-400">
             <div>ID：<span class="font-mono">{{ deletingToken.id }}</span></div>
             <div>Token：<span class="font-mono">{{ deletingToken.token_masked }}</span></div>
+          </div>
+          <!-- 影响范围 -->
+          <div v-if="deleteImpact" class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg text-sm space-y-1">
+            <p class="font-medium text-red-700 dark:text-red-300">删除影响范围：</p>
+            <p class="text-red-600 dark:text-red-400">关联图片：{{ deleteImpact.upload_count }} 张（将解除关联）</p>
+            <p class="text-red-600 dark:text-red-400">拥有画集：{{ deleteImpact.gallery_count }} 个（将解除关联）</p>
+            <p v-if="deleteImpact.access_count > 0" class="text-red-600 dark:text-red-400">画集授权：{{ deleteImpact.access_count }} 条（将被清除）</p>
+          </div>
+          <div v-else-if="loadingImpact" class="flex items-center gap-2 text-sm text-stone-500">
+            <div class="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+            正在查询影响范围...
           </div>
         </div>
 
@@ -297,9 +346,50 @@
         </template>
       </UCard>
     </UModal>
+
+    <!-- 批量操作确认模态框 -->
+    <UModal v-model="batchModalOpen">
+      <UCard>
+        <template #header>
+          <h3 class="text-lg font-semibold" :class="batchModalAction === 'delete' ? 'text-red-600' : 'text-stone-900 dark:text-white'">
+            {{ batchModalTitle }}
+          </h3>
+        </template>
+
+        <div class="space-y-3">
+          <p class="text-stone-700 dark:text-stone-300">
+            {{ batchModalDesc }}
+          </p>
+          <!-- 批量删除影响范围 -->
+          <div v-if="batchModalAction === 'delete' && batchImpact" class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg text-sm space-y-1">
+            <p class="font-medium text-red-700 dark:text-red-300">删除影响范围汇总：</p>
+            <p class="text-red-600 dark:text-red-400">关联图片：{{ batchImpact.upload_count }} 张</p>
+            <p class="text-red-600 dark:text-red-400">拥有画集：{{ batchImpact.gallery_count }} 个</p>
+            <p v-if="batchImpact.access_count > 0" class="text-red-600 dark:text-red-400">画集授权：{{ batchImpact.access_count }} 条</p>
+          </div>
+          <div v-else-if="batchModalAction === 'delete' && loadingBatchImpact" class="flex items-center gap-2 text-sm text-stone-500">
+            <div class="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+            正在查询影响范围...
+          </div>
+        </div>
+
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <UButton color="gray" variant="ghost" @click="batchModalOpen = false">取消</UButton>
+            <UButton
+              :color="batchModalAction === 'delete' ? 'red' : 'primary'"
+              :loading="batchProcessing"
+              :disabled="batchProcessing"
+              @click="confirmBatch"
+            >
+              确认
+            </UButton>
+          </div>
+        </template>
+      </UCard>
+    </UModal>
   </div>
 </template>
-
 <script setup lang="ts">
 definePageMeta({
   layout: 'admin',
@@ -327,6 +417,13 @@ interface TokenListData {
   items: AdminTokenItem[]
 }
 
+interface ImpactData {
+  upload_count: number
+  gallery_count: number
+  access_count: number
+  token_count?: number
+}
+
 const runtimeConfig = useRuntimeConfig()
 const notification = useNotification()
 
@@ -351,10 +448,28 @@ const totalPages = computed(() => {
   return Math.max(1, Number.isFinite(pages) ? pages : 1)
 })
 
+// 批量选择
+const selectedIds = ref<number[]>([])
+const isAllSelected = computed(() => tokens.value.length > 0 && selectedIds.value.length === tokens.value.length)
+const isPartialSelected = computed(() => selectedIds.value.length > 0 && selectedIds.value.length < tokens.value.length)
+const toggleSelect = (id: number) => {
+  const idx = selectedIds.value.indexOf(id)
+  if (idx >= 0) selectedIds.value.splice(idx, 1)
+  else selectedIds.value.push(id)
+}
+
+const toggleSelectAll = () => {
+  if (isAllSelected.value) selectedIds.value = []
+  else selectedIds.value = tokens.value.map(t => t.id)
+}
+
+const clearSelection = () => { selectedIds.value = [] }
+
 // 创建Token
 const createModalOpen = ref(false)
 const creating = ref(false)
 const createdToken = ref<string | null>(null)
+const tokenCopied = ref(false)
 const createForm = ref({
   description: '',
   expires_at: '',
@@ -362,11 +477,55 @@ const createForm = ref({
   is_active: true,
 })
 
+// 系统设置默认值
+const tokenDefaults = ref({ upload_limit: 100, expires_days: 365 })
+const tokenDefaultsLoaded = ref(false)
+
+const loadTokenDefaults = async () => {
+  if (tokenDefaultsLoaded.value) return
+  try {
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
+      credentials: 'include'
+    })
+    if (resp?.success) {
+      const d = resp.data
+      tokenDefaults.value = {
+        upload_limit: Number(d.guest_token_max_upload_limit) || 1000,
+        expires_days: Number(d.guest_token_max_expires_days) || 365,
+      }
+      tokenDefaultsLoaded.value = true
+    }
+  } catch { /* 静默失败，使用硬编码默认值 */ }
+}
+
 // 删除Token
 const deleteModalOpen = ref(false)
 const deleting = ref(false)
 const deletingToken = ref<AdminTokenItem | null>(null)
+const deleteImpact = ref<ImpactData | null>(null)
+const loadingImpact = ref(false)
 
+// 批量操作
+const batchModalOpen = ref(false)
+const batchModalAction = ref<'enable' | 'disable' | 'delete'>('enable')
+const batchProcessing = ref(false)
+const batchImpact = ref<ImpactData | null>(null)
+const loadingBatchImpact = ref(false)
+
+const batchModalTitle = computed(() => {
+  const map = { enable: '批量启用', disable: '批量禁用', delete: '批量删除' }
+  return map[batchModalAction.value] || '批量操作'
+})
+
+const batchModalDesc = computed(() => {
+  const n = selectedIds.value.length
+  const map = {
+    enable: `确定要启用选中的 ${n} 个 Token 吗？`,
+    disable: `确定要禁用选中的 ${n} 个 Token 吗？禁用后这些 Token 将无法使用。`,
+    delete: `确定要删除选中的 ${n} 个 Token 吗？此操作不可恢复。`,
+  }
+  return map[batchModalAction.value] || ''
+})
 const isExpired = (t: AdminTokenItem) => {
   if (typeof t.is_expired === 'boolean') return t.is_expired
   if (!t.expires_at) return false
@@ -413,6 +572,9 @@ const loadTokens = async () => {
     }
 
     tokens.value = data.items ?? []
+    // 清除不在当前页的选中项
+    const currentIds = new Set(tokens.value.map(t => t.id))
+    selectedIds.value = selectedIds.value.filter(id => currentIds.has(id))
   } catch (error: any) {
     console.error('加载Token列表失败:', error)
     notification.error('加载失败', error.data?.error || error.message || '无法加载Token列表')
@@ -429,21 +591,36 @@ watch(status, async () => {
 watch(page, async () => {
   await loadTokens()
 })
-
-const openCreateModal = () => {
+const openCreateModal = async () => {
   createdToken.value = null
+  tokenCopied.value = false
+  await loadTokenDefaults()
+
+  // 根据系统设置计算默认过期时间
+  const days = tokenDefaults.value.expires_days
+  const expires = new Date(Date.now() + days * 86400000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const defaultExpires = `${expires.getFullYear()}-${pad(expires.getMonth() + 1)}-${pad(expires.getDate())}T${pad(expires.getHours())}:${pad(expires.getMinutes())}`
+
   createForm.value = {
     description: '',
-    expires_at: '',
-    upload_limit: 100,
+    expires_at: defaultExpires,
+    upload_limit: tokenDefaults.value.upload_limit,
     is_active: true,
   }
   createModalOpen.value = true
 }
 
 const closeCreateModal = () => {
+  // 创建保护：如果已创建 Token 但未复制，二次确认
+  if (createdToken.value && !tokenCopied.value) {
+    if (!window.confirm('Token 尚未复制，关闭后将无法再次查看。确定要关闭吗？')) {
+      return
+    }
+  }
   createModalOpen.value = false
   createdToken.value = null
+  tokenCopied.value = false
 }
 
 const createToken = async () => {
@@ -467,6 +644,7 @@ const createToken = async () => {
     }
 
     createdToken.value = resp.data?.token || null
+    tokenCopied.value = false
     notification.success('创建成功', 'Token 已生成，请及时复制保存')
     await loadTokens()
   } catch (error: any) {
@@ -481,16 +659,24 @@ const copyCreatedToken = async () => {
   if (!createdToken.value) return
   try {
     await navigator.clipboard.writeText(createdToken.value)
+    tokenCopied.value = true
     notification.success('已复制', 'Token 已复制到剪贴板')
   } catch (error) {
     notification.error('复制失败', '无法复制到剪贴板')
   }
 }
-
+// 禁用保护
 const updateStatus = async (t: AdminTokenItem, next: boolean) => {
   if (isExpired(t)) {
     notification.warning('无法操作', '已过期的Token无法修改状态')
     return
+  }
+
+  // 禁用时二次确认
+  if (!next) {
+    if (!window.confirm('确定要禁用该 Token 吗？禁用后该 Token 将无法使用。')) {
+      return
+    }
   }
 
   const prev = t.is_active
@@ -523,9 +709,23 @@ const updateStatus = async (t: AdminTokenItem, next: boolean) => {
   }
 }
 
-const askDelete = (t: AdminTokenItem) => {
+// 删除增强：请求影响范围
+const askDelete = async (t: AdminTokenItem) => {
   deletingToken.value = t
+  deleteImpact.value = null
   deleteModalOpen.value = true
+
+  // 异步加载影响范围
+  loadingImpact.value = true
+  try {
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens/${t.id}/impact`, {
+      credentials: 'include'
+    })
+    if (resp?.success) {
+      deleteImpact.value = resp.data
+    }
+  } catch { /* 静默失败 */ }
+  finally { loadingImpact.value = false }
 }
 
 const confirmDelete = async () => {
@@ -544,12 +744,63 @@ const confirmDelete = async () => {
     notification.success('删除成功', 'Token 已删除')
     deleteModalOpen.value = false
     deletingToken.value = null
+    deleteImpact.value = null
     await loadTokens()
   } catch (error: any) {
     console.error('删除Token失败:', error)
     notification.error('删除失败', error.data?.error || error.message || '无法删除Token')
   } finally {
     deleting.value = false
+  }
+}
+// 批量操作
+const batchAction = async (action: 'enable' | 'disable' | 'delete') => {
+  if (selectedIds.value.length === 0) return
+  batchModalAction.value = action
+  batchImpact.value = null
+  batchModalOpen.value = true
+
+  // 批量删除时异步加载影响范围
+  if (action === 'delete') {
+    loadingBatchImpact.value = true
+    try {
+      const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens/batch`, {
+        method: 'POST',
+        credentials: 'include',
+        body: { action: 'impact', ids: selectedIds.value }
+      })
+      if (resp?.success) {
+        batchImpact.value = resp.data
+      }
+    } catch { /* 静默失败 */ }
+    finally { loadingBatchImpact.value = false }
+  }
+}
+
+const confirmBatch = async () => {
+  batchProcessing.value = true
+  try {
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens/batch`, {
+      method: 'POST',
+      credentials: 'include',
+      body: { action: batchModalAction.value, ids: selectedIds.value }
+    })
+
+    if (!resp?.success) {
+      throw new Error(resp?.error || '操作失败')
+    }
+
+    const d = resp.data
+    const actionText = batchModalTitle.value
+    notification.success(`${actionText}完成`, `成功 ${d.success_count} 个，失败 ${d.fail_count} 个`)
+    batchModalOpen.value = false
+    selectedIds.value = []
+    await loadTokens()
+  } catch (error: any) {
+    console.error('批量操作失败:', error)
+    notification.error('操作失败', error.data?.error || error.message || '批量操作失败')
+  } finally {
+    batchProcessing.value = false
   }
 }
 

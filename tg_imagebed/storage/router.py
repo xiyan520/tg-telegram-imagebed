@@ -18,7 +18,7 @@ from .backends.local import LocalBackend
 from .backends.rclone import RcloneBackend
 from .backends.s3 import S3Backend
 
-from ..config import PROXY_URL, logger
+from ..config import get_proxy_url, logger
 from ..bot_control import get_effective_bot_token
 
 
@@ -57,10 +57,9 @@ class StorageRouter:
 
     def get_active_backend_name(self) -> str:
         """获取当前激活的后端名称"""
-        # 优先级：环境变量 > 数据库设置 > 配置文件 > 默认值
+        # 优先级：数据库设置 > 配置文件 > 默认值
         from ..database import get_system_setting
         return (
-            os.getenv("STORAGE_BACKEND") or
             get_system_setting("storage_active_backend") or
             self._config.get("active") or
             "telegram"
@@ -75,7 +74,7 @@ class StorageRouter:
             effective_token, _ = get_effective_bot_token()
             bot_token = str(cfg2.get("bot_token") or effective_token or "")
             chat_id = int(cfg2.get("chat_id") or 0)
-            proxy_url = str(cfg2.get("proxy_url") or PROXY_URL or "").strip() or None
+            proxy_url = str(cfg2.get("proxy_url") or get_proxy_url() or "").strip() or None
             return TelegramBackend(name=name, bot_token=bot_token, chat_id=chat_id, proxy_url=proxy_url)
 
         if driver == "local":
@@ -256,15 +255,7 @@ _router_ts: float = 0.0
 
 
 def _load_storage_config() -> Dict[str, Any]:
-    """加载存储配置"""
-    # 优先从环境变量读取
-    env_json = (os.getenv("STORAGE_CONFIG_JSON") or "").strip()
-    if env_json:
-        try:
-            return json.loads(env_json)
-        except Exception as e:
-            logger.error(f"解析 STORAGE_CONFIG_JSON 失败: {e}")
-
+    """加载存储配置（从数据库读取）"""
     # 从数据库读取
     try:
         from ..database import get_system_setting
@@ -280,7 +271,7 @@ def _load_storage_config() -> Dict[str, Any]:
         "backends": {
             "telegram": {
                 "driver": "telegram",
-                "bot_token": "env:BOT_TOKEN",
+                "bot_token": "",
                 "chat_id": "0",
             },
             "local": {

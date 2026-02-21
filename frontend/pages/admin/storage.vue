@@ -324,6 +324,15 @@
               <UInput v-model="backendForm.chat_id" placeholder="留空使用环境变量 STORAGE_CHAT_ID" />
             </div>
 
+            <!-- 同时用作机器人开关 -->
+            <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg mt-4">
+              <div>
+                <p class="text-sm font-medium text-stone-700 dark:text-stone-300">同时用作机器人</p>
+                <p class="text-xs text-stone-500 dark:text-stone-400">保存时将此 Bot Token 同步到 Telegram 机器人配置</p>
+              </div>
+              <UToggle v-model="backendForm.use_as_bot" />
+            </div>
+
             <!-- 群组上传配置 -->
             <div class="pt-4 border-t border-stone-200 dark:border-neutral-700">
               <p class="font-medium text-stone-900 dark:text-white mb-4">群组上传设置</p>
@@ -545,6 +554,8 @@ const backendForm = ref<{
   base_path: string
   rclone_bin: string
   config_path: string
+  // 联动标志
+  use_as_bot: boolean
 }>({
   name: '',
   driver: 'telegram',
@@ -561,7 +572,8 @@ const backendForm = ref<{
   remote: '',
   base_path: '',
   rclone_bin: '',
-  config_path: ''
+  config_path: '',
+  use_as_bot: false
 })
 
 // 驱动选项
@@ -800,7 +812,8 @@ const resetBackendForm = () => {
     remote: '',
     base_path: '',
     rclone_bin: '',
-    config_path: ''
+    config_path: '',
+    use_as_bot: false
   }
 }
 
@@ -831,7 +844,8 @@ const openEditModal = (name: string) => {
     remote: cfg.remote || '',
     base_path: cfg.base_path || '',
     rclone_bin: cfg.rclone_bin || '',
-    config_path: cfg.config_path || ''
+    config_path: cfg.config_path || '',
+    use_as_bot: false
   }
   showBackendModal.value = true
 }
@@ -881,7 +895,7 @@ const saveBackend = async () => {
       // 编辑
       const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends/${encodeURIComponent(name)}`, {
         method: 'PUT',
-        body: { config },
+        body: { config, use_as_bot: form.use_as_bot },
         credentials: 'include'
       })
       if (!resp?.success) throw new Error(resp?.error || '更新失败')
@@ -889,7 +903,7 @@ const saveBackend = async () => {
       // 添加
       const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends`, {
         method: 'POST',
-        body: { name, config },
+        body: { name, config, use_as_bot: form.use_as_bot },
         credentials: 'include'
       })
       if (!resp?.success) throw new Error(resp?.error || '添加失败')

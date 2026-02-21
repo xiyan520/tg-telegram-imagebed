@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 
 import requests
 
-from ..config import STORAGE_CHAT_ID, CLOUDFLARE_CDN_DOMAIN, logger
+from ..config import logger
 from ..database import save_file_info, get_file_info, update_file_path_in_db
 from ..utils import encrypt_file_id, get_mime_type
 from .cdn_service import add_to_cdn_monitor
@@ -52,99 +52,6 @@ def get_fresh_file_path(file_id: str) -> Optional[str]:
 
     except Exception as e:
         logger.error(f"获取文件路径异常: {e}")
-        return None
-
-
-def upload_to_telegram(
-    file_content: bytes,
-    filename: str,
-    content_type: str,
-    file_size: int,
-    caption: str = ""
-) -> Optional[Dict[str, Any]]:
-    """
-    上传文件到 Telegram
-
-    Args:
-        file_content: 文件内容
-        filename: 文件名
-        content_type: MIME 类型
-        file_size: 文件大小
-        caption: 图片说明
-
-    Returns:
-        包含 file_id, file_path, file_size 的字典，失败返回 None
-    """
-    if not BOT_TOKEN or not STORAGE_CHAT_ID:
-        logger.error("Telegram 配置不完整")
-        return None
-
-    try:
-        # 根据文件大小选择上传方式
-        if file_size <= 10 * 1024 * 1024:  # 10MB 以下使用 sendPhoto
-            files = {'photo': (filename, file_content, content_type)}
-            data = {'chat_id': STORAGE_CHAT_ID, 'caption': caption}
-            response = requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-                files=files,
-                data=data,
-                timeout=30
-            )
-        else:  # 10MB 以上使用 sendDocument
-            files = {'document': (filename, file_content, content_type)}
-            data = {'chat_id': STORAGE_CHAT_ID, 'caption': caption}
-            response = requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument",
-                files=files,
-                data=data,
-                timeout=60
-            )
-
-        if not response.ok:
-            logger.error(f"Telegram API error: {response.text}")
-            return None
-
-        result = response.json()
-        if not result.get('ok'):
-            logger.error(f"Telegram API failed: {result}")
-            return None
-
-        # 获取文件信息
-        if file_size <= 10 * 1024 * 1024:
-            photos = result['result'].get('photo', [])
-            if not photos:
-                return None
-            photo = photos[-1]
-            file_id = photo['file_id']
-        else:
-            document = result['result'].get('document')
-            if not document:
-                return None
-            file_id = document['file_id']
-
-        # 获取文件路径
-        file_response = requests.get(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/getFile",
-            params={'file_id': file_id},
-            timeout=30
-        )
-
-        if not file_response.ok:
-            logger.error(f"Failed to get file info: {file_response.text}")
-            return None
-
-        file_result = file_response.json()
-        if not file_result.get('ok'):
-            return None
-
-        return {
-            'file_id': file_id,
-            'file_path': file_result['result']['file_path'],
-            'file_size': file_result['result'].get('file_size', file_size)
-        }
-
-    except Exception as e:
-        logger.error(f"上传到 Telegram 失败: {e}")
         return None
 
 
@@ -335,7 +242,6 @@ def record_existing_telegram_file(
 
 __all__ = [
     'get_fresh_file_path',
-    'upload_to_telegram',
     'process_upload',
     'record_existing_telegram_file',
 ]

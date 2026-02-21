@@ -114,6 +114,7 @@
 
 <script setup lang="ts">
 import type { TokenVaultItem } from '~/types/tokenVault'
+import { maskToken } from '~/stores/token'
 
 interface Props {
   modelValue?: boolean
@@ -138,7 +139,7 @@ const emit = defineEmits<{
 
 const config = useRuntimeConfig()
 const authStore = useAuthStore()
-const guestTokenStore = useGuestTokenStore()
+const tokenStore = useTokenStore()
 
 const isOpen = computed({
   get: () => props.modelValue,
@@ -163,13 +164,7 @@ const tabs = computed(() => {
   return items
 })
 
-const vaultItems = computed(() => guestTokenStore.vaultItems)
-
-const maskToken = (token: string) => {
-  const t = (token || '').trim()
-  if (t.length <= 12) return t
-  return `${t.slice(0, 8)}…${t.slice(-4)}`
-}
+const vaultItems = computed(() => tokenStore.vaultItems)
 
 const selectVaultToken = (item: TokenVaultItem) => {
   tokenForm.token = item.token
@@ -221,7 +216,7 @@ const handleTokenVerify = async () => {
     }
 
     // 添加到 vault
-    await guestTokenStore.addTokenToVault(tokenForm.token, { makeActive: true, verify: true })
+    await tokenStore.addTokenToVault(tokenForm.token, { makeActive: true, verify: true })
 
     isOpen.value = false
     emit('success', 'token')

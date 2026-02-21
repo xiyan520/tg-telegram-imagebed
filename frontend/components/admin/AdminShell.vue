@@ -15,7 +15,6 @@
       <AdminTopbar
         :page-title="pageTitle"
         @open-settings="$emit('openSettings')"
-        @logout="$emit('logout')"
       >
         <template #title>
           <slot name="title" />
@@ -40,7 +39,6 @@ defineProps<{
 
 defineEmits<{
   openSettings: []
-  logout: []
 }>()
 
 const adminUiStore = useAdminUiStore()

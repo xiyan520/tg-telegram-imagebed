@@ -21,12 +21,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from ..config import (
-    CLOUDFLARE_CDN_DOMAIN, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ZONE_ID,
-    CDN_MONITOR_INTERVAL, CDN_MONITOR_MAX_RETRIES, CDN_MONITOR_QUEUE_SIZE,
-    ENABLE_CACHE_WARMING,
-    logger
-)
+from ..config import logger, get_proxy_url
 from ..database import update_cdn_cache_status, get_file_info, get_uncached_files, get_system_setting
 
 
@@ -69,14 +64,8 @@ def _get_effective_cdn_settings():
         zone_id = str(get_system_setting("cloudflare_zone_id") or "").strip()
         cache_warming_enabled = str(get_system_setting("enable_cache_warming") or "0") == "1"
     except Exception as e:
-        # 数据库不可用时回退到 config 常量
-        logger.debug(f"从数据库读取 CDN 设置失败，使用 config 常量: {e}")
-        cdn_enabled = bool(CDN_ENABLED)
-        monitor_enabled = bool(CDN_MONITOR_ENABLED)
-        cdn_domain = str(CLOUDFLARE_CDN_DOMAIN or "").strip()
-        api_token = str(CLOUDFLARE_API_TOKEN or "").strip()
-        zone_id = str(CLOUDFLARE_ZONE_ID or "").strip()
-        cache_warming_enabled = bool(ENABLE_CACHE_WARMING)
+        # 数据库不可用时使用默认值（全部关闭）
+        logger.debug(f"从数据库读取 CDN 设置失败: {e}")
 
     _CDN_SETTINGS_CACHE.update({
         "ts": now,
@@ -89,6 +78,10 @@ def _get_effective_cdn_settings():
     })
     return cdn_enabled, monitor_enabled, cdn_domain, api_token, zone_id, cache_warming_enabled
 
+
+# CDN 监控默认参数（硬编码，不再从环境变量读取）
+CDN_MONITOR_MAX_RETRIES = 15
+CDN_MONITOR_QUEUE_SIZE = 1000
 
 # CDN 缓存状态常量
 CF_CACHED_STATUSES = {'HIT', 'STALE', 'UPDATING', 'REVALIDATED'}
@@ -144,6 +137,13 @@ class CloudflareCDN:
             headers['Authorization'] = f'Bearer {self.api_token}'
         self.headers = headers
         self._cfg_ts = now
+
+        # 同步代理设置到 Session
+        proxy = get_proxy_url()
+        if proxy:
+            self._session.proxies = {'http': proxy, 'https': proxy}
+        else:
+            self._session.proxies = {}
 
     def _api_post(self, path: str, payload: dict) -> Tuple[bool, str]:
         """发送 Cloudflare API POST 请求"""

@@ -28,30 +28,18 @@
       <slot name="actions" />
 
       <!-- 用户信息 -->
-      <div v-if="authStore.isAuthenticated" class="flex items-center gap-2">
-        <span class="hidden sm:inline text-sm text-stone-600 dark:text-stone-400">
-          {{ authStore.username }}
-        </span>
-
-        <!-- 设置按钮 -->
-        <UTooltip text="管理员设置">
-          <button
-            class="p-2 text-stone-600 dark:text-stone-300 hover:bg-stone-100/50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors"
-            @click="$emit('openSettings')"
-          >
-            <UIcon name="heroicons:cog-6-tooth" class="w-5 h-5" />
-          </button>
-        </UTooltip>
-
-        <!-- 退出按钮 -->
-        <UTooltip text="退出登录">
-          <button
-            class="p-2 text-stone-600 dark:text-stone-300 hover:bg-stone-100/50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors"
-            @click="$emit('logout')"
-          >
-            <UIcon name="heroicons:arrow-right-on-rectangle" class="w-5 h-5" />
-          </button>
-        </UTooltip>
+      <div v-if="authStore.isAuthenticated" class="flex items-center">
+        <!-- 用户名 + 设置按钮合并为一个可点击区域 -->
+        <button
+          class="flex items-center gap-2 px-3 py-1.5 text-stone-600 dark:text-stone-300 hover:bg-stone-100/50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors"
+          @click="$emit('openSettings')"
+        >
+          <div class="w-7 h-7 bg-gradient-to-br from-amber-500 to-orange-500 rounded-full flex items-center justify-center">
+            <UIcon name="heroicons:user" class="w-4 h-4 text-white" />
+          </div>
+          <span class="hidden sm:inline text-sm font-medium">{{ authStore.username }}</span>
+          <UIcon name="heroicons:chevron-down" class="w-4 h-4 text-stone-400" />
+        </button>
       </div>
     </div>
   </header>
@@ -64,7 +52,6 @@ defineProps<{
 
 defineEmits<{
   openSettings: []
-  logout: []
 }>()
 
 const adminUiStore = useAdminUiStore()

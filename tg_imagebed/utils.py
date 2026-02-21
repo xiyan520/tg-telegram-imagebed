@@ -24,9 +24,8 @@ from typing import Optional
 from flask import Response
 
 from .config import (
-    SECRET_KEY, CDN_ENABLED, CDN_CACHE_TTL, CLOUDFLARE_CDN_DOMAIN,
-    CLOUDFLARE_EDGE_TTL, CLOUDFLARE_BROWSER_TTL, STATIC_VERSION,
-    FORCE_REFRESH, LOCK_FILE, PORT, logger
+    SECRET_KEY, STATIC_VERSION,
+    LOCK_FILE, PORT, logger
 )
 
 # ===================== 单实例锁管理 =====================
@@ -131,22 +130,34 @@ def encrypt_file_id(file_id: str, file_path: str) -> str:
 
 
 # ===================== MIME类型检测 =====================
+# 已知后缀 → MIME 映射
+_MIME_TYPES = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.tiff': 'image/tiff',
+    '.tif': 'image/tiff',
+    '.avif': 'image/avif',
+    '.heic': 'image/heic',
+    '.heif': 'image/heif',
+}
+
+
 def get_mime_type(file_path: str) -> str:
-    """根据文件扩展名获取MIME类型"""
+    """根据文件扩展名获取MIME类型（支持自定义后缀）"""
     ext = Path(file_path).suffix.lower()
-    mime_types = {
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.png': 'image/png',
-        '.gif': 'image/gif',
-        '.webp': 'image/webp',
-        '.bmp': 'image/bmp',
-        '.svg': 'image/svg+xml',
-        '.ico': 'image/x-icon',
-        '.tiff': 'image/tiff',
-        '.tif': 'image/tiff'
-    }
-    return mime_types.get(ext, 'image/jpeg')
+    mime = _MIME_TYPES.get(ext)
+    if mime:
+        return mime
+    # 对未知后缀，尝试通过 mimetypes 标准库猜测
+    import mimetypes
+    guessed, _ = mimetypes.guess_type(file_path)
+    return guessed or 'application/octet-stream'
 
 
 # ===================== HTTP缓存头部管理 =====================
@@ -180,15 +191,28 @@ def add_cache_headers(response: Response, cache_type: str = 'public', max_age: O
             response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         return response
 
-    # 设置默认 max_age
+    # 设置默认 max_age（从 DB 读取 CDN 缓存 TTL）
     if max_age is None:
-        max_age = CDN_CACHE_TTL
+        try:
+            from .database import get_system_setting_int
+            max_age = get_system_setting_int('cdn_cache_ttl', 86400, minimum=0)
+        except Exception:
+            max_age = 86400
+
+    # 从 DB 读取 edge/browser TTL
+    try:
+        from .database import get_system_setting_int as _gsi
+        edge_ttl = _gsi('cloudflare_edge_ttl', 86400, minimum=0)
+        browser_ttl = _gsi('cloudflare_browser_ttl', 3600, minimum=0)
+    except Exception:
+        edge_ttl = 86400
+        browser_ttl = 3600
 
     # 根据缓存类型设置头部
     if cache_type == 'public':
-        response.headers['Cache-Control'] = f'public, max-age={max_age}, s-maxage={CLOUDFLARE_EDGE_TTL}, stale-while-revalidate=86400, stale-if-error=604800'
-        response.headers['Cloudflare-CDN-Cache-Control'] = f'max-age={CLOUDFLARE_EDGE_TTL}'
-        response.headers['CDN-Cache-Control'] = f'max-age={CLOUDFLARE_EDGE_TTL}'
+        response.headers['Cache-Control'] = f'public, max-age={max_age}, s-maxage={edge_ttl}, stale-while-revalidate=86400, stale-if-error=604800'
+        response.headers['Cloudflare-CDN-Cache-Control'] = f'max-age={edge_ttl}'
+        response.headers['CDN-Cache-Control'] = f'max-age={edge_ttl}'
     elif cache_type == 'private':
         response.headers['Cache-Control'] = f'private, max-age={max_age}'
     elif cache_type == 'no-cache':
@@ -196,7 +220,7 @@ def add_cache_headers(response: Response, cache_type: str = 'public', max_age: O
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
     elif cache_type == 'static':
-        response.headers['Cache-Control'] = f'public, max-age={CLOUDFLARE_BROWSER_TTL}, s-maxage={CLOUDFLARE_EDGE_TTL}'
+        response.headers['Cache-Control'] = f'public, max-age={browser_ttl}, s-maxage={edge_ttl}'
 
     # 添加安全头部
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -259,11 +283,11 @@ def _get_effective_domain_settings():
         from .database import get_system_setting
         domain = str(get_system_setting("cloudflare_cdn_domain") or "").strip()
         cdn_enabled = str(get_system_setting("cdn_enabled") or "0") == "1"
-        logger.info(f"[域名配置] 从数据库读取: domain='{domain}', cdn_enabled={cdn_enabled}")
+        logger.debug(f"[域名配置] 从数据库读取: domain='{domain}', cdn_enabled={cdn_enabled}")
     except Exception as e:
-        domain = str(CLOUDFLARE_CDN_DOMAIN or "").strip()
-        cdn_enabled = bool(CDN_ENABLED)
-        logger.warning(f"[域名配置] 数据库读取失败，使用环境变量: domain='{domain}', cdn_enabled={cdn_enabled}, error={e}")
+        domain = ""
+        cdn_enabled = False
+        logger.warning(f"[域名配置] 数据库读取失败，使用默认值: error={e}")
 
     _DOMAIN_SETTINGS_CACHE["ts"] = now
     _DOMAIN_SETTINGS_CACHE["domain"] = domain
@@ -343,8 +367,6 @@ def get_static_file_version(filename: str) -> str:
     Returns:
         版本号字符串
     """
-    if FORCE_REFRESH:
-        return str(int(time.time()))
     return STATIC_VERSION
 
 

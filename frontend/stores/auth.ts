@@ -36,7 +36,20 @@ export const useAuthStore = defineStore('auth', {
           throw new Error(response.message || '登录失败')
         }
       } catch (error: any) {
-        throw new Error(error.message || '登录失败')
+        // 解析后端返回的结构化错误
+        const data = error?.data || error?.response?._data
+        if (data?.locked) {
+          const err: any = new Error(data.message || '登录尝试过多')
+          err.locked = true
+          err.retryAfter = data.retry_after
+          throw err
+        }
+        if (data?.remaining_attempts !== undefined) {
+          const err: any = new Error(data.message || '登录失败')
+          err.remainingAttempts = data.remaining_attempts
+          throw err
+        }
+        throw new Error(error.message || error?.data?.message || '登录失败')
       }
     },
 

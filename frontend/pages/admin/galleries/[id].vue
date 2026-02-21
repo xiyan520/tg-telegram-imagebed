@@ -419,7 +419,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Gallery, GalleryImage } from '~/composables/useAdminGalleryApi'
+import type { Gallery, GalleryImage } from '~/composables/useGalleryApi'
 
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 

@@ -169,7 +169,7 @@
 <script setup lang="ts">
 const config = useRuntimeConfig()
 const mobileMenuOpen = ref(false)
-const guestStore = useGuestTokenStore()
+const tokenStore = useTokenStore()
 const { getStats } = useImageApi()
 const { onStatsRefresh } = useStatsRefresh()
 
@@ -190,7 +190,7 @@ let statsRefreshInterval: NodeJS.Timeout | null = null
 
 // 页面加载时恢复游客token和加载统计
 onMounted(async () => {
-  guestStore.restoreToken()
+  tokenStore.restoreToken()
   await loadStats()
 
   // 监听全局统计刷新事件

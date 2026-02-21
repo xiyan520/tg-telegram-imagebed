@@ -1,32 +1,4 @@
-export interface Gallery {
-  id: number
-  owner_token?: string
-  name: string
-  description?: string
-  image_count: number
-  cover_image?: string
-  cover_url?: string
-  share_enabled: boolean
-  share_token?: string
-  share_url?: string
-  share_expires_at?: string
-  access_mode?: string
-  hide_from_share_all?: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface GalleryImage {
-  encrypted_id: string
-  original_filename: string
-  file_size: number
-  created_at: string
-  cdn_cached: boolean
-  cdn_url?: string
-  mime_type: string
-  image_url: string
-  added_at: string
-}
+import type { Gallery, GalleryImage } from './useGalleryApi'
 
 export const useAdminGalleryApi = () => {
   const config = useRuntimeConfig()

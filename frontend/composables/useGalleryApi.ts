@@ -1,7 +1,9 @@
-import { useGuestTokenStore } from '~/stores/guestToken'
+import { useTokenStore } from '~/stores/token'
 
 export interface Gallery {
   id: number
+  owner_type?: string
+  owner_token?: string
   name: string
   description?: string
   image_count: number
@@ -11,6 +13,8 @@ export interface Gallery {
   share_token?: string
   share_url?: string
   share_expires_at?: string
+  access_mode?: string
+  hide_from_share_all?: boolean
   created_at: string
   updated_at: string
 }
@@ -31,10 +35,10 @@ export const useGalleryApi = () => {
   const config = useRuntimeConfig()
   const baseURL = config.public.apiBase
 
-  let _guestStore: ReturnType<typeof useGuestTokenStore> | null = null
+  let _tokenStore: ReturnType<typeof useTokenStore> | null = null
   const getGuestStore = () => {
-    if (!_guestStore) _guestStore = useGuestTokenStore()
-    return _guestStore
+    if (!_tokenStore) _tokenStore = useTokenStore()
+    return _tokenStore
   }
 
   const getAuthHeaders = () => {
@@ -70,6 +74,8 @@ export const useGalleryApi = () => {
 
   // 获取画集列表
   const getGalleries = async (page = 1, limit = 50) => {
+    const token = getGuestStore().token
+    if (!token) throw new Error('未提供Token')
     const response = await $fetch<any>(`${baseURL}/api/auth/galleries`, {
       params: { page, limit },
       headers: getAuthHeaders()
@@ -172,6 +178,27 @@ export const useGalleryApi = () => {
     return true
   }
 
+  // 设置画集封面
+  const setCover = async (galleryId: number, encryptedId: string) => {
+    const response = await $fetch<any>(`${baseURL}/api/auth/galleries/${galleryId}/cover`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: { encrypted_id: encryptedId }
+    })
+    if (!response.success) throw new Error(response.error || '设置封面失败')
+    return response.data.gallery as Gallery
+  }
+
+  // 清除画集封面
+  const clearCover = async (galleryId: number) => {
+    const response = await $fetch<any>(`${baseURL}/api/auth/galleries/${galleryId}/cover`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    })
+    if (!response.success) throw new Error(response.error || '清除封面失败')
+    return response.data.gallery as Gallery
+  }
+
   // 获取分享画集（公开访问）
   const getSharedGallery = async (shareToken: string, page = 1, limit = 50) => {
     try {
@@ -269,6 +296,8 @@ export const useGalleryApi = () => {
     removeImagesFromGallery,
     enableShare,
     disableShare,
+    setCover,
+    clearCover,
     getSharedGallery,
     unlockGallery,
     getShareAllGallery,

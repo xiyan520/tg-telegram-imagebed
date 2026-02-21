@@ -3,12 +3,13 @@
 """
 系统设置路由模块 - 公共设置和管理员设置 API
 """
+import os
 import re
 from urllib.parse import urlsplit
 from flask import request, jsonify, make_response
 
 from . import admin_bp, images_bp
-from ..config import logger
+from ..config import logger, PROXY_URL
 from ..utils import add_cache_headers, clear_domain_cache
 from ..database import (
     get_public_settings, get_all_system_settings, update_system_settings,
@@ -88,6 +89,17 @@ def _format_settings_for_response(settings: dict) -> dict:
         'group_upload_delete_delay': _safe_int(settings.get('group_upload_delete_delay'), 0, 0),
         # TG 同步删除
         'tg_sync_delete_enabled': settings.get('tg_sync_delete_enabled', '1') == '1',
+        # Bot 功能开关
+        'bot_caption_filename_enabled': settings.get('bot_caption_filename_enabled', '1') == '1',
+        'bot_inline_buttons_enabled': settings.get('bot_inline_buttons_enabled', '1') == '1',
+        'bot_user_delete_enabled': settings.get('bot_user_delete_enabled', '1') == '1',
+        'bot_myuploads_enabled': settings.get('bot_myuploads_enabled', '1') == '1',
+        'bot_myuploads_page_size': _safe_int(settings.get('bot_myuploads_page_size'), 8, 1, 50),
+        # 网络代理
+        'proxy_url_set': bool(settings.get('proxy_url', '')),
+        'proxy_env_set': bool(PROXY_URL),
+        # 允许的文件后缀
+        'allowed_extensions': settings.get('allowed_extensions', 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico'),
     }
 
 
@@ -166,6 +178,7 @@ def admin_system_settings():
 
             settings_to_update = {}
             errors = []
+            svg_warning = ''
 
             # 游客上传策略
             if 'guest_upload_policy' in data:
@@ -294,6 +307,53 @@ def admin_system_settings():
             if 'tg_sync_delete_enabled' in data:
                 settings_to_update['tg_sync_delete_enabled'] = '1' if data['tg_sync_delete_enabled'] else '0'
 
+            # Bot 功能开关
+            for bool_key in (
+                'bot_caption_filename_enabled', 'bot_inline_buttons_enabled',
+                'bot_user_delete_enabled', 'bot_myuploads_enabled',
+            ):
+                if bool_key in data:
+                    settings_to_update[bool_key] = '1' if data[bool_key] else '0'
+
+            if 'bot_myuploads_page_size' in data:
+                ps = _safe_int(data['bot_myuploads_page_size'], 8)
+                if ps < 1 or ps > 50:
+                    errors.append('上传历史每页数量必须在 1-50 之间')
+                else:
+                    settings_to_update['bot_myuploads_page_size'] = str(ps)
+
+            # 网络代理
+            if 'proxy_url' in data:
+                proxy_val = str(data.get('proxy_url') or '').strip()
+                if proxy_val:
+                    if not proxy_val.startswith(('http://', 'https://')):
+                        errors.append('代理 URL 必须以 http:// 或 https:// 开头')
+                    else:
+                        settings_to_update['proxy_url'] = proxy_val
+                else:
+                    # 空值清除代理
+                    settings_to_update['proxy_url'] = ''
+
+            # 允许的文件后缀
+            svg_warning = ''
+            if 'allowed_extensions' in data:
+                raw_exts = str(data.get('allowed_extensions') or '').strip()
+                if raw_exts:
+                    ext_list = [e.strip().lower().lstrip('.') for e in raw_exts.split(',') if e.strip()]
+                    # 验证每项只允许字母数字
+                    invalid_exts = [e for e in ext_list if not re.match(r'^[a-zA-Z0-9]+$', e)]
+                    if invalid_exts:
+                        errors.append(f'文件后缀格式无效: {", ".join(invalid_exts)}')
+                    else:
+                        if 'svg' in ext_list:
+                            svg_warning = '已启用 SVG 上传，请注意 SVG 文件存在 XSS 安全风险'
+                        # 去重、排序、小写化
+                        unique_exts = sorted(set(ext_list))
+                        settings_to_update['allowed_extensions'] = ','.join(unique_exts)
+                else:
+                    # 空值恢复默认
+                    settings_to_update['allowed_extensions'] = 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico'
+
             # 有错误则返回
             if errors:
                 response = jsonify({'success': False, 'error': '; '.join(errors)})
@@ -308,6 +368,16 @@ def admin_system_settings():
                 if any(k in settings_to_update for k in ('cloudflare_cdn_domain', 'cdn_enabled')):
                     clear_domain_cache()
 
+                # 同步代理到环境变量（CDN 服务和 S3 等依赖 os.environ）
+                if 'proxy_url' in settings_to_update:
+                    proxy_val = settings_to_update['proxy_url']
+                    if proxy_val:
+                        os.environ['HTTP_PROXY'] = proxy_val
+                        os.environ['HTTPS_PROXY'] = proxy_val
+                    else:
+                        os.environ.pop('HTTP_PROXY', None)
+                        os.environ.pop('HTTPS_PROXY', None)
+
             # 获取更新后的有效配置
             updated_settings = get_all_system_settings()
 
@@ -320,9 +390,13 @@ def admin_system_settings():
                 elif tokens_policy == 'disable_all':
                     disabled_count = disable_all_tokens()
 
+            msg = '设置已更新'
+            if svg_warning:
+                msg = f'{msg}。⚠️ {svg_warning}'
+
             response = jsonify({
                 'success': True,
-                'message': '设置已更新',
+                'message': msg,
                 'data': _format_settings_for_response(updated_settings),
                 'tokens_disabled': disabled_count
             })

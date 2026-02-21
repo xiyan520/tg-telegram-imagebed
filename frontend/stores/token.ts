@@ -7,7 +7,7 @@ const LEGACY_IS_GUEST_KEY = 'is_guest'
 
 const nowIso = () => new Date().toISOString()
 
-const maskToken = (token: string) => {
+export const maskToken = (token: string) => {
   const t = (token || '').trim()
   if (t.length <= 12) return t
   return `${t.slice(0, 8)}…${t.slice(-4)}`
@@ -28,7 +28,7 @@ const newId = () => {
   return `id_${Math.random().toString(16).slice(2)}_${Date.now()}`
 }
 
-export const useGuestTokenStore = defineStore('guestToken', {
+export const useTokenStore = defineStore('token', {
   state: () => ({
     vault: {
       version: 1 as const,
@@ -259,9 +259,15 @@ export const useGuestTokenStore = defineStore('guestToken', {
           }
           return response.data
         } else {
-          throw new Error(response.reason || 'Token无效')
+          // Token 确实无效（后端明确返回 valid=false）
+          const err: any = new Error(response.reason || 'Token无效')
+          err.tokenInvalid = true
+          throw err
         }
       } catch (error: any) {
+        // 保留 tokenInvalid 标记
+        if (error.tokenInvalid) throw error
+        // 网络/服务器错误，不标记为 tokenInvalid
         throw new Error(error.data?.reason || error.message || 'Token验证失败')
       }
     },
@@ -288,8 +294,14 @@ export const useGuestTokenStore = defineStore('guestToken', {
         if (this.token) {
           try {
             await this.verifyToken()
-          } catch {
-            // 保留vault，不清除
+          } catch (e: any) {
+            // 仅在 Token 确实无效时自动移除（网络错误不移除）
+            if (e?.tokenInvalid) {
+              const failedId = this.vault.activeId
+              if (failedId) {
+                this.removeTokenFromVault(failedId)
+              }
+            }
           }
         }
       }
@@ -309,7 +321,7 @@ export const useGuestTokenStore = defineStore('guestToken', {
           headers: {
             'Authorization': `Bearer ${this.token}`
           },
-          params: { page, limit }
+          params: { page, limit, _t: Date.now() }
         })
 
         if (response.success) {

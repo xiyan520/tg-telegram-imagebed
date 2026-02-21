@@ -7,11 +7,12 @@ Telegram Bot 控制模块
 - Bot Token 配置管理（支持 DB 与环境变量）
 - Bot 热重启信号机制
 """
+import os
 import time
 import threading
 from typing import Optional, Tuple
 
-from .config import BOT_TOKEN as ENV_BOT_TOKEN, logger
+from .config import logger
 
 
 # Bot 重启信号
@@ -27,12 +28,10 @@ _TOKEN_CACHE = {"ts": 0.0, "token": "", "source": ""}
 
 def get_effective_bot_token() -> Tuple[str, str]:
     """
-    获取有效的 Bot Token
-
-    优先级: 环境变量 > 数据库
+    获取有效的 Bot Token（优先数据库，回退环境变量）
 
     Returns:
-        (token, source) 元组，source 为 'env' 或 'db' 或 ''
+        (token, source) 元组，source 为 'db' / 'env' / ''
     """
     now = time.time()
 
@@ -40,13 +39,7 @@ def get_effective_bot_token() -> Tuple[str, str]:
         if (now - _TOKEN_CACHE["ts"]) < 1.0:
             return _TOKEN_CACHE["token"], _TOKEN_CACHE["source"]
 
-    # 优先使用环境变量
-    if ENV_BOT_TOKEN:
-        with _TOKEN_CACHE_LOCK:
-            _TOKEN_CACHE.update({"ts": now, "token": ENV_BOT_TOKEN, "source": "env"})
-        return ENV_BOT_TOKEN, "env"
-
-    # 从数据库读取
+    # 优先从数据库读取
     db_token = ""
     try:
         from .database import get_system_setting
@@ -54,13 +47,22 @@ def get_effective_bot_token() -> Tuple[str, str]:
     except Exception as e:
         logger.debug(f"从数据库读取 Bot Token 失败: {e}")
 
-    with _TOKEN_CACHE_LOCK:
-        if db_token:
+    # 数据库有值则使用数据库
+    if db_token:
+        with _TOKEN_CACHE_LOCK:
             _TOKEN_CACHE.update({"ts": now, "token": db_token, "source": "db"})
-        else:
-            _TOKEN_CACHE.update({"ts": now, "token": "", "source": ""})
+        return db_token, "db"
 
-    return db_token, "db" if db_token else ""
+    # 回退到环境变量
+    env_token = os.environ.get("BOT_TOKEN", "").strip() or os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if env_token:
+        with _TOKEN_CACHE_LOCK:
+            _TOKEN_CACHE.update({"ts": now, "token": env_token, "source": "env"})
+        return env_token, "env"
+
+    with _TOKEN_CACHE_LOCK:
+        _TOKEN_CACHE.update({"ts": now, "token": "", "source": ""})
+    return "", ""
 
 
 def is_bot_token_configured() -> bool:
@@ -126,7 +128,6 @@ def get_bot_token_status() -> dict:
             "configured": False,
             "source": None,
             "masked_token": None,
-            "env_set": bool(ENV_BOT_TOKEN),
         }
 
     # 掩码处理
@@ -139,7 +140,6 @@ def get_bot_token_status() -> dict:
         "configured": True,
         "source": source,
         "masked_token": masked,
-        "env_set": bool(ENV_BOT_TOKEN),
     }
 
 

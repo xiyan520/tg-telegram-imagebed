@@ -11,6 +11,7 @@ from ..utils import add_cache_headers, get_domain
 from ..database import (
     verify_auth_token, verify_auth_token_access,
     create_gallery, get_gallery, list_galleries, update_gallery, delete_gallery,
+    set_gallery_cover,
     add_images_to_gallery, remove_images_from_gallery, get_gallery_images,
     update_gallery_share, get_shared_gallery,
     update_gallery_access, verify_gallery_password,
@@ -186,6 +187,39 @@ def gallery_images(gallery_id: int):
     # DELETE
     removed = remove_images_from_gallery(gallery_id, token, encrypted_ids)
     return _cors_response({'success': True, 'data': {'removed': removed}})
+
+
+# ===================== 画集封面 =====================
+
+@auth_bp.route('/api/auth/galleries/<int:gallery_id>/cover', methods=['PUT', 'DELETE', 'OPTIONS'])
+def gallery_cover(gallery_id: int):
+    """设置/清除画集封面"""
+    if request.method == 'OPTIONS':
+        return _options_response()
+
+    token, error_resp, status = _verify_token()
+    if error_resp:
+        error_resp.headers['Access-Control-Allow-Origin'] = '*'
+        return add_cache_headers(error_resp, 'no-cache'), status
+
+    if request.method == 'PUT':
+        data = request.get_json(silent=True) or {}
+        encrypted_id = (data.get('encrypted_id') or '').strip()
+        if not encrypted_id:
+            return _cors_response({'success': False, 'error': '请提供图片ID'}, 400)
+        gallery = set_gallery_cover(gallery_id, token, encrypted_id)
+        if not gallery:
+            return _cors_response({'success': False, 'error': '画集不存在、无权限或图片不在画集中'}, 404)
+        base_url = get_domain(request)
+        if gallery.get('cover_image'):
+            gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
+        return _cors_response({'success': True, 'data': {'gallery': gallery}})
+
+    # DELETE - 清除封面
+    gallery = set_gallery_cover(gallery_id, token, None)
+    if not gallery:
+        return _cors_response({'success': False, 'error': '画集不存在或无权限'}, 404)
+    return _cors_response({'success': True, 'data': {'gallery': gallery}})
 
 
 # ===================== 画集分享 =====================

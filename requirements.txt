@@ -11,3 +11,4 @@ requests==2.31.0
 
 # 其他依赖
 python-dotenv==1.0.0
+waitress==3.0.0

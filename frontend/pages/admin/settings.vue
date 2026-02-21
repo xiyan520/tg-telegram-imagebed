@@ -388,6 +388,137 @@
             </template>
           </UFormGroup>
         </div>
+
+        <UFormGroup label="允许的文件类型">
+          <UInput
+            v-model="settings.allowed_extensions"
+            placeholder="jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico"
+          />
+          <template #hint>
+            <span class="text-xs text-stone-500">
+              逗号分隔的文件后缀，内置后缀（jpg/jpeg/png/gif/webp/bmp）始终生效。添加 svg 请注意 XSS 风险。
+            </span>
+          </template>
+        </UFormGroup>
+      </UCard>
+
+      <!-- Bot 功能配置 -->
+      <UCard>
+        <template #header>
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
+              <UIcon name="heroicons:chat-bubble-left-right" class="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">Bot 功能</h3>
+              <p class="text-xs text-stone-500 dark:text-stone-400">配置 Telegram Bot 的交互功能</p>
+            </div>
+          </div>
+        </template>
+
+        <div class="space-y-4">
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">Caption 自定义文件名</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                发送图片时附带说明文字作为文件名
+              </p>
+            </div>
+            <UToggle v-model="settings.bot_caption_filename_enabled" size="lg" />
+          </div>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">上传成功 Inline 按钮</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                私聊上传成功后显示"打开链接"和"删除"按钮
+              </p>
+            </div>
+            <UToggle v-model="settings.bot_inline_buttons_enabled" size="lg" />
+          </div>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">用户自助删除</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                允许用户通过 /delete 命令和 inline 按钮删除自己的图片
+              </p>
+            </div>
+            <UToggle v-model="settings.bot_user_delete_enabled" size="lg" />
+          </div>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">上传历史查询</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                允许用户通过 /myuploads 查看个人上传记录
+              </p>
+            </div>
+            <UToggle v-model="settings.bot_myuploads_enabled" size="lg" />
+          </div>
+
+          <div v-if="settings.bot_myuploads_enabled" class="pl-4 border-l-2 border-blue-500">
+            <UFormGroup label="每页显示数量">
+              <UInput
+                v-model.number="settings.bot_myuploads_page_size"
+                type="number"
+                min="1"
+                max="50"
+                placeholder="8"
+                class="w-32"
+              />
+              <template #hint>
+                <span class="text-xs text-stone-500">上传历史每页显示的图片数量（1-50）</span>
+              </template>
+            </UFormGroup>
+          </div>
+        </div>
+      </UCard>
+
+      <!-- 网络代理 -->
+      <UCard>
+        <template #header>
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-teal-500 to-teal-600 rounded-lg flex items-center justify-center">
+              <UIcon name="heroicons:globe-americas" class="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">网络代理</h3>
+              <p class="text-xs text-stone-500 dark:text-stone-400">配置 HTTP/HTTPS 代理，用于 Telegram Bot 和存储后端的网络请求</p>
+            </div>
+          </div>
+        </template>
+
+        <div class="space-y-4">
+          <UFormGroup label="代理地址">
+            <UInput
+              v-model="settings.proxy_url"
+              type="password"
+              :placeholder="proxyPlaceholder"
+            />
+            <template #hint>
+              <span v-if="settings.proxy_url_set" class="text-xs text-green-600 dark:text-green-400">
+                当前使用数据库配置的代理
+              </span>
+              <span v-else-if="settings.proxy_env_set" class="text-xs text-blue-600 dark:text-blue-400">
+                当前使用环境变量配置的代理
+              </span>
+              <span v-else class="text-xs text-stone-500 dark:text-stone-400">
+                未配置代理
+              </span>
+            </template>
+          </UFormGroup>
+
+          <div class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div class="flex items-start gap-3">
+              <UIcon name="heroicons:information-circle" class="w-5 h-5 text-stone-400 flex-shrink-0 mt-0.5" />
+              <div class="text-sm text-stone-500 dark:text-stone-400">
+                <p>格式：<code class="px-1 py-0.5 bg-stone-200 dark:bg-neutral-700 rounded text-xs">http://host:port</code> 或 <code class="px-1 py-0.5 bg-stone-200 dark:bg-neutral-700 rounded text-xs">http://user:pass@host:port</code></p>
+                <p class="mt-1">留空则清除数据库代理设置，回退到环境变量。修改后需重启 Bot 才能对 Telegram 连接生效。</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </UCard>
 
       <!-- Token 管理 -->
@@ -500,6 +631,18 @@ const settings = ref({
   cdn_redirect_enabled: false,
   cdn_redirect_max_count: 2,
   cdn_redirect_delay: 10,
+  // Bot 功能开关
+  bot_caption_filename_enabled: true,
+  bot_inline_buttons_enabled: true,
+  bot_user_delete_enabled: true,
+  bot_myuploads_enabled: true,
+  bot_myuploads_page_size: 8,
+  // 网络代理
+  proxy_url: '',
+  proxy_url_set: false,
+  proxy_env_set: false,
+  // 允许的文件后缀
+  allowed_extensions: 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico',
 })
 
 const originalSettings = ref<typeof settings.value | null>(null)
@@ -524,6 +667,12 @@ const policyOptions = ref({
 
 // 域名模式计算属性
 const hasDomain = computed(() => !!settings.value.cloudflare_cdn_domain?.trim())
+
+const proxyPlaceholder = computed(() => {
+  if (settings.value.proxy_url_set) return '已设置（留空清除，回退到环境变量）'
+  if (settings.value.proxy_env_set) return '环境变量已配置（此处可覆盖）'
+  return 'http://host:port'
+})
 const cdnEnabled = computed(() => settings.value.cdn_enabled)
 
 // 当前模式: cdn | direct | default
@@ -618,6 +767,7 @@ const loadSettings = async () => {
         ...settings.value,
         ...data,
         cloudflare_api_token: '',
+        proxy_url: '',
       }
       originalSettings.value = { ...settings.value }
       settingsLoaded.value = true
@@ -644,6 +794,9 @@ const saveSettings = async () => {
     if (!payload.cloudflare_api_token) {
       delete (payload as any).cloudflare_api_token
     }
+    if (!payload.proxy_url) {
+      delete (payload as any).proxy_url
+    }
 
     const response = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
       method: 'PUT',
@@ -653,7 +806,7 @@ const saveSettings = async () => {
 
     if (response.success) {
       notification.success('保存成功', response.message || '系统设置已更新')
-      settings.value = { ...settings.value, ...response.data, cloudflare_api_token: '' }
+      settings.value = { ...settings.value, ...response.data, cloudflare_api_token: '', proxy_url: '' }
       originalSettings.value = { ...settings.value }
 
       if (response.tokens_disabled > 0) {

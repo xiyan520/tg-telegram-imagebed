@@ -10,6 +10,8 @@ import hashlib
 import secrets
 import logging
 import time
+import json
+import re
 import requests
 from datetime import datetime, timedelta
 from functools import wraps
@@ -27,26 +29,253 @@ except ImportError:
         """简化版 get_domain 函数"""
         return req.host_url.rstrip('/')
 
-# 从 config.py 导入配置（统一配置来源，避免默认弱口令）
+# 从 config.py 导入配置
 try:
     from .config import (
-        DEFAULT_ADMIN_USERNAME,
-        DEFAULT_ADMIN_PASSWORD,
         SESSION_LIFETIME,
-        DATABASE_PATH
+        DATABASE_PATH,
+        LOGIN_MAX_ATTEMPTS,
+        LOGIN_LOCKOUT_DURATIONS,
+        LOGIN_ATTEMPT_WINDOW,
+        MAX_CONCURRENT_SESSIONS,
     )
 except ImportError:
     # 兼容独立运行场景
-    DEFAULT_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-    # 无默认密码，必须从环境变量读取
-    DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
-    if not DEFAULT_ADMIN_PASSWORD:
-        import secrets
-        DEFAULT_ADMIN_PASSWORD = secrets.token_urlsafe(12)
-        logger.warning("ADMIN_PASSWORD 未配置，已自动生成临时密码")
-    SESSION_LIFETIME = int(os.getenv("SESSION_LIFETIME", "3600"))
-    DEFAULT_DB_PATH = os.path.join(os.getcwd(), "telegram_imagebed.db")
-    DATABASE_PATH = os.getenv("DATABASE_PATH", DEFAULT_DB_PATH)
+    SESSION_LIFETIME = 3600
+    DEFAULT_DB_PATH = os.path.join(os.getcwd(), "data", "telegram_imagebed.db")
+    DATABASE_PATH = DEFAULT_DB_PATH
+    LOGIN_MAX_ATTEMPTS = 5
+    LOGIN_LOCKOUT_DURATIONS = [300, 900, 1800]
+    LOGIN_ATTEMPT_WINDOW = 900
+    MAX_CONCURRENT_SESSIONS = 3
+
+
+# ===================== 登录速率限制器（内存级） =====================
+_login_tracker: dict[str, dict] = {}
+# 结构: { ip: { 'attempts': int, 'locked_until': float, 'lockout_level': int, 'last_attempt': float } }
+
+
+def _get_client_ip(req) -> str:
+    """从 X-Forwarded-For 或 remote_addr 获取真实客户端 IP"""
+    forwarded = req.headers.get('X-Forwarded-For', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return req.remote_addr or '127.0.0.1'
+
+
+def _cleanup_expired_trackers():
+    """清理过期的登录追踪记录"""
+    now = time.time()
+    expired_ips = [
+        ip for ip, info in _login_tracker.items()
+        if now - info.get('last_attempt', 0) > LOGIN_ATTEMPT_WINDOW
+        and now > info.get('locked_until', 0)
+    ]
+    for ip in expired_ips:
+        del _login_tracker[ip]
+
+
+def _check_login_allowed(ip: str) -> tuple[bool, int, int]:
+    """
+    检查 IP 是否允许登录
+    返回: (allowed, retry_after_seconds, remaining_attempts)
+    """
+    _cleanup_expired_trackers()
+    info = _login_tracker.get(ip)
+    if not info:
+        return True, 0, LOGIN_MAX_ATTEMPTS
+
+    now = time.time()
+
+    # 检查是否在锁定期内
+    locked_until = info.get('locked_until', 0)
+    if now < locked_until:
+        retry_after = int(locked_until - now) + 1
+        return False, retry_after, 0
+
+    # 检查失败计数窗口是否已过期（自动重置）
+    if now - info.get('last_attempt', 0) > LOGIN_ATTEMPT_WINDOW:
+        del _login_tracker[ip]
+        return True, 0, LOGIN_MAX_ATTEMPTS
+
+    remaining = max(0, LOGIN_MAX_ATTEMPTS - info.get('attempts', 0))
+    return True, 0, remaining
+
+
+def _record_login_failure(ip: str):
+    """记录登录失败，累加计数，达到阈值时触发渐进式锁定"""
+    now = time.time()
+    info = _login_tracker.get(ip)
+
+    if not info:
+        _login_tracker[ip] = {
+            'attempts': 1,
+            'locked_until': 0,
+            'lockout_level': 0,
+            'last_attempt': now,
+        }
+        return
+
+    info['attempts'] = info.get('attempts', 0) + 1
+    info['last_attempt'] = now
+
+    # 达到阈值 → 触发锁定
+    if info['attempts'] >= LOGIN_MAX_ATTEMPTS:
+        level = info.get('lockout_level', 0)
+        duration = LOGIN_LOCKOUT_DURATIONS[min(level, len(LOGIN_LOCKOUT_DURATIONS) - 1)]
+        info['locked_until'] = now + duration
+        info['lockout_level'] = min(level + 1, len(LOGIN_LOCKOUT_DURATIONS) - 1)
+        info['attempts'] = 0  # 重置计数，解锁后重新开始计数
+
+
+def _record_login_success(ip: str):
+    """登录成功后清除该 IP 的失败记录"""
+    _login_tracker.pop(ip, None)
+
+
+# ===================== 密码强度校验 =====================
+def _validate_password_strength(password: str) -> tuple[bool, str]:
+    """
+    校验密码强度
+    返回: (valid, message)
+    """
+    if not password or len(password) < 8:
+        return False, '密码长度至少需要8个字符'
+    if not re.search(r'[a-zA-Z]', password):
+        return False, '密码必须包含字母'
+    if not re.search(r'[0-9]', password):
+        return False, '密码必须包含数字'
+    return True, ''
+
+
+# ===================== 安全审计日志 =====================
+def _log_security_event(event_type: str, ip: str, username: str = '', detail: str = ''):
+    """将安全事件写入 admin_config 表（key=security_log，保留最近 200 条）"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+
+        # 读取现有日志
+        cursor.execute("SELECT value FROM admin_config WHERE key = 'security_log'")
+        row = cursor.fetchone()
+        logs = json.loads(row[0]) if row else []
+
+        # 追加新事件
+        logs.append({
+            'type': event_type,
+            'ip': ip,
+            'username': username,
+            'detail': detail,
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        })
+
+        # 保留最近 200 条
+        logs = logs[-200:]
+
+        cursor.execute(
+            "INSERT OR REPLACE INTO admin_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+            ('security_log', json.dumps(logs, ensure_ascii=False))
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"写入安全审计日志失败: {e}")
+
+
+# ===================== Session 并发控制 =====================
+def _get_active_sessions() -> list[dict]:
+    """从数据库读取活跃 session 列表"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM admin_config WHERE key = 'active_sessions'")
+        row = cursor.fetchone()
+        conn.close()
+        return json.loads(row[0]) if row else []
+    except Exception:
+        return []
+
+
+def _save_active_sessions(sessions: list[dict]):
+    """保存活跃 session 列表到数据库"""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO admin_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+            ('active_sessions', json.dumps(sessions, ensure_ascii=False))
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"保存活跃 session 失败: {e}")
+
+
+def _register_session(token: str, ip: str):
+    """注册新 session，超出并发限制时踢掉最早的"""
+    now = time.time()
+    sessions = _get_active_sessions()
+
+    # 清理过期 session
+    sessions = [s for s in sessions if now - s.get('login_time', 0) < SESSION_LIFETIME]
+
+    # 踢掉最早的 session（如果超出限制）
+    kicked = []
+    while len(sessions) >= MAX_CONCURRENT_SESSIONS:
+        oldest = sessions.pop(0)
+        kicked.append(oldest)
+
+    # 记录被踢出的 session
+    for s in kicked:
+        _log_security_event('session_kicked', s.get('ip', ''), detail=f"token={s.get('token', '')[:8]}...")
+
+    # 添加新 session
+    sessions.append({
+        'token': token,
+        'ip': ip,
+        'login_time': now,
+        'last_active': now,
+    })
+
+    _save_active_sessions(sessions)
+
+
+def _update_session_activity(token: str):
+    """更新 session 的最后活跃时间，若不存在则自动补注册"""
+    now = time.time()
+    sessions = _get_active_sessions()
+    # 清理过期 session
+    sessions = [s for s in sessions if now - s.get('login_time', 0) < SESSION_LIFETIME]
+
+    found = False
+    for s in sessions:
+        if s.get('token') == token:
+            s['last_active'] = now
+            found = True
+            break
+
+    if not found:
+        # 当前 session 不在列表中（功能上线前已登录），自动补注册
+        ip = '0.0.0.0'
+        try:
+            ip = _get_client_ip(request)
+        except Exception:
+            pass
+        sessions.append({
+            'token': token,
+            'ip': ip,
+            'login_time': now,
+            'last_active': now,
+        })
+
+    _save_active_sessions(sessions)
+
+
+def _remove_session(token: str):
+    """移除指定 session"""
+    sessions = _get_active_sessions()
+    sessions = [s for s in sessions if s.get('token') != token]
+    _save_active_sessions(sessions)
 
 
 def _get_config_status_from_db() -> dict:
@@ -60,8 +289,10 @@ def _get_config_status_from_db() -> dict:
         cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
         cdn_monitor_enabled = str(get_system_setting('cdn_monitor_enabled') or '0') == '1'
         cdn_domain = str(get_system_setting('cloudflare_cdn_domain') or '').strip()
+        group_upload_admin_only = str(get_system_setting('group_upload_admin_only') or '0') == '1'
     except Exception as e:
         logger.debug(f"从数据库读取系统设置失败: {e}")
+        group_upload_admin_only = False
 
     # CDN 监控只有在 CDN 启用时才有意义
     cdn_monitor_display = '已启用' if (cdn_enabled and cdn_monitor_enabled) else '已关闭'
@@ -70,6 +301,7 @@ def _get_config_status_from_db() -> dict:
         'cdnStatus': '已启用' if cdn_enabled else '未启用',
         'cdnDomain': cdn_domain if cdn_domain else '未配置',
         'uptime': '运行中',
+        'groupUpload': '仅管理员' if group_upload_admin_only else '已开放',
         'cdnMonitor': cdn_monitor_display
     }
 
@@ -77,7 +309,7 @@ def init_admin_config():
     """初始化管理员配置表（在主数据库中）"""
     conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
-    
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS admin_config (
             key TEXT PRIMARY KEY,
@@ -85,21 +317,7 @@ def init_admin_config():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
-    # 检查是否有配置，如果没有则使用默认值
-    cursor.execute("SELECT value FROM admin_config WHERE key = 'username'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO admin_config (key, value) VALUES (?, ?)", 
-                      ('username', DEFAULT_ADMIN_USERNAME))
-    
-    cursor.execute("SELECT value FROM admin_config WHERE key = 'password_hash'")
-    if not cursor.fetchone():
-        # 使用 werkzeug.security 进行安全的密码哈希
-        from werkzeug.security import generate_password_hash
-        password_hash = generate_password_hash(DEFAULT_ADMIN_PASSWORD, method='pbkdf2:sha256')
-        cursor.execute("INSERT INTO admin_config (key, value) VALUES (?, ?)",
-                      ('password_hash', password_hash))
-    
+
     conn.commit()
     conn.close()
 
@@ -112,7 +330,7 @@ def get_admin_config():
     
     cursor.execute("SELECT value FROM admin_config WHERE key = 'username'")
     username = cursor.fetchone()
-    username = username[0] if username else DEFAULT_ADMIN_USERNAME
+    username = username[0] if username else ''
     
     cursor.execute("SELECT value FROM admin_config WHERE key = 'password_hash'")
     password_hash = cursor.fetchone()
@@ -189,7 +407,7 @@ def update_admin_credentials(new_username=None, new_password=None):
 def configure_admin_session(app):
     """配置管理员会话"""
     app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_SECURE', 'false').lower() == 'true'
+    app.config['SESSION_COOKIE_SECURE'] = False
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=SESSION_LIFETIME)
 
@@ -206,6 +424,21 @@ def login_required(f):
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Unauthorized'}), 401
             return redirect(url_for('admin_login'))
+
+        # 检查当前 token 是否仍在活跃 session 列表中（被踢出则拒绝）
+        token = session.get('admin_token')
+        if token:
+            active = _get_active_sessions()
+            if active and not any(s.get('token') == token for s in active):
+                # token 已被踢出，清除本地 session
+                session.pop('admin_logged_in', None)
+                session.pop('admin_username', None)
+                session.pop('admin_token', None)
+                if request.path.startswith('/api/'):
+                    return jsonify({'error': 'Session revoked', 'kicked': True}), 401
+                return redirect(url_for('admin_login'))
+            _update_session_activity(token)
+
         return f(*args, **kwargs)
     return decorated_function
 
@@ -297,6 +530,23 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             return response
 
+        ip = _get_client_ip(request)
+
+        # 速率限制检查
+        allowed, retry_after, remaining = _check_login_allowed(ip)
+        if not allowed:
+            logger.warning(f"登录被锁定: IP={ip}, 剩余等待={retry_after}秒")
+            _log_security_event('login_locked', ip, detail=f"retry_after={retry_after}s")
+            response = jsonify({
+                'success': False,
+                'message': '登录尝试过多，请稍后再试',
+                'locked': True,
+                'retry_after': retry_after
+            })
+            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            return response, 429
+
         data = request.get_json()
         username = data.get('username', '').strip()
         password = data.get('password', '')
@@ -309,6 +559,8 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
         # 验证用户名和密码
         if verify_admin_password(username, password):
+            _record_login_success(ip)
+
             session['admin_logged_in'] = True
             session['admin_username'] = username
             session.permanent = True
@@ -317,6 +569,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             token = secrets.token_urlsafe(32)
             session['admin_token'] = token
 
+            # 注册 session（并发控制）
+            _register_session(token, ip)
+
+            _log_security_event('login_success', ip, username)
             logger.info(f"管理员登录成功: {username}")
             response = jsonify({
                 'success': True,
@@ -329,8 +585,16 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             return response
 
-        logger.warning(f"管理员登录失败: {username}")
-        response = jsonify({'success': False, 'message': '用户名或密码错误'})
+        # 登录失败
+        _record_login_failure(ip)
+        _log_security_event('login_failed', ip, username)
+        _, _, remaining = _check_login_allowed(ip)
+        logger.warning(f"管理员登录失败: {username}, IP={ip}, 剩余尝试={remaining}")
+        response = jsonify({
+            'success': False,
+            'message': '用户名或密码错误',
+            'remaining_attempts': remaining
+        })
         response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         return response, 401
@@ -348,8 +612,18 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             return response
 
         username = session.get('admin_username', 'unknown')
+        token = session.get('admin_token')
+        ip = _get_client_ip(request)
+
+        # 移除 session 记录
+        if token:
+            _remove_session(token)
+
         session.pop('admin_logged_in', None)
         session.pop('admin_username', None)
+        session.pop('admin_token', None)
+
+        _log_security_event('logout', ip, username)
         logger.info(f"管理员退出登录: {username}")
         response = jsonify({'success': True})
         response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
@@ -363,28 +637,34 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         data = request.get_json()
         new_username = data.get('username', '').strip()
         new_password = data.get('password', '').strip()
-        
+
         if not new_username and not new_password:
             return jsonify({'success': False, 'error': '请提供新的用户名或密码'}), 400
-        
+
         if new_username and len(new_username) < 3:
             return jsonify({'success': False, 'error': '用户名至少需要3个字符'}), 400
-        
-        if new_password and len(new_password) < 6:
-            return jsonify({'success': False, 'error': '密码至少需要6个字符'}), 400
-        
+
+        if new_password:
+            valid, msg = _validate_password_strength(new_password)
+            if not valid:
+                return jsonify({'success': False, 'error': msg}), 400
+
         if update_admin_credentials(new_username, new_password):
             # 如果更改了用户名，更新会话
             if new_username:
                 session['admin_username'] = new_username
-            
+
+            ip = _get_client_ip(request)
+            _log_security_event('password_changed', ip, session.get('admin_username', ''),
+                                detail='username_changed' if new_username else 'password_changed')
+
             return jsonify({
-                'success': True, 
+                'success': True,
                 'message': '凭据更新成功',
                 'updated_username': new_username is not None,
                 'updated_password': new_password is not None
             })
-        
+
         return jsonify({'success': False, 'error': '更新失败'}), 500
 
     @app.route('/api/admin/stats', methods=['GET', 'OPTIONS'])
@@ -446,7 +726,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                 }
             }
 
-            logger.info(f"返回统计数据: {response_data}")
+            logger.debug(f"返回统计数据: {response_data}")
             return jsonify(response_data)
 
         except Exception as e:
@@ -823,4 +1103,77 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         finally:
             conn.close()
     
+    @app.route('/api/admin/security-log', methods=['GET', 'OPTIONS'])
+    @login_required
+    def admin_security_log():
+        """获取安全审计日志"""
+        try:
+            conn = sqlite3.connect(DATABASE_PATH)
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM admin_config WHERE key = 'security_log'")
+            row = cursor.fetchone()
+            conn.close()
+
+            logs = json.loads(row[0]) if row else []
+            # 返回倒序（最新在前）
+            logs.reverse()
+            return jsonify({'success': True, 'data': logs})
+        except Exception as e:
+            logger.error(f"获取安全日志失败: {e}")
+            return jsonify({'success': False, 'error': '获取安全日志失败'}), 500
+
+    @app.route('/api/admin/active-sessions', methods=['GET', 'OPTIONS'])
+    @login_required
+    def admin_active_sessions():
+        """获取当前活跃 Session 列表"""
+        try:
+            now = time.time()
+            sessions = _get_active_sessions()
+            # 清理过期 session
+            sessions = [s for s in sessions if now - s.get('login_time', 0) < SESSION_LIFETIME]
+            current_token = session.get('admin_token', '')
+
+            result = []
+            for s in sessions:
+                login_ts = s.get('login_time', 0)
+                last_ts = s.get('last_active', 0)
+                result.append({
+                    'token_prefix': s.get('token', '')[:8] + '...',
+                    'ip': s.get('ip', ''),
+                    'login_time': datetime.fromtimestamp(login_ts).strftime('%Y-%m-%d %H:%M:%S') if login_ts else '',
+                    'last_active': datetime.fromtimestamp(last_ts).strftime('%Y-%m-%d %H:%M:%S') if last_ts else '',
+                    'is_current': s.get('token', '') == current_token,
+                })
+            return jsonify({'success': True, 'data': result})
+        except Exception as e:
+            logger.error(f"获取活跃 Session 失败: {e}")
+            return jsonify({'success': False, 'error': '获取失败'}), 500
+
+    @app.route('/api/admin/kick-session', methods=['POST', 'OPTIONS'])
+    @login_required
+    def admin_kick_session():
+        """踢出指定 Session"""
+        if request.method == 'OPTIONS':
+            return make_response()
+        data = request.get_json(silent=True) or {}
+        token_prefix = data.get('token_prefix', '')
+        if not token_prefix:
+            return jsonify({'success': False, 'error': '缺少参数'}), 400
+
+        try:
+            sessions = _get_active_sessions()
+            target = token_prefix.rstrip('.')
+            new_sessions = [s for s in sessions if not s.get('token', '').startswith(target)]
+            kicked = len(sessions) - len(new_sessions)
+            _save_active_sessions(new_sessions)
+
+            if kicked > 0:
+                ip = _get_client_ip(request)
+                _log_security_event('session_kicked', ip, session.get('admin_username', ''),
+                                    detail=f"手动踢出 token={target}...")
+            return jsonify({'success': True, 'kicked': kicked})
+        except Exception as e:
+            logger.error(f"踢出 Session 失败: {e}")
+            return jsonify({'success': False, 'error': '操作失败'}), 500
+
     logger.info("管理员路由注册完成")
