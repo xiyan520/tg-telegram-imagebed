@@ -31,13 +31,6 @@ def _extract_bearer_token() -> str:
 @auth_bp.route('/api/auth/token/generate', methods=['POST'])
 def generate_token():
     """生成游客 Token"""
-    # 检查是否允许生成 Token
-    if not is_token_generation_allowed():
-        return add_cache_headers(jsonify({
-            'success': False,
-            'error': 'Token 生成已关闭，请联系管理员'
-        }), 'no-cache'), 403
-
     try:
         # 提取客户端 IP（处理代理情况）
         xff = (request.headers.get('X-Forwarded-For') or '').strip()
@@ -61,13 +54,21 @@ def generate_token():
                     'success': False, 'error': f'已达到 Token 上限（{max_tokens}个）'
                 }), 'no-cache'), 403
 
-        # 不强制 TG 登录，但开启了绑定开关 + 用户已 TG 登录
-        elif get_system_setting('tg_bind_token_enabled') == '1':
-            tg_session_token = request.cookies.get('tg_session', '')
-            if tg_session_token:
-                session_info = verify_tg_session(tg_session_token)
-                if session_info:
-                    tg_user_id = session_info['tg_user_id']
+        else:
+            # 非强制 TG 模式：检查游客 Token 生成策略
+            if not is_token_generation_allowed():
+                return add_cache_headers(jsonify({
+                    'success': False,
+                    'error': 'Token 生成已关闭，请联系管理员'
+                }), 'no-cache'), 403
+
+            # 开启了绑定开关 + 用户已 TG 登录 → 自动绑定
+            if get_system_setting('tg_bind_token_enabled') == '1':
+                tg_session_token = request.cookies.get('tg_session', '')
+                if tg_session_token:
+                    session_info = verify_tg_session(tg_session_token)
+                    if session_info:
+                        tg_user_id = session_info['tg_user_id']
 
         # 非 TG 用户：限制每个 IP 最多生成 N 个 Token
         if not tg_user_id:
