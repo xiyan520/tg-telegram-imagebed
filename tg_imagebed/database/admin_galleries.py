@@ -55,18 +55,38 @@ def admin_get_gallery(gallery_id: int) -> Optional[Dict[str, Any]]:
         logger.error(f"Admin 获取画集失败: {e}")
         return None
 
-def admin_list_galleries(page: int = 1, limit: int = 50) -> Dict[str, Any]:
-    """管理员获取画集列表"""
+def admin_list_galleries(page: int = 1, limit: int = 50, search: Optional[str] = None, sort: Optional[str] = None) -> Dict[str, Any]:
+    """管理员获取画集列表（支持搜索和排序）"""
     page = max(1, int(page or 1))
     limit = max(1, min(200, int(limit or 50)))
     try:
         with get_connection() as conn:
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM galleries WHERE owner_type = 'admin'")
+
+            # 构建 WHERE 条件
+            where_clauses = ["g.owner_type = 'admin'"]
+            params: list = []
+            if search and search.strip():
+                where_clauses.append("g.name LIKE ?")
+                params.append(f"%{search.strip()}%")
+            where_sql = " AND ".join(where_clauses)
+
+            # 计数
+            cur.execute(f"SELECT COUNT(*) FROM galleries g WHERE {where_sql}", params)
             total = cur.fetchone()[0]
+
+            # 排序
+            sort_map = {
+                'newest': 'g.updated_at DESC',
+                'oldest': 'g.created_at ASC',
+                'most_images': 'image_count DESC, g.updated_at DESC',
+                'name': 'g.name ASC',
+            }
+            order_sql = sort_map.get(sort or '', 'g.updated_at DESC')
+
             offset = (page - 1) * limit
-            # 优先使用手动设置的封面，否则取第一张图（按添加时间 ASC）
-            cur.execute('''
+            query_params = params + [limit, offset]
+            cur.execute(f'''
                 SELECT g.*,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count,
                     COALESCE(g.cover_image, (
@@ -75,10 +95,10 @@ def admin_list_galleries(page: int = 1, limit: int = 50) -> Dict[str, Any]:
                         WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at ASC LIMIT 1
                     )) AS resolved_cover_image
                 FROM galleries g
-                WHERE g.owner_type = 'admin'
-                ORDER BY g.updated_at DESC
+                WHERE {where_sql}
+                ORDER BY {order_sql}
                 LIMIT ? OFFSET ?
-            ''', (limit, offset))
+            ''', query_params)
             items = [dict(r) for r in cur.fetchall()]
             for item in items:
                 item['cover_image'] = item.pop('resolved_cover_image', None)

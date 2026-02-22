@@ -56,3 +56,26 @@ def _inc_bot_stats(*, success: int = 0, failed: int = 0) -> None:
         _BOT_STATUS["stats_processed"] += success + failed
         _BOT_STATUS["stats_success"] += success
         _BOT_STATUS["stats_failed"] += failed
+
+
+# ===================== Bot 实例引用（跨线程桥接） =====================
+_bot_instance = None
+_bot_loop = None
+
+def set_bot_instance(bot):
+    """保存 Bot 实例引用（在 Bot 启动后调用）"""
+    global _bot_instance
+    _bot_instance = bot
+
+def get_bot_instance():
+    """获取 Bot 实例"""
+    return _bot_instance
+
+def set_bot_loop(loop):
+    """保存 Bot 事件循环引用"""
+    global _bot_loop
+    _bot_loop = loop
+
+def get_bot_loop():
+    """获取 Bot 事件循环"""
+    return _bot_loop

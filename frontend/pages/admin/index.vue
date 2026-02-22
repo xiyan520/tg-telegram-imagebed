@@ -164,7 +164,7 @@
       <!-- 版权信息 -->
       <div class="mt-6 text-center">
         <p class="text-sm text-gray-500 dark:text-gray-400">
-          © 2024 图床管理系统. All rights reserved.
+          &copy; {{ new Date().getFullYear() }} 图床管理系统. All rights reserved.
         </p>
       </div>
     </div>
@@ -207,7 +207,7 @@ onMounted(async () => {
   }
 
   // 恢复并验证后端 session
-  if (process.client && !authStore.isAuthenticated) {
+  if (import.meta.client && !authStore.isAuthenticated) {
     await authStore.restoreAuth()
   }
 
@@ -221,7 +221,7 @@ onMounted(async () => {
   authChecking.value = false
 
   // 从localStorage恢复记住的用户名
-  if (process.client) {
+  if (import.meta.client) {
     const savedUsername = localStorage.getItem('admin_username')
     if (savedUsername) {
       loginForm.value.username = savedUsername
@@ -252,14 +252,14 @@ const startLockoutCountdown = (seconds: number) => {
 const handleLogin = async () => {
   loading.value = true
   try {
-    await authStore.login(loginForm.value.username, loginForm.value.password)
+    await authStore.login(loginForm.value.username, loginForm.value.password, rememberMe.value)
 
     // 重置安全状态
     remainingAttempts.value = -1
     lockoutTimer.value = 0
 
     // 如果选择记住我，保存用户名
-    if (process.client) {
+    if (import.meta.client) {
       if (rememberMe.value) {
         localStorage.setItem('admin_username', loginForm.value.username)
       } else {

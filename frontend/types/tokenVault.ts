@@ -13,6 +13,7 @@ export interface TokenInfo {
   last_used: string | null
   can_upload?: boolean
   description?: string | null
+  tg_user_id?: number | null
 }
 
 /** Token Vault 单项 */

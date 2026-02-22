@@ -30,7 +30,9 @@ def admin_galleries_list_create():
         page = request.args.get('page', 1, type=int)
         limit = request.args.get('limit', 50, type=int)
         limit = max(1, min(200, limit))
-        result = admin_list_galleries(page, limit)
+        search = request.args.get('search', '').strip() or None
+        sort = request.args.get('sort', '').strip() or None
+        result = admin_list_galleries(page, limit, search=search, sort=sort)
         base_url = get_domain(request)
         for item in result['items']:
             if item.get('cover_image'):

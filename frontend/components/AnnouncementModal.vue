@@ -38,7 +38,7 @@ const announcement = ref({
 
 // 检查是否已经显示过公告
 const hasShownAnnouncement = () => {
-  if (process.client) {
+  if (import.meta.client) {
     // 如果公告ID为0或无效，说明没有公告，不应该显示
     if (!announcement.value.id || announcement.value.id === 0) {
       return true
@@ -51,7 +51,7 @@ const hasShownAnnouncement = () => {
 
 // 标记公告已显示
 const markAnnouncementShown = () => {
-  if (process.client && announcement.value.id && announcement.value.id !== 0) {
+  if (import.meta.client && announcement.value.id && announcement.value.id !== 0) {
     localStorage.setItem('last_announcement_id', String(announcement.value.id))
   }
 }

@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
+import type { ApiResponse, AdminLoginData, AdminCheckResponse, AdminUpdateCredentialsData } from '~/types/api'
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
-    token: '',
     username: '',
     isAuthenticated: false,
     isChecking: false
@@ -10,24 +10,23 @@ export const useAuthStore = defineStore('auth', {
 
   actions: {
     // 登录
-    async login(username: string, password: string) {
+    async login(username: string, password: string, rememberMe: boolean = false) {
       const config = useRuntimeConfig()
 
       try {
-        const response = await $fetch<any>(`${config.public.apiBase}/api/admin/login`, {
+        const response = await $fetch<ApiResponse<AdminLoginData>>(`${config.public.apiBase}/api/admin/login`, {
           method: 'POST',
-          body: { username, password },
+          body: { username, password, remember_me: rememberMe },
           credentials: 'include'
         })
 
-        if (response.success) {
-          this.token = response.data.token
+        if (response.success && response.data) {
           this.username = response.data.username
           this.isAuthenticated = true
 
-          // 保存到 localStorage
-          if (process.client) {
-            localStorage.setItem('auth_token', this.token)
+          // 仅存储会话标记，不持久化实际 token（防止 XSS 窃取）
+          if (import.meta.client) {
+            localStorage.setItem('has_session', 'true')
             localStorage.setItem('auth_username', this.username)
           }
 
@@ -67,12 +66,11 @@ export const useAuthStore = defineStore('auth', {
         // 忽略错误，继续清理本地状态
       }
 
-      this.token = ''
       this.username = ''
       this.isAuthenticated = false
 
-      if (process.client) {
-        localStorage.removeItem('auth_token')
+      if (import.meta.client) {
+        localStorage.removeItem('has_session')
         localStorage.removeItem('auth_username')
       }
     },
@@ -82,7 +80,7 @@ export const useAuthStore = defineStore('auth', {
       const config = useRuntimeConfig()
 
       try {
-        const response = await $fetch<any>(`${config.public.apiBase}/api/admin/update_credentials`, {
+        const response = await $fetch<ApiResponse<AdminUpdateCredentialsData>>(`${config.public.apiBase}/api/admin/update_credentials`, {
           method: 'POST',
           body: settings,
           credentials: 'include'
@@ -90,7 +88,7 @@ export const useAuthStore = defineStore('auth', {
 
         if (response.success && settings.username) {
           this.username = settings.username
-          if (process.client) {
+          if (import.meta.client) {
             localStorage.setItem('auth_username', settings.username)
           }
         }
@@ -103,19 +101,20 @@ export const useAuthStore = defineStore('auth', {
 
     // 从 localStorage 恢复状态并验证后端 session
     async restoreAuth() {
-      if (!process.client) return
+      if (!import.meta.client) return
 
-      const token = localStorage.getItem('auth_token')
+      const hasSession = localStorage.getItem('has_session')
       const username = localStorage.getItem('auth_username')
 
-      if (!token || !username) {
+      if (!hasSession) {
         this.clearAuth()
         return
       }
 
-      // 先临时设置状态（避免闪烁）
-      this.token = token
-      this.username = username
+      // 先临时设置用户名（避免闪烁）
+      if (username) {
+        this.username = username
+      }
 
       // 验证后端 session 是否有效
       const isValid = await this.checkAuth()
@@ -132,7 +131,7 @@ export const useAuthStore = defineStore('auth', {
       this.isChecking = true
 
       try {
-        const response = await $fetch<any>(`${config.public.apiBase}/api/admin/check`, {
+        const response = await $fetch<AdminCheckResponse>(`${config.public.apiBase}/api/admin/check`, {
           credentials: 'include'
         })
 
@@ -153,12 +152,11 @@ export const useAuthStore = defineStore('auth', {
 
     // 清除认证状态
     clearAuth() {
-      this.token = ''
       this.username = ''
       this.isAuthenticated = false
 
-      if (process.client) {
-        localStorage.removeItem('auth_token')
+      if (import.meta.client) {
+        localStorage.removeItem('has_session')
         localStorage.removeItem('auth_username')
       }
     },
@@ -166,7 +164,7 @@ export const useAuthStore = defineStore('auth', {
     // 处理 401 错误（供全局错误处理调用）
     handleUnauthorized() {
       this.clearAuth()
-      if (process.client) {
+      if (import.meta.client) {
         navigateTo('/admin')
       }
     }

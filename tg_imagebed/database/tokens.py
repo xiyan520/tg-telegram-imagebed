@@ -246,6 +246,24 @@ def get_token_info(token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def count_tokens_by_ip(ip_address: str) -> int:
+    """统计某个 IP 地址创建的活跃 Token 数量"""
+    if not ip_address:
+        return 0
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT COUNT(*) FROM auth_tokens WHERE ip_address = ? AND is_active = 1',
+                (ip_address,)
+            )
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
+    except Exception as e:
+        logger.error(f"统计 IP Token 数量失败: {e}")
+        return 0
+
+
 def get_token_uploads(token: str, limit: int = 50, page: int = 1) -> List[Dict[str, Any]]:
     """获取 token 上传的所有图片"""
     try:
@@ -273,7 +291,8 @@ def admin_list_tokens(
     *,
     status: str = 'all',
     page: int = 1,
-    page_size: int = 20
+    page_size: int = 20,
+    search: str = None
 ) -> Dict[str, Any]:
     """
     管理员获取 Token 列表（分页）。
@@ -286,6 +305,7 @@ def admin_list_tokens(
             - 'expired': 已过期（无论是否启用）
         page: 页码（从 1 开始）
         page_size: 每页数量（最大 100）
+        search: 搜索关键词（匹配 token 或 description）
 
     Returns:
         包含 page, page_size, total, items 的字典
@@ -297,44 +317,57 @@ def admin_list_tokens(
     offset = (page - 1) * page_size
 
     # 根据状态构建 WHERE 子句
-    where_sql = ""
-    where_params: tuple = ()
+    where_clauses = []
+    where_params_list = []
 
     if status == 'active':
-        where_sql = f"WHERE is_active = 1 AND NOT {_EXPIRED_EXPR}"
+        where_clauses.append(f"a.is_active = 1 AND NOT (a.expires_at IS NOT NULL AND a.expires_at < CURRENT_TIMESTAMP)")
     elif status == 'disabled':
-        where_sql = f"WHERE is_active = 0 AND NOT {_EXPIRED_EXPR}"
+        where_clauses.append(f"a.is_active = 0 AND NOT (a.expires_at IS NOT NULL AND a.expires_at < CURRENT_TIMESTAMP)")
     elif status == 'expired':
-        where_sql = f"WHERE {_EXPIRED_EXPR}"
+        where_clauses.append(f"(a.expires_at IS NOT NULL AND a.expires_at < CURRENT_TIMESTAMP)")
     elif status != 'all':
         raise ValueError(f"无效的状态筛选: {status}")
+
+    # 搜索条件
+    if search and search.strip():
+        where_clauses.append("(a.token LIKE ? OR a.description LIKE ?)")
+        search_pattern = f"%{search.strip()}%"
+        where_params_list.extend([search_pattern, search_pattern])
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    where_params = tuple(where_params_list)
 
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
 
             # 查询总数
-            cursor.execute(f"SELECT COUNT(1) FROM auth_tokens {where_sql}", where_params)
+            cursor.execute(f"SELECT COUNT(1) FROM auth_tokens a {where_sql}", where_params)
             total = cursor.fetchone()[0] or 0
 
             # 查询列表
             cursor.execute(f"""
                 SELECT
-                    rowid AS id,
-                    token,
-                    created_at,
-                    expires_at,
-                    last_used,
-                    upload_count,
-                    upload_limit,
-                    is_active,
-                    ip_address,
-                    user_agent,
-                    description,
-                    CASE WHEN {_EXPIRED_EXPR} THEN 1 ELSE 0 END AS is_expired
-                FROM auth_tokens
+                    a.rowid AS id,
+                    a.token,
+                    a.created_at,
+                    a.expires_at,
+                    a.last_used,
+                    a.upload_count,
+                    a.upload_limit,
+                    a.is_active,
+                    a.ip_address,
+                    a.user_agent,
+                    a.description,
+                    a.tg_user_id,
+                    CASE WHEN a.expires_at IS NOT NULL AND a.expires_at < CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_expired,
+                    u.username AS tg_username,
+                    u.first_name AS tg_first_name
+                FROM auth_tokens a
+                LEFT JOIN tg_users u ON a.tg_user_id = u.tg_user_id
                 {where_sql}
-                ORDER BY created_at DESC, rowid DESC
+                ORDER BY a.created_at DESC, a.rowid DESC
                 LIMIT ? OFFSET ?
             """, (*where_params, page_size, offset))
 
@@ -612,6 +645,44 @@ def admin_delete_token(*, token_id: int) -> bool:
     except Exception as e:
         logger.error(f"管理员删除 Token 失败: {e}")
         raise
+
+
+def delete_token_by_string(token: str) -> bool:
+    """
+    按 token 字符串级联删除（用户侧删除）。
+
+    级联：file_storage.auth_token 置空 → galleries.owner_token 置空
+          → gallery_token_access 清理 → auth_tokens 删除
+    """
+    token = (token or '').strip()
+    if not token:
+        return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 检查 token 是否存在
+            cursor.execute("SELECT 1 FROM auth_tokens WHERE token = ?", (token,))
+            if not cursor.fetchone():
+                return False
+            # 级联清理
+            cursor.execute(
+                "UPDATE file_storage SET auth_token = NULL WHERE auth_token = ?",
+                (token,),
+            )
+            cursor.execute(
+                "UPDATE galleries SET owner_token = NULL WHERE owner_token = ?",
+                (token,),
+            )
+            cursor.execute(
+                "DELETE FROM gallery_token_access WHERE token = ?",
+                (token,),
+            )
+            cursor.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
+        logger.info(f"用户侧级联删除 Token: {token[:20]}...")
+        return True
+    except Exception as e:
+        logger.error(f"用户侧删除 Token 失败: {e}")
+        return False
 
 
 def admin_get_token_detail(token_id: int) -> Optional[Dict[str, Any]]:

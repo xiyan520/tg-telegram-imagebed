@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import type { TokenInfo, TokenVaultItem, TokenVaultPersistedV1 } from '~/types/tokenVault'
+import type { ApiResponse, TokenGenerateResult, TokenVerifyData, TokenUploadsData } from '~/types/api'
 
 const VAULT_STORAGE_KEY = 'token_vault_v1'
 const LEGACY_TOKEN_KEY = 'guest_token'
@@ -172,6 +173,20 @@ export const useTokenStore = defineStore('token', {
       const t = (token || '').trim()
       if (!t) throw new Error('Token不能为空')
 
+      // 先验证 Token 有效性，无效则不添加
+      if (opts?.verify) {
+        const config = useRuntimeConfig()
+        const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/verify`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${t}` }
+        })
+        if (!response?.success || !response?.valid) {
+          const err: any = new Error(response?.reason || 'Token无效或不存在')
+          err.tokenInvalid = true
+          throw err
+        }
+      }
+
       const existing = this.vault.items.find(i => i.token === t)
       if (existing) {
         if (typeof opts?.albumName === 'string') existing.albumName = opts.albumName.slice(0, 50)
@@ -198,6 +213,7 @@ export const useTokenStore = defineStore('token', {
       }
       this.persistVault()
       this.syncActiveFromVault()
+      // 已在上面验证过，这里同步 tokenInfo
       if (opts?.verify) await this.verifyToken()
       return item.id
     },
@@ -213,12 +229,13 @@ export const useTokenStore = defineStore('token', {
         if (options?.expires_days != null) body.expires_days = options.expires_days
         if (options?.albumName) body.description = options.albumName
 
-        const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/generate`, {
+        const response = await $fetch<ApiResponse<TokenGenerateResult>>(`${config.public.apiBase}/api/auth/token/generate`, {
           method: 'POST',
-          body
+          body,
+          credentials: 'include',
         })
 
-        if (response.success) {
+        if (response.success && response.data) {
           await this.addTokenToVault(response.data.token, {
             albumName: options?.albumName || '',
             makeActive: true,
@@ -242,7 +259,7 @@ export const useTokenStore = defineStore('token', {
       const config = useRuntimeConfig()
 
       try {
-        const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/verify`, {
+        const response = await $fetch<ApiResponse<TokenVerifyData> & { valid?: boolean; reason?: string }>(`${config.public.apiBase}/api/auth/token/verify`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${this.token}`
@@ -285,6 +302,14 @@ export const useTokenStore = defineStore('token', {
       this.syncActiveFromVault()
     },
 
+    // 清空整个 vault（退出登录时使用，仅清本地）
+    clearVault() {
+      this.vault.items = []
+      this.vault.activeId = null
+      this.persistVault()
+      this.syncActiveFromVault()
+    },
+
     // 从 localStorage 恢复token
     async restoreToken() {
       if (import.meta.client) {
@@ -316,7 +341,7 @@ export const useTokenStore = defineStore('token', {
       const config = useRuntimeConfig()
 
       try {
-        const response = await $fetch<any>(`${config.public.apiBase}/api/auth/uploads`, {
+        const response = await $fetch<ApiResponse<TokenUploadsData>>(`${config.public.apiBase}/api/auth/uploads`, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${this.token}`
@@ -350,11 +375,47 @@ export const useTokenStore = defineStore('token', {
       }
     },
 
+    // 从服务器删除所有 vault 中的 Token（退出登录时使用）
+    async deleteAllTokensFromServer() {
+      const config = useRuntimeConfig()
+      const items = [...this.vault.items]
+      for (const item of items) {
+        try {
+          await $fetch(`${config.public.apiBase}/api/auth/token`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${item.token}` }
+          })
+        } catch {
+          // 静默忽略单个删除失败（Token 可能已失效）
+        }
+      }
+      // 清空本地 vault
+      this.vault.items = []
+      this.vault.activeId = null
+      this.persistVault()
+      this.syncActiveFromVault()
+    },
+
+    // 从服务器删除 Token（级联删除）
+    async deleteTokenFromServer(vaultId: string) {
+      const item = this.vault.items.find(i => i.id === vaultId)
+      if (!item) return
+
+      const config = useRuntimeConfig()
+      await $fetch(`${config.public.apiBase}/api/auth/token`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${item.token}` }
+      })
+
+      // 后端删除成功后，从本地 vault 移除
+      this.removeTokenFromVault(vaultId)
+    },
+
     // 更新相册描述（同步到服务器）
     async updateDescription(description: string) {
       if (!this.token) throw new Error('未提供Token')
       const config = useRuntimeConfig()
-      const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token`, {
+      const response = await $fetch<ApiResponse<{ token: string; description: string }>>(`${config.public.apiBase}/api/auth/token`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${this.token}` },
         body: { description }

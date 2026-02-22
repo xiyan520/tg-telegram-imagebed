@@ -48,8 +48,10 @@ def admin_update_settings():
     if new_username and len(new_username) < 3:
         return jsonify({'success': False, 'message': '用户名至少需要3个字符'}), 400
 
-    if new_password and len(new_password) < 6:
-        return jsonify({'success': False, 'message': '密码至少需要6个字符'}), 400
+    if new_password:
+        valid, msg = admin_module.validate_password_strength(new_password)
+        if not valid:
+            return jsonify({'success': False, 'message': msg}), 400
 
     if admin_module.update_admin_credentials(new_username, new_password):
         if new_username:
@@ -104,7 +106,7 @@ def get_announcement_api():
 
     except Exception as e:
         logger.error(f"获取公告失败: {e}")
-        response = jsonify({'success': False, 'error': str(e)})
+        response = jsonify({'success': False, 'error': '获取公告失败，请稍后重试'})
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 500
 
@@ -171,7 +173,7 @@ def admin_announcement():
 
     except Exception as e:
         logger.error(f"公告管理失败: {e}")
-        response = jsonify({'success': False, 'error': str(e)})
+        response = jsonify({'success': False, 'error': '操作失败，请稍后重试'})
         response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         return add_cache_headers(response, 'no-cache'), 500

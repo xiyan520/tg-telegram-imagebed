@@ -71,7 +71,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help — 显示此帮助信息\n"
         "/id — 查看你的 Telegram ID 和聊天信息\n"
         "/myuploads — 查看个人上传历史\n"
-        "/delete <ID> — 删除你上传的图片\n\n"
+        "/delete <ID> — 删除你上传的图片\n"
+        "/login — 获取 Web 端登录链接\n"
+        "/mytokens — 查看我的 Token\n\n"
         "💡 *使用方法*\n"
         "直接发送图片即可获取永久直链\n"
         "发送图片时附带说明文字可自定义文件名"
@@ -331,3 +333,80 @@ async def _handle_quick_delete(query):
         await query.edit_message_text("✅ 文件已删除")
     else:
         await query.edit_message_text("❌ 删除失败，请稍后重试")
+
+
+# ===================== TG 认证命令 =====================
+
+async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理 /login 命令 — 生成 Web 端一次性登录链接"""
+    from ..database import get_system_setting, upsert_tg_user, create_login_code
+    from ..utils import get_domain
+
+    if str(get_system_setting('tg_auth_enabled') or '0') != '1':
+        await update.message.reply_text("❌ TG 认证功能未启用")
+        return
+
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("❌ 无法获取用户信息")
+        return
+
+    # 记录/更新用户信息
+    upsert_tg_user(
+        tg_user_id=user.id,
+        username=user.username,
+        first_name=user.first_name,
+        last_name=user.last_name
+    )
+
+    # 生成一次性登录链接
+    code = create_login_code(code_type='login_link', tg_user_id=user.id)
+    if not code:
+        await update.message.reply_text("❌ 生成登录链接失败，请稍后重试")
+        return
+
+    base_url = get_domain(None)
+    login_url = f"{base_url}/tg-login?code={code}"
+
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("🔗 点击登录 Web 端", url=login_url)
+    ]])
+
+    await update.message.reply_text(
+        "🔐 *Web 端登录*\n\n"
+        "点击下方按钮登录图床 Web 端：\n\n"
+        "⏰ 链接有效期 5 分钟，仅可使用一次",
+        parse_mode='Markdown',
+        reply_markup=markup
+    )
+
+
+async def mytokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理 /mytokens 命令 — 查看绑定的 Token"""
+    from ..database import get_system_setting, get_user_tokens
+
+    if str(get_system_setting('tg_auth_enabled') or '0') != '1':
+        await update.message.reply_text("❌ TG 认证功能未启用")
+        return
+
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("❌ 无法获取用户信息")
+        return
+
+    tokens = get_user_tokens(user.id)
+    if not tokens:
+        await update.message.reply_text("📭 你还没有绑定任何 Token\n\n💡 通过 Web 端登录后生成的 Token 会自动绑定")
+        return
+
+    lines = [f"🔑 *你的 Token*（共 {len(tokens)} 个）\n"]
+    for t in tokens:
+        token_str = t['token']
+        masked = f"{token_str[:8]}…{token_str[-4:]}" if len(token_str) > 12 else token_str
+        status = "✅" if t['is_active'] else "❌"
+        usage = f"{t['upload_count']}/{t['upload_limit']}"
+        desc = t.get('description') or ''
+        desc_str = f" | {desc}" if desc else ''
+        lines.append(f"• `{masked}` {status} {usage}{desc_str}")
+
+    await update.message.reply_text('\n'.join(lines), parse_mode='Markdown')

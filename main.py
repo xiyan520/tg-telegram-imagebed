@@ -12,6 +12,7 @@ Telegram 图床机器人 - 模块化重构版入口文件
 """
 import sys
 import time
+import signal
 import threading
 
 from flask import Flask, jsonify
@@ -45,6 +46,24 @@ from tg_imagebed.services.cdn_service import start_cdn_monitor, stop_cdn_monitor
 # 导入 admin_module（保持兼容）
 from tg_imagebed import admin_module
 
+# 全局关闭信号，供各线程检测退出
+shutdown_event = threading.Event()
+
+
+def _graceful_shutdown(signum, frame):
+    """SIGTERM / SIGINT 信号处理器，触发优雅关闭"""
+    sig_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+    logger.info(f"收到 {sig_name} 信号，正在优雅关闭...")
+    shutdown_event.set()
+
+
+# 注册信号处理器（Windows 不支持 SIGTERM，用 try/except 兼容）
+signal.signal(signal.SIGINT, _graceful_shutdown)
+try:
+    signal.signal(signal.SIGTERM, _graceful_shutdown)
+except (OSError, AttributeError):
+    pass  # Windows 下 SIGTERM 不可用，忽略
+
 
 def create_app() -> Flask:
     """创建并配置 Flask 应用"""
@@ -67,6 +86,24 @@ def create_app() -> Flask:
         r"/api/admin/*": {
             "origins": admin_origins,
             "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+            "supports_credentials": True,
+            "vary_header": True,
+            "max_age": 3600
+        },
+        # TG 认证 API - 需要 credentials（tg_session cookie）
+        r"/api/auth/tg/*": {
+            "origins": admin_origins,
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+            "supports_credentials": True,
+            "vary_header": True,
+            "max_age": 3600
+        },
+        # Token 生成 API - 需要 credentials（TG 绑定时读取 tg_session cookie）
+        r"/api/auth/token/generate": {
+            "origins": admin_origins,
+            "methods": ["POST", "OPTIONS"],
             "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
             "supports_credentials": True,
             "vary_header": True,
@@ -123,12 +160,13 @@ def create_app() -> Flask:
     # 注册蓝图 - 必须先导入路由模块以触发路由注册
     from tg_imagebed.api import upload_bp, images_bp, admin_bp, auth_bp
     # 导入路由模块，触发 @bp.route 装饰器执行
-    from tg_imagebed.api import upload, images, admin, auth, settings, galleries
+    from tg_imagebed.api import upload, images, admin, auth, settings, galleries, tg_auth
 
     app.register_blueprint(upload_bp)
-    app.register_blueprint(images_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
+    # images_bp 必须最后注册，因为它包含 /<path:path> catch-all 路由
+    app.register_blueprint(images_bp)
 
     # 注册 admin_module 路由（保持兼容）
     admin_module.register_admin_routes(
@@ -209,11 +247,12 @@ def main():
         logger.warning("=" * 60)
 
     try:
-        # 主线程保持运行
-        while True:
-            time.sleep(1)
+        # 主线程等待关闭信号（SIGTERM / SIGINT / KeyboardInterrupt）
+        while not shutdown_event.is_set():
+            shutdown_event.wait(timeout=1)
     except KeyboardInterrupt:
-        logger.info("收到停止信号，正在关闭服务...")
+        logger.info("收到 KeyboardInterrupt，正在关闭服务...")
+        shutdown_event.set()
     finally:
         stop_cdn_monitor()
         release_lock()

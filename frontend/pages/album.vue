@@ -10,21 +10,16 @@
       </p>
     </div>
 
-    <!-- Token 切换器 -->
-    <TokenVaultSwitcher />
-
-    <!-- 无Token提示 -->
+    <!-- 无 Token 引导提示 -->
     <UCard v-if="!store.hasToken" class="shadow-lg">
       <div class="text-center py-8 space-y-4">
         <div class="w-16 h-16 mx-auto bg-gradient-to-br from-amber-500 to-orange-500 rounded-2xl flex items-center justify-center">
           <UIcon name="heroicons:photo" class="w-8 h-8 text-white" />
         </div>
         <div>
-          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">
-            添加或生成一个 Token
-          </h2>
+          <h2 class="text-xl font-bold text-gray-900 dark:text-white mb-2">开始使用相册</h2>
           <p class="text-gray-600 dark:text-gray-400">
-            点击上方"添加 Token"或"生成新 Token"按钮开始使用相册
+            请点击右上角「游客登录」按钮登录后使用相册功能
           </p>
         </div>
       </div>
@@ -112,7 +107,7 @@ watch(() => store.token, (newToken, oldToken) => {
   refreshKey.value++
 })
 
-// 页面加载时恢复 Token，验证失败自动清理
+// 页面加载时恢复 Token
 onMounted(async () => {
   await store.restoreToken()
 })

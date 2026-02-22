@@ -18,8 +18,11 @@ IMAGE_SIGNATURES = {
     b'\xff\xd8\xff': 'image/jpeg',
     b'GIF87a': 'image/gif',
     b'GIF89a': 'image/gif',
-    b'RIFF': 'image/webp',  # WebP (需额外检查 WEBP 标识)
+    b'RIFF': 'image/webp',       # WebP (需额外检查 WEBP 标识)
     b'BM': 'image/bmp',
+    b'\x49\x49\x2A\x00': 'image/tiff',  # TIFF Little-Endian
+    b'\x4D\x4D\x00\x2A': 'image/tiff',  # TIFF Big-Endian
+    b'\x00\x00\x01\x00': 'image/x-icon', # ICO
 }
 
 
@@ -32,6 +35,12 @@ def validate_image_magic(content: bytes) -> str | None:
             if sig == b'RIFF' and content[8:12] != b'WEBP':
                 continue
             return mime
+    # AVIF 特殊检测：ISOBMFF 容器，偏移 4 字节处为 'ftyp'，
+    # 然后在 8-32 字节范围内包含 'avif' 或 'avis' 品牌标识
+    if len(content) >= 12 and content[4:8] == b'ftyp':
+        brand_region = content[8:min(32, len(content))]
+        if b'avif' in brand_region or b'avis' in brand_region:
+            return 'image/avif'
     return None
 
 
@@ -132,4 +141,4 @@ def upload_file():
 
     except Exception as e:
         logger.error(f"Upload error: {e}")
-        return add_cache_headers(jsonify({'error': str(e)}), 'no-cache'), 500
+        return add_cache_headers(jsonify({'error': '上传失败，请稍后重试'}), 'no-cache'), 500

@@ -77,7 +77,7 @@ def get_storage_backends():
 
     except Exception as e:
         logger.error(f"获取存储后端列表失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '获取存储后端列表失败'}, 500)
 
 
 @admin_bp.route('/api/admin/storage/active', methods=['POST', 'OPTIONS'])
@@ -107,7 +107,7 @@ def set_active_storage():
 
     except Exception as e:
         logger.error(f"切换存储后端失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '切换存储后端失败'}, 500)
 
 
 @admin_bp.route('/api/admin/storage/health', methods=['GET', 'OPTIONS'])
@@ -134,7 +134,7 @@ def check_storage_health():
 
     except Exception as e:
         logger.error(f"存储健康检查失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '存储健康检查失败'}, 500)
 
 
 @admin_bp.route('/api/admin/storage/policy', methods=['GET', 'PUT', 'OPTIONS'])
@@ -185,7 +185,7 @@ def storage_upload_policy():
 
     except Exception as e:
         logger.error(f"存储策略操作失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '存储策略操作失败'}, 500)
 
 
 @admin_bp.route('/api/admin/upload', methods=['POST', 'OPTIONS'])
@@ -266,7 +266,7 @@ def get_storage_config():
 
     except Exception as e:
         logger.error(f"获取存储配置失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '获取存储配置失败'}, 500)
 
 
 @admin_bp.route('/api/admin/storage/backends', methods=['POST', 'OPTIONS'])
@@ -324,7 +324,7 @@ def add_storage_backend():
 
     except Exception as e:
         logger.error(f"添加存储后端失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '添加存储后端失败'}, 500)
 
 
 @admin_bp.route('/api/admin/storage/backends/<name>', methods=['PUT', 'DELETE', 'OPTIONS'])
@@ -392,4 +392,4 @@ def modify_storage_backend(name: str):
 
     except Exception as e:
         logger.error(f"修改存储后端失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '修改存储后端失败'}, 500)

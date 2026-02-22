@@ -17,12 +17,14 @@ from datetime import datetime, timedelta
 from functools import wraps
 from flask import session, request, jsonify, render_template, make_response, redirect, url_for
 
+from .database.connection import get_connection
+
 # 日志配置
 logger = logging.getLogger(__name__)
 
-# 从 utils.py 导入 get_domain
+# 从 utils.py 导入 get_domain 和 format_size
 try:
-    from .utils import get_domain
+    from .utils import get_domain, format_size
 except ImportError:
     # 兼容独立运行场景
     def get_domain(req):
@@ -33,6 +35,7 @@ except ImportError:
 try:
     from .config import (
         SESSION_LIFETIME,
+        REMEMBER_ME_LIFETIME,
         DATABASE_PATH,
         LOGIN_MAX_ATTEMPTS,
         LOGIN_LOCKOUT_DURATIONS,
@@ -42,6 +45,7 @@ try:
 except ImportError:
     # 兼容独立运行场景
     SESSION_LIFETIME = 3600
+    REMEMBER_ME_LIFETIME = 30 * 24 * 3600
     DEFAULT_DB_PATH = os.path.join(os.getcwd(), "data", "telegram_imagebed.db")
     DATABASE_PATH = DEFAULT_DB_PATH
     LOGIN_MAX_ATTEMPTS = 5
@@ -56,10 +60,7 @@ _login_tracker: dict[str, dict] = {}
 
 
 def _get_client_ip(req) -> str:
-    """从 X-Forwarded-For 或 remote_addr 获取真实客户端 IP"""
-    forwarded = req.headers.get('X-Forwarded-For', '')
-    if forwarded:
-        return forwarded.split(',')[0].strip()
+    """获取真实客户端 IP（ProxyFix 已将 X-Forwarded-For 解析到 remote_addr）"""
     return req.remote_addr or '127.0.0.1'
 
 
@@ -134,7 +135,7 @@ def _record_login_success(ip: str):
 
 
 # ===================== 密码强度校验 =====================
-def _validate_password_strength(password: str) -> tuple[bool, str]:
+def validate_password_strength(password: str) -> tuple[bool, str]:
     """
     校验密码强度
     返回: (valid, message)
@@ -152,46 +153,49 @@ def _validate_password_strength(password: str) -> tuple[bool, str]:
 def _log_security_event(event_type: str, ip: str, username: str = '', detail: str = ''):
     """将安全事件写入 admin_config 表（key=security_log，保留最近 200 条）"""
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        # 读取现有日志
-        cursor.execute("SELECT value FROM admin_config WHERE key = 'security_log'")
-        row = cursor.fetchone()
-        logs = json.loads(row[0]) if row else []
+            # 读取现有日志
+            cursor.execute("SELECT value FROM admin_config WHERE key = 'security_log'")
+            row = cursor.fetchone()
+            logs = json.loads(row[0]) if row else []
 
-        # 追加新事件
-        logs.append({
-            'type': event_type,
-            'ip': ip,
-            'username': username,
-            'detail': detail,
-            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        })
+            # 追加新事件
+            logs.append({
+                'type': event_type,
+                'ip': ip,
+                'username': username,
+                'detail': detail,
+                'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            })
 
-        # 保留最近 200 条
-        logs = logs[-200:]
+            # 保留最近 200 条
+            logs = logs[-200:]
 
-        cursor.execute(
-            "INSERT OR REPLACE INTO admin_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            ('security_log', json.dumps(logs, ensure_ascii=False))
-        )
-        conn.commit()
-        conn.close()
+            cursor.execute(
+                "INSERT OR REPLACE INTO admin_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                ('security_log', json.dumps(logs, ensure_ascii=False))
+            )
     except Exception as e:
         logger.debug(f"写入安全审计日志失败: {e}")
 
 
 # ===================== Session 并发控制 =====================
+
+def _get_session_lifetime(remember_me: bool = False) -> int:
+    """根据是否"记住我"返回对应的 session 有效期（秒）"""
+    return REMEMBER_ME_LIFETIME if remember_me else SESSION_LIFETIME
+
+
 def _get_active_sessions() -> list[dict]:
     """从数据库读取活跃 session 列表"""
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT value FROM admin_config WHERE key = 'active_sessions'")
-        row = cursor.fetchone()
-        conn.close()
-        return json.loads(row[0]) if row else []
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM admin_config WHERE key = 'active_sessions'")
+            row = cursor.fetchone()
+            return json.loads(row[0]) if row else []
     except Exception:
         return []
 
@@ -199,25 +203,26 @@ def _get_active_sessions() -> list[dict]:
 def _save_active_sessions(sessions: list[dict]):
     """保存活跃 session 列表到数据库"""
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR REPLACE INTO admin_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
-            ('active_sessions', json.dumps(sessions, ensure_ascii=False))
-        )
-        conn.commit()
-        conn.close()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO admin_config (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                ('active_sessions', json.dumps(sessions, ensure_ascii=False))
+            )
     except Exception as e:
         logger.debug(f"保存活跃 session 失败: {e}")
 
 
-def _register_session(token: str, ip: str):
+def _register_session(token: str, ip: str, remember_me: bool = False):
     """注册新 session，超出并发限制时踢掉最早的"""
     now = time.time()
     sessions = _get_active_sessions()
 
-    # 清理过期 session
-    sessions = [s for s in sessions if now - s.get('login_time', 0) < SESSION_LIFETIME]
+    # 清理过期 session（根据各自的 remember_me 标记使用对应的 lifetime）
+    sessions = [
+        s for s in sessions
+        if now - s.get('login_time', 0) < _get_session_lifetime(s.get('remember_me', False))
+    ]
 
     # 踢掉最早的 session（如果超出限制）
     kicked = []
@@ -235,6 +240,7 @@ def _register_session(token: str, ip: str):
         'ip': ip,
         'login_time': now,
         'last_active': now,
+        'remember_me': remember_me,
     })
 
     _save_active_sessions(sessions)
@@ -244,8 +250,11 @@ def _update_session_activity(token: str):
     """更新 session 的最后活跃时间，若不存在则自动补注册"""
     now = time.time()
     sessions = _get_active_sessions()
-    # 清理过期 session
-    sessions = [s for s in sessions if now - s.get('login_time', 0) < SESSION_LIFETIME]
+    # 清理过期 session（根据各自的 remember_me 标记使用对应的 lifetime）
+    sessions = [
+        s for s in sessions
+        if now - s.get('login_time', 0) < _get_session_lifetime(s.get('remember_me', False))
+    ]
 
     found = False
     for s in sessions:
@@ -307,119 +316,124 @@ def _get_config_status_from_db() -> dict:
 
 def init_admin_config():
     """初始化管理员配置表（在主数据库中）"""
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    with get_connection() as conn:
+        cursor = conn.cursor()
 
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS admin_config (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admin_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
 def get_admin_config():
     """获取管理员配置"""
     init_admin_config()
 
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("SELECT value FROM admin_config WHERE key = 'username'")
-    username = cursor.fetchone()
-    username = username[0] if username else ''
-    
-    cursor.execute("SELECT value FROM admin_config WHERE key = 'password_hash'")
-    password_hash = cursor.fetchone()
-    
-    conn.close()
-    
-    return {
-        'username': username,
-        'password_status': '已设置' if password_hash else '使用默认密码',
-        'session_lifetime': SESSION_LIFETIME
-    }
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT value FROM admin_config WHERE key = 'username'")
+        username = cursor.fetchone()
+        username = username[0] if username else ''
+
+        cursor.execute("SELECT value FROM admin_config WHERE key = 'password_hash'")
+        password_hash = cursor.fetchone()
+
+        return {
+            'username': username,
+            'password_status': '已设置' if password_hash else '使用默认密码',
+            'session_lifetime': SESSION_LIFETIME
+        }
 
 def verify_admin_password(username, password):
     """验证管理员密码"""
     from werkzeug.security import check_password_hash
 
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
+    with get_connection() as conn:
+        cursor = conn.cursor()
 
-    cursor.execute("SELECT value FROM admin_config WHERE key = 'username'")
-    stored_username = cursor.fetchone()
-    if not stored_username or stored_username[0] != username:
-        conn.close()
-        return False
+        cursor.execute("SELECT value FROM admin_config WHERE key = 'username'")
+        stored_username = cursor.fetchone()
+        if not stored_username or stored_username[0] != username:
+            return False
 
-    cursor.execute("SELECT value FROM admin_config WHERE key = 'password_hash'")
-    stored_hash = cursor.fetchone()
+        cursor.execute("SELECT value FROM admin_config WHERE key = 'password_hash'")
+        stored_hash = cursor.fetchone()
 
-    conn.close()
+        if not stored_hash:
+            return False
 
-    if not stored_hash:
-        return False
-
-    # 使用 werkzeug.security 验证密码
-    # 兼容旧的 sha256 哈希格式
-    hash_value = stored_hash[0]
-    if hash_value.startswith('pbkdf2:'):
-        return check_password_hash(hash_value, password)
-    else:
-        # 兼容旧格式（sha256）
-        import hashlib
-        return hash_value == hashlib.sha256(password.encode()).hexdigest()
+        # 使用 werkzeug.security 验证密码
+        # 兼容旧的 sha256 哈希格式
+        hash_value = stored_hash[0]
+        if hash_value.startswith('pbkdf2:'):
+            return check_password_hash(hash_value, password)
+        else:
+            # 兼容旧格式（sha256）
+            import hashlib
+            if hash_value == hashlib.sha256(password.encode()).hexdigest():
+                # 旧格式验证成功，自动升级为 pbkdf2
+                try:
+                    update_admin_credentials(new_password=password)
+                    logger.info(f"已自动将管理员 {username} 的密码哈希从 SHA256 升级为 pbkdf2")
+                except Exception as e:
+                    logger.warning(f"密码哈希自动升级失败（不影响登录）: {e}")
+                return True
+            return False
 
 def update_admin_credentials(new_username=None, new_password=None):
     """更新管理员凭据"""
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    
     try:
-        if new_username:
-            cursor.execute('''
-                INSERT OR REPLACE INTO admin_config (key, value, updated_at) 
-                VALUES ('username', ?, CURRENT_TIMESTAMP)
-            ''', (new_username,))
-        
-        if new_password:
-            # 使用 werkzeug.security 进行安全的密码哈希
-            from werkzeug.security import generate_password_hash
-            password_hash = generate_password_hash(new_password, method='pbkdf2:sha256')
-            cursor.execute('''
-                INSERT OR REPLACE INTO admin_config (key, value, updated_at)
-                VALUES ('password_hash', ?, CURRENT_TIMESTAMP)
-            ''', (password_hash,))
-        
-        conn.commit()
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            if new_username:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO admin_config (key, value, updated_at)
+                    VALUES ('username', ?, CURRENT_TIMESTAMP)
+                ''', (new_username,))
+
+            if new_password:
+                # 使用 werkzeug.security 进行安全的密码哈希
+                from werkzeug.security import generate_password_hash
+                password_hash = generate_password_hash(new_password, method='pbkdf2:sha256')
+                cursor.execute('''
+                    INSERT OR REPLACE INTO admin_config (key, value, updated_at)
+                    VALUES ('password_hash', ?, CURRENT_TIMESTAMP)
+                ''', (password_hash,))
+
         return True
     except Exception as e:
         logger.error(f"更新管理员凭据失败: {e}")
-        conn.rollback()
         return False
-    finally:
-        conn.close()
 
 def configure_admin_session(app):
     """配置管理员会话"""
     app.config['SESSION_COOKIE_HTTPONLY'] = True
-    app.config['SESSION_COOKIE_SECURE'] = False
+    # 生产环境默认启用 Secure（ProxyFix x_proto=1 确保反代后 HTTPS 正确识别）
+    # 开发环境可通过 FLASK_ENV=development 关闭
+    is_dev = os.getenv('FLASK_ENV', '').lower() == 'development'
+    app.config['SESSION_COOKIE_SECURE'] = not is_dev
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=SESSION_LIFETIME)
+
+    @app.before_request
+    def _dynamic_session_lifetime():
+        """根据 session 中的 _remember_me 标记动态调整 session 有效期，并实现活跃续期"""
+        if session.get('admin_logged_in'):
+            remember_me = session.get('_remember_me', False)
+            lifetime = _get_session_lifetime(remember_me)
+            app.permanent_session_lifetime = timedelta(seconds=lifetime)
+            # 标记 session 已修改，使 Flask 重新设置 cookie 过期时间，实现活跃续期
+            session.modified = True
 
 # 添加登录验证装饰器
 def login_required(f):
     """需要登录的装饰器"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # OPTIONS 预检请求由 Flask-CORS 统一处理，此处直接放行
-        if request.method == 'OPTIONS':
-            return make_response()
-
         if 'admin_logged_in' not in session or not session['admin_logged_in']:
             if request.path.startswith('/api/'):
                 return jsonify({'error': 'Unauthorized'}), 401
@@ -445,47 +459,45 @@ def login_required(f):
 def init_database_admin_update(DATABASE_PATH):
     """为管理功能更新数据库索引"""
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        
-        # 检查并添加新列
-        cursor.execute("PRAGMA table_info(file_storage)")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        # 添加缺失的列
-        if 'is_group_upload' not in columns:
-            logger.info("管理模块：添加 is_group_upload 列")
-            cursor.execute('ALTER TABLE file_storage ADD COLUMN is_group_upload BOOLEAN DEFAULT 0')
-        
-        if 'group_message_id' not in columns:
-            logger.info("管理模块：添加 group_message_id 列")
-            cursor.execute('ALTER TABLE file_storage ADD COLUMN group_message_id INTEGER')
+        with get_connection() as conn:
+            cursor = conn.cursor()
 
-        if 'group_chat_id' not in columns:
-            logger.info("管理模块：添加 group_chat_id 列")
-            cursor.execute('ALTER TABLE file_storage ADD COLUMN group_chat_id INTEGER')
+            # 检查并添加新列
+            cursor.execute("PRAGMA table_info(file_storage)")
+            columns = [column[1] for column in cursor.fetchall()]
 
-        # 添加文件名索引以加速搜索
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_original_filename 
-            ON file_storage(original_filename)
-        ''')
-        
-        # 添加额外的索引以优化管理查询
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_created_at ON file_storage(created_at DESC)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_file_size ON file_storage(file_size)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_group_upload ON file_storage(is_group_upload)
-        ''')
-        
-        conn.commit()
-        conn.close()
+            # 添加缺失的列
+            if 'is_group_upload' not in columns:
+                logger.info("管理模块：添加 is_group_upload 列")
+                cursor.execute('ALTER TABLE file_storage ADD COLUMN is_group_upload BOOLEAN DEFAULT 0')
+
+            if 'group_message_id' not in columns:
+                logger.info("管理模块：添加 group_message_id 列")
+                cursor.execute('ALTER TABLE file_storage ADD COLUMN group_message_id INTEGER')
+
+            if 'group_chat_id' not in columns:
+                logger.info("管理模块：添加 group_chat_id 列")
+                cursor.execute('ALTER TABLE file_storage ADD COLUMN group_chat_id INTEGER')
+
+            # 添加文件名索引以加速搜索
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_original_filename
+                ON file_storage(original_filename)
+            ''')
+
+            # 添加额外的索引以优化管理查询
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_created_at ON file_storage(created_at DESC)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_file_size ON file_storage(file_size)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_group_upload ON file_storage(is_group_upload)
+            ''')
+
         logger.info("管理功能数据库索引创建完成")
     except Exception as e:
         logger.error(f"创建管理索引失败: {e}")
@@ -518,18 +530,9 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             })
         return jsonify({'authenticated': False})
 
-    @app.route('/api/admin/login', methods=['POST', 'OPTIONS'])
+    @app.route('/api/admin/login', methods=['POST'])
     def admin_login_api():
         """管理员登录"""
-        # 处理OPTIONS预检请求
-        if request.method == 'OPTIONS':
-            response = make_response()
-            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response
-
         ip = _get_client_ip(request)
 
         # 速率限制检查
@@ -543,19 +546,15 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                 'locked': True,
                 'retry_after': retry_after
             })
-            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
             return response, 429
 
         data = request.get_json()
         username = data.get('username', '').strip()
         password = data.get('password', '')
+        remember_me = bool(data.get('remember_me', False))
 
         if not username or not password:
-            response = jsonify({'success': False, 'message': '用户名和密码不能为空'})
-            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response, 400
+            return jsonify({'success': False, 'message': '用户名和密码不能为空'}), 400
 
         # 验证用户名和密码
         if verify_admin_password(username, password):
@@ -563,54 +562,44 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
             session['admin_logged_in'] = True
             session['admin_username'] = username
+            session['_remember_me'] = remember_me
             session.permanent = True
+
+            # 根据"记住我"设置对应的 session 有效期
+            lifetime = _get_session_lifetime(remember_me)
+            app.permanent_session_lifetime = timedelta(seconds=lifetime)
 
             # 生成一个简单的 token（用于前端存储）
             token = secrets.token_urlsafe(32)
             session['admin_token'] = token
 
-            # 注册 session（并发控制）
-            _register_session(token, ip)
+            # 注册 session（并发控制），传递 remember_me 标记
+            _register_session(token, ip, remember_me=remember_me)
 
             _log_security_event('login_success', ip, username)
             logger.info(f"管理员登录成功: {username}")
-            response = jsonify({
+            return jsonify({
                 'success': True,
                 'data': {
                     'token': token,
                     'username': username
                 }
             })
-            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response
 
         # 登录失败
         _record_login_failure(ip)
         _log_security_event('login_failed', ip, username)
         _, _, remaining = _check_login_allowed(ip)
         logger.warning(f"管理员登录失败: {username}, IP={ip}, 剩余尝试={remaining}")
-        response = jsonify({
+        return jsonify({
             'success': False,
             'message': '用户名或密码错误',
             'remaining_attempts': remaining
-        })
-        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        return response, 401
+        }), 401
 
-    @app.route('/api/admin/logout', methods=['POST', 'OPTIONS'])
+    @app.route('/api/admin/logout', methods=['POST'])
     def admin_logout():
         """管理员退出登录"""
-        # 处理OPTIONS预检请求
-        if request.method == 'OPTIONS':
-            response = make_response()
-            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            return response
-
         username = session.get('admin_username', 'unknown')
         token = session.get('admin_token')
         ip = _get_client_ip(request)
@@ -625,12 +614,9 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
         _log_security_event('logout', ip, username)
         logger.info(f"管理员退出登录: {username}")
-        response = jsonify({'success': True})
-        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        return response
+        return jsonify({'success': True})
     
-    @app.route('/api/admin/update_credentials', methods=['POST', 'OPTIONS'])
+    @app.route('/api/admin/update_credentials', methods=['POST'])
     @login_required
     def admin_update_credentials():
         """更新管理员凭据"""
@@ -645,7 +631,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             return jsonify({'success': False, 'error': '用户名至少需要3个字符'}), 400
 
         if new_password:
-            valid, msg = _validate_password_strength(new_password)
+            valid, msg = validate_password_strength(new_password)
             if not valid:
                 return jsonify({'success': False, 'error': msg}), 400
 
@@ -667,7 +653,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
         return jsonify({'success': False, 'error': '更新失败'}), 500
 
-    @app.route('/api/admin/stats', methods=['GET', 'OPTIONS'])
+    @app.route('/api/admin/stats', methods=['GET'])
     @login_required
     def admin_stats():
         """获取管理统计信息"""
@@ -676,42 +662,29 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             total_size = get_total_size()
 
             # 获取今日上传数
-            conn = sqlite3.connect(DATABASE_PATH)
-            cursor = conn.cursor()
+            with get_connection() as conn:
+                cursor = conn.cursor()
 
-            try:
-                # 修复日期查询 - 使用时间戳范围查询
-                today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                today_end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
-                today_start_ts = int(today_start.timestamp())
-                today_end_ts = int(today_end.timestamp())
+                try:
+                    # 修复日期查询 - 使用时间戳范围查询
+                    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                    today_end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
+                    today_start_ts = int(today_start.timestamp())
+                    today_end_ts = int(today_end.timestamp())
 
-                cursor.execute('''
-                    SELECT COUNT(*) FROM file_storage
-                    WHERE upload_time >= ? AND upload_time <= ?
-                ''', (today_start_ts, today_end_ts))
-                today_uploads = cursor.fetchone()[0]
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM file_storage
+                        WHERE upload_time >= ? AND upload_time <= ?
+                    ''', (today_start_ts, today_end_ts))
+                    today_uploads = cursor.fetchone()[0]
 
-                # 获取 CDN 缓存数量
-                cursor.execute('SELECT COUNT(*) FROM file_storage WHERE cdn_cached = 1')
-                cdn_cached = cursor.fetchone()[0]
-            except Exception as e:
-                logger.error(f"查询统计数据失败: {e}")
-                today_uploads = 0
-                cdn_cached = 0
-            finally:
-                conn.close()
-
-            # 格式化文件大小
-            def format_size(size_bytes):
-                if size_bytes < 1024:
-                    return f"{size_bytes} B"
-                elif size_bytes < 1024 * 1024:
-                    return f"{size_bytes / 1024:.1f} KB"
-                elif size_bytes < 1024 * 1024 * 1024:
-                    return f"{size_bytes / 1024 / 1024:.1f} MB"
-                else:
-                    return f"{size_bytes / 1024 / 1024 / 1024:.1f} GB"
+                    # 获取 CDN 缓存数量
+                    cursor.execute('SELECT COUNT(*) FROM file_storage WHERE cdn_cached = 1')
+                    cdn_cached = cursor.fetchone()[0]
+                except Exception as e:
+                    logger.error(f"查询统计数据失败: {e}")
+                    today_uploads = 0
+                    cdn_cached = 0
 
             response_data = {
                 'success': True,
@@ -736,10 +709,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             return jsonify({
                 'success': False,
                 'error': '获取统计信息失败',
-                'message': str(e)
+                'message': '服务器内部错误'
             }), 500
 
-    @app.route('/api/admin/images', methods=['GET', 'OPTIONS'])
+    @app.route('/api/admin/images', methods=['GET'])
     @login_required
     def admin_images():
         """获取图片列表（支持分页、搜索和筛选）"""
@@ -759,176 +732,166 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
             logger.info(f"获取图片列表请求: page={page}, limit={limit}, search={search}, filter={filter_type}")
 
-            conn = sqlite3.connect(DATABASE_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            with get_connection() as conn:
+                cursor = conn.cursor()
 
-        except Exception as e:
-            logger.error(f"初始化数据库连接失败: {e}")
-            return jsonify({
-                'success': False,
-                'error': '数据库连接失败',
-                'message': str(e)
-            }), 500
+                # 检查列是否存在
+                cursor.execute("PRAGMA table_info(file_storage)")
+                columns = [column[1] for column in cursor.fetchall()]
 
-        try:
-            # 检查列是否存在
-            cursor.execute("PRAGMA table_info(file_storage)")
-            columns = [column[1] for column in cursor.fetchall()]
-            
-            # 构建查询
-            offset = (page - 1) * limit
-            
-            # 构建SELECT语句，只选择存在的列
-            select_columns = [
-                'fs.encrypted_id', 'fs.file_id', 'fs.original_filename', 
-                'fs.file_size', 'fs.source', 'fs.created_at', 'fs.username', 
-                'fs.access_count', 'fs.last_accessed', 'fs.upload_time',
-                'fs.cdn_cached', 'fs.cdn_cache_time', 'fs.mime_type'
-            ]
-            
-            # 可选列
-            if 'is_group_upload' in columns:
-                select_columns.append('fs.is_group_upload')
-            if 'cdn_hit_count' in columns:
-                select_columns.append('fs.cdn_hit_count')
-            if 'direct_hit_count' in columns:
-                select_columns.append('fs.direct_hit_count')
+                # 构建查询
+                offset = (page - 1) * limit
 
-            query = f'''
-                SELECT {', '.join(select_columns)}
-                FROM file_storage fs
-            '''
+                # 构建SELECT语句，只选择存在的列
+                select_columns = [
+                    'fs.encrypted_id', 'fs.file_id', 'fs.original_filename',
+                    'fs.file_size', 'fs.source', 'fs.created_at', 'fs.username',
+                    'fs.access_count', 'fs.last_accessed', 'fs.upload_time',
+                    'fs.cdn_cached', 'fs.cdn_cache_time', 'fs.mime_type'
+                ]
 
-            # 构建 WHERE 条件
-            where_clauses = []
-            where_params = []
-
-            if search:
-                # 搜索文件名和用户名
-                where_clauses.append('(fs.original_filename LIKE ? OR fs.username LIKE ?)')
-                search_pattern = f'%{search}%'
-                where_params.extend([search_pattern, search_pattern])
-
-            # 根据 filter_type 添加筛选条件
-            if filter_type == 'cached':
-                if 'cdn_cached' in columns:
-                    where_clauses.append('fs.cdn_cached = 1')
-                else:
-                    # 如果列不存在，返回空结果
-                    where_clauses.append('1 = 0')
-            elif filter_type == 'uncached':
-                if 'cdn_cached' in columns:
-                    where_clauses.append('(fs.cdn_cached = 0 OR fs.cdn_cached IS NULL)')
-                # 如果列不存在，不添加条件（相当于返回全部）
-            elif filter_type == 'group':
+                # 可选列
                 if 'is_group_upload' in columns:
-                    where_clauses.append('fs.is_group_upload = 1')
-                else:
-                    # 如果列不存在，返回空结果
-                    where_clauses.append('1 = 0')
+                    select_columns.append('fs.is_group_upload')
+                if 'cdn_hit_count' in columns:
+                    select_columns.append('fs.cdn_hit_count')
+                if 'direct_hit_count' in columns:
+                    select_columns.append('fs.direct_hit_count')
 
-            # 拼接 WHERE 子句
-            if where_clauses:
-                query += ' WHERE ' + ' AND '.join(where_clauses)
+                query = f'''
+                    SELECT {', '.join(select_columns)}
+                    FROM file_storage fs
+                '''
 
-            # 获取总数（与查询条件一致）
-            count_query = 'SELECT COUNT(*) FROM file_storage fs'
-            if where_clauses:
-                count_query += ' WHERE ' + ' AND '.join(where_clauses)
-            cursor.execute(count_query, where_params)
+                # 构建 WHERE 条件
+                where_clauses = []
+                where_params = []
 
-            total_count = cursor.fetchone()[0]
+                if search:
+                    # 搜索文件名和用户名
+                    where_clauses.append('(fs.original_filename LIKE ? OR fs.username LIKE ?)')
+                    search_pattern = f'%{search}%'
+                    where_params.extend([search_pattern, search_pattern])
 
-            # 获取当前页数据
-            query += ' ORDER BY fs.created_at DESC LIMIT ? OFFSET ?'
-            params = list(where_params)
-            params.extend([limit, offset])
-            
-            cursor.execute(query, params)
-            images = []
-            
-            for row in cursor.fetchall():
-                image_data = dict(row)
-                
-                # 如果没有 is_group_upload 列，默认为 0
-                if 'is_group_upload' not in image_data:
-                    image_data['is_group_upload'] = 0
-                # 如果没有访问统计列，默认为 0
-                if 'cdn_hit_count' not in image_data:
-                    image_data['cdn_hit_count'] = 0
-                if 'direct_hit_count' not in image_data:
-                    image_data['direct_hit_count'] = 0
+                # 根据 filter_type 添加筛选条件
+                if filter_type == 'cached':
+                    if 'cdn_cached' in columns:
+                        where_clauses.append('fs.cdn_cached = 1')
+                    else:
+                        # 如果列不存在，返回空结果
+                        where_clauses.append('1 = 0')
+                elif filter_type == 'uncached':
+                    if 'cdn_cached' in columns:
+                        where_clauses.append('(fs.cdn_cached = 0 OR fs.cdn_cached IS NULL)')
+                    # 如果列不存在，不添加条件（相当于返回全部）
+                elif filter_type == 'group':
+                    if 'is_group_upload' in columns:
+                        where_clauses.append('fs.is_group_upload = 1')
+                    else:
+                        # 如果列不存在，返回空结果
+                        where_clauses.append('1 = 0')
 
-                # 处理时间格式
-                if image_data.get('upload_time'):
-                    try:
-                        timestamp = int(image_data['upload_time'])
-                        dt = datetime.fromtimestamp(timestamp)
-                        image_data['created_at'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                    except Exception as e:
-                        logger.debug(f"处理upload_time失败: {e}")
-                
-                if 'created_at' in image_data and image_data['created_at'] and not isinstance(image_data['created_at'], str):
-                    created_at = image_data['created_at']
-                    try:
-                        if isinstance(created_at, (int, float)):
-                            dt = datetime.fromtimestamp(created_at)
+                # 拼接 WHERE 子句
+                if where_clauses:
+                    query += ' WHERE ' + ' AND '.join(where_clauses)
+
+                # 获取总数（与查询条件一致）
+                count_query = 'SELECT COUNT(*) FROM file_storage fs'
+                if where_clauses:
+                    count_query += ' WHERE ' + ' AND '.join(where_clauses)
+                cursor.execute(count_query, where_params)
+
+                total_count = cursor.fetchone()[0]
+
+                # 获取当前页数据
+                query += ' ORDER BY fs.created_at DESC LIMIT ? OFFSET ?'
+                params = list(where_params)
+                params.extend([limit, offset])
+
+                cursor.execute(query, params)
+                images = []
+
+                for row in cursor.fetchall():
+                    image_data = dict(row)
+
+                    # 如果没有 is_group_upload 列，默认为 0
+                    if 'is_group_upload' not in image_data:
+                        image_data['is_group_upload'] = 0
+                    # 如果没有访问统计列，默认为 0
+                    if 'cdn_hit_count' not in image_data:
+                        image_data['cdn_hit_count'] = 0
+                    if 'direct_hit_count' not in image_data:
+                        image_data['direct_hit_count'] = 0
+
+                    # 处理时间格式
+                    if image_data.get('upload_time'):
+                        try:
+                            timestamp = int(image_data['upload_time'])
+                            dt = datetime.fromtimestamp(timestamp)
                             image_data['created_at'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                        else:
-                            created_at_str = str(created_at)
-                            if 'T' in created_at_str:
-                                dt = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                        except Exception as e:
+                            logger.debug(f"处理upload_time失败: {e}")
+
+                    if 'created_at' in image_data and image_data['created_at'] and not isinstance(image_data['created_at'], str):
+                        created_at = image_data['created_at']
+                        try:
+                            if isinstance(created_at, (int, float)):
+                                dt = datetime.fromtimestamp(created_at)
                                 image_data['created_at'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                            elif ' ' in created_at_str:
-                                image_data['created_at'] = created_at_str
                             else:
-                                dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
-                                image_data['created_at'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                    except Exception as e:
-                        logger.debug(f"时间格式转换失败 ({created_at}): {e}")
-                        image_data['created_at'] = str(created_at) if created_at else '未知时间'
-                
-                # 处理最后访问时间
-                if image_data.get('last_accessed'):
-                    try:
-                        last_accessed = image_data['last_accessed']
-                        if isinstance(last_accessed, str) and 'T' in last_accessed:
-                            dt = datetime.fromisoformat(last_accessed.replace('Z', '+00:00'))
-                            image_data['last_accessed'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                        elif isinstance(last_accessed, (int, float)):
-                            dt = datetime.fromtimestamp(last_accessed)
-                            image_data['last_accessed'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                        else:
-                            image_data['last_accessed'] = str(last_accessed)
-                    except Exception as e:
-                        logger.debug(f"处理last_accessed失败: {e}")
-                        image_data['last_accessed'] = None
-                
-                # 处理CDN缓存时间
-                if image_data.get('cdn_cache_time'):
-                    try:
-                        cdn_cache_time = image_data['cdn_cache_time']
-                        if isinstance(cdn_cache_time, str) and 'T' in cdn_cache_time:
-                            dt = datetime.fromisoformat(cdn_cache_time.replace('Z', '+00:00'))
-                            image_data['cdn_cache_time'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                        elif isinstance(cdn_cache_time, (int, float)):
-                            dt = datetime.fromtimestamp(cdn_cache_time)
-                            image_data['cdn_cache_time'] = dt.strftime('%Y-%m-%d %H:%M:%S')
-                        else:
-                            image_data['cdn_cache_time'] = str(cdn_cache_time)
-                    except Exception as e:
-                        logger.debug(f"处理cdn_cache_time失败: {e}")
-                        image_data['cdn_cache_time'] = None
-                
-                # 确保created_at是字符串格式
-                if 'created_at' not in image_data or not image_data['created_at']:
-                    image_data['created_at'] = '未知时间'
-                elif not isinstance(image_data['created_at'], str):
-                    image_data['created_at'] = str(image_data['created_at'])
-                
-                images.append(image_data)
-            
+                                created_at_str = str(created_at)
+                                if 'T' in created_at_str:
+                                    dt = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                                    image_data['created_at'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                                elif ' ' in created_at_str:
+                                    image_data['created_at'] = created_at_str
+                                else:
+                                    dt = datetime.strptime(created_at_str, '%Y-%m-%d %H:%M:%S')
+                                    image_data['created_at'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                        except Exception as e:
+                            logger.debug(f"时间格式转换失败 ({created_at}): {e}")
+                            image_data['created_at'] = str(created_at) if created_at else '未知时间'
+
+                    # 处理最后访问时间
+                    if image_data.get('last_accessed'):
+                        try:
+                            last_accessed = image_data['last_accessed']
+                            if isinstance(last_accessed, str) and 'T' in last_accessed:
+                                dt = datetime.fromisoformat(last_accessed.replace('Z', '+00:00'))
+                                image_data['last_accessed'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                            elif isinstance(last_accessed, (int, float)):
+                                dt = datetime.fromtimestamp(last_accessed)
+                                image_data['last_accessed'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                            else:
+                                image_data['last_accessed'] = str(last_accessed)
+                        except Exception as e:
+                            logger.debug(f"处理last_accessed失败: {e}")
+                            image_data['last_accessed'] = None
+
+                    # 处理CDN缓存时间
+                    if image_data.get('cdn_cache_time'):
+                        try:
+                            cdn_cache_time = image_data['cdn_cache_time']
+                            if isinstance(cdn_cache_time, str) and 'T' in cdn_cache_time:
+                                dt = datetime.fromisoformat(cdn_cache_time.replace('Z', '+00:00'))
+                                image_data['cdn_cache_time'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                            elif isinstance(cdn_cache_time, (int, float)):
+                                dt = datetime.fromtimestamp(cdn_cache_time)
+                                image_data['cdn_cache_time'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                            else:
+                                image_data['cdn_cache_time'] = str(cdn_cache_time)
+                        except Exception as e:
+                            logger.debug(f"处理cdn_cache_time失败: {e}")
+                            image_data['cdn_cache_time'] = None
+
+                    # 确保created_at是字符串格式
+                    if 'created_at' not in image_data or not image_data['created_at']:
+                        image_data['created_at'] = '未知时间'
+                    elif not isinstance(image_data['created_at'], str):
+                        image_data['created_at'] = str(image_data['created_at'])
+
+                    images.append(image_data)
+
             # 计算总页数
             total_pages = (total_count + limit - 1) // limit
 
@@ -975,15 +938,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             return jsonify({
                 'success': False,
                 'error': '获取图片列表失败',
-                'message': str(e)
+                'message': '服务器内部错误'
             }), 500
-        finally:
-            try:
-                conn.close()
-            except:
-                pass
 
-    @app.route('/api/admin/delete', methods=['POST', 'OPTIONS'])
+    @app.route('/api/admin/delete', methods=['POST'])
     @login_required
     def admin_delete_images():
         """删除图片，同时同步删除TG群组消息"""
@@ -998,9 +956,6 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         if not ids:
             return jsonify({'success': False, 'message': '没有选择要删除的图片'}), 400
 
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-
         deleted_count = 0
         deleted_size = 0
         tg_deleted_count = 0
@@ -1010,81 +965,83 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                 yield seq[i:i + size]
 
         try:
-            files_to_delete = []
-            for chunk in _chunked(ids):
-                placeholders = ','.join('?' * len(chunk))
-                try:
-                    cursor.execute(f'''
-                        SELECT encrypted_id, file_size, group_chat_id, group_message_id
-                        FROM file_storage
-                        WHERE encrypted_id IN ({placeholders})
-                    ''', chunk)
-                except sqlite3.OperationalError as e:
-                    if 'no such column' in str(e).lower():
+            with get_connection() as conn:
+                cursor = conn.cursor()
+
+                files_to_delete = []
+                for chunk in _chunked(ids):
+                    placeholders = ','.join('?' * len(chunk))
+                    try:
                         cursor.execute(f'''
-                            SELECT encrypted_id, file_size, NULL, NULL
+                            SELECT encrypted_id, file_size, group_chat_id, group_message_id
                             FROM file_storage
                             WHERE encrypted_id IN ({placeholders})
                         ''', chunk)
-                    else:
-                        raise
-                files_to_delete.extend(cursor.fetchall())
+                    except sqlite3.OperationalError as e:
+                        if 'no such column' in str(e).lower():
+                            cursor.execute(f'''
+                                SELECT encrypted_id, file_size, NULL, NULL
+                                FROM file_storage
+                                WHERE encrypted_id IN ({placeholders})
+                            ''', chunk)
+                        else:
+                            raise
+                    files_to_delete.extend(cursor.fetchall())
 
-            for row in files_to_delete:
-                if row[1]:
-                    deleted_size += row[1]
+                for row in files_to_delete:
+                    if row[1]:
+                        deleted_size += row[1]
 
-            # 检查是否启用TG同步删除
-            tg_sync_delete_enabled = True
-            try:
-                from .database import get_system_setting
-                tg_sync_delete_enabled = str(get_system_setting('tg_sync_delete_enabled') or '1') == '1'
-            except Exception:
-                pass
-
-            # 同步删除TG群组消息（静默忽略失败）
-            if tg_sync_delete_enabled:
+                # 检查是否启用TG同步删除
+                tg_sync_delete_enabled = True
                 try:
-                    from .bot_control import get_effective_bot_token
-                    bot_token, _ = get_effective_bot_token()
-                    if bot_token:
-                        seen = set()
-                        for row in files_to_delete:
-                            chat_id, message_id = row[2], row[3]
-                            if chat_id is None or message_id is None:
-                                continue
-                            key = (chat_id, message_id)
-                            if key in seen:
-                                continue
-                            seen.add(key)
-                            try:
-                                url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
-                                resp = requests.post(url, data={
-                                    'chat_id': chat_id,
-                                    'message_id': message_id
-                                }, timeout=5)
-                                if resp.ok:
-                                    try:
-                                        payload = resp.json()
-                                        if payload.get('ok') is True:
-                                            tg_deleted_count += 1
-                                    except Exception:
-                                        pass
-                            except Exception:
-                                pass
-                except Exception as e:
-                    logger.debug(f"TG消息删除跳过: {e}")
+                    from .database import get_system_setting
+                    tg_sync_delete_enabled = str(get_system_setting('tg_sync_delete_enabled') or '1') == '1'
+                except Exception:
+                    pass
 
-            # 删除数据库记录（分块处理）
-            for chunk in _chunked(ids):
-                placeholders = ','.join('?' * len(chunk))
-                cursor.execute(f'''
-                    DELETE FROM file_storage
-                    WHERE encrypted_id IN ({placeholders})
-                ''', chunk)
-                deleted_count += cursor.rowcount
+                # 同步删除TG群组消息（静默忽略失败）
+                if tg_sync_delete_enabled:
+                    try:
+                        from .bot_control import get_effective_bot_token
+                        bot_token, _ = get_effective_bot_token()
+                        if bot_token:
+                            seen = set()
+                            for row in files_to_delete:
+                                chat_id, message_id = row[2], row[3]
+                                if chat_id is None or message_id is None:
+                                    continue
+                                key = (chat_id, message_id)
+                                if key in seen:
+                                    continue
+                                seen.add(key)
+                                try:
+                                    url = f"https://api.telegram.org/bot{bot_token}/deleteMessage"
+                                    resp = requests.post(url, data={
+                                        'chat_id': chat_id,
+                                        'message_id': message_id
+                                    }, timeout=5)
+                                    if resp.ok:
+                                        try:
+                                            payload = resp.json()
+                                            if payload.get('ok') is True:
+                                                tg_deleted_count += 1
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        logger.debug(f"TG消息删除跳过: {e}")
 
-            conn.commit()
+                # 删除数据库记录（分块处理）
+                for chunk in _chunked(ids):
+                    placeholders = ','.join('?' * len(chunk))
+                    cursor.execute(f'''
+                        DELETE FROM file_storage
+                        WHERE encrypted_id IN ({placeholders})
+                    ''', chunk)
+                    deleted_count += cursor.rowcount
+
             logger.info(f"管理员删除了 {deleted_count} 张图片，TG消息同步删除 {tg_deleted_count} 条")
 
             return jsonify({
@@ -1098,21 +1055,17 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
         except Exception as e:
             logger.error(f"删除图片失败: {e}")
-            conn.rollback()
             return jsonify({'success': False, 'message': '删除失败'}), 500
-        finally:
-            conn.close()
     
-    @app.route('/api/admin/security-log', methods=['GET', 'OPTIONS'])
+    @app.route('/api/admin/security-log', methods=['GET'])
     @login_required
     def admin_security_log():
         """获取安全审计日志"""
         try:
-            conn = sqlite3.connect(DATABASE_PATH)
-            cursor = conn.cursor()
-            cursor.execute("SELECT value FROM admin_config WHERE key = 'security_log'")
-            row = cursor.fetchone()
-            conn.close()
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT value FROM admin_config WHERE key = 'security_log'")
+                row = cursor.fetchone()
 
             logs = json.loads(row[0]) if row else []
             # 返回倒序（最新在前）
@@ -1122,15 +1075,18 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             logger.error(f"获取安全日志失败: {e}")
             return jsonify({'success': False, 'error': '获取安全日志失败'}), 500
 
-    @app.route('/api/admin/active-sessions', methods=['GET', 'OPTIONS'])
+    @app.route('/api/admin/active-sessions', methods=['GET'])
     @login_required
     def admin_active_sessions():
         """获取当前活跃 Session 列表"""
         try:
             now = time.time()
             sessions = _get_active_sessions()
-            # 清理过期 session
-            sessions = [s for s in sessions if now - s.get('login_time', 0) < SESSION_LIFETIME]
+            # 清理过期 session（根据各自的 remember_me 标记使用对应的 lifetime）
+            sessions = [
+                s for s in sessions
+                if now - s.get('login_time', 0) < _get_session_lifetime(s.get('remember_me', False))
+            ]
             current_token = session.get('admin_token', '')
 
             result = []
@@ -1149,12 +1105,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             logger.error(f"获取活跃 Session 失败: {e}")
             return jsonify({'success': False, 'error': '获取失败'}), 500
 
-    @app.route('/api/admin/kick-session', methods=['POST', 'OPTIONS'])
+    @app.route('/api/admin/kick-session', methods=['POST'])
     @login_required
     def admin_kick_session():
         """踢出指定 Session"""
-        if request.method == 'OPTIONS':
-            return make_response()
         data = request.get_json(silent=True) or {}
         token_prefix = data.get('token_prefix', '')
         if not token_prefix:

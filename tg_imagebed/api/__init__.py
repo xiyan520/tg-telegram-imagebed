@@ -22,7 +22,7 @@ auth_bp = Blueprint('auth', __name__)
 def register_blueprints(app):
     """注册所有蓝图到 Flask 应用"""
     # 导入路由模块以注册路由
-    from . import upload, images, admin, auth, settings, galleries
+    from . import upload, images, admin, auth, settings, galleries, tg_auth
 
     app.register_blueprint(upload_bp)
     app.register_blueprint(images_bp)

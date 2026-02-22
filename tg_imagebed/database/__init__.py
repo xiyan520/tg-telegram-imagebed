@@ -27,6 +27,7 @@ from .tokens import (
     admin_list_tokens, admin_create_token,
     admin_update_token_status, admin_update_token, admin_delete_token,
     admin_get_token_detail, admin_get_token_uploads, admin_get_token_galleries,
+    delete_token_by_string, count_tokens_by_ip,
 )
 
 # 系统设置 + 公告
@@ -63,6 +64,16 @@ from .admin_galleries import (
     admin_get_gallery_images, admin_update_gallery_share,
 )
 
+# TG 认证
+from .tg_auth import (
+    upsert_tg_user, get_tg_user, get_tg_user_by_username,
+    create_login_code, verify_login_code,
+    create_tg_session, verify_tg_session, delete_tg_session,
+    get_user_token_count, get_user_tokens, bind_token_to_user, unbind_token_from_user,
+    cleanup_expired_codes, cleanup_expired_sessions,
+    consume_web_verify_code, get_web_verify_status,
+)
+
 __all__ = [
     # 连接管理
     'get_connection', 'db_retry',
@@ -83,6 +94,7 @@ __all__ = [
     'admin_list_tokens', 'admin_create_token',
     'admin_update_token_status', 'admin_update_token', 'admin_delete_token',
     'admin_get_token_detail', 'admin_get_token_uploads', 'admin_get_token_galleries',
+    'delete_token_by_string',
     # 公告
     'get_announcement', 'update_announcement',
     # 系统设置
@@ -110,4 +122,11 @@ __all__ = [
     'admin_update_gallery', 'admin_delete_gallery', 'admin_set_gallery_cover',
     'admin_add_images_to_gallery', 'admin_remove_images_from_gallery',
     'admin_get_gallery_images', 'admin_update_gallery_share',
+    # TG 认证
+    'upsert_tg_user', 'get_tg_user', 'get_tg_user_by_username',
+    'create_login_code', 'verify_login_code',
+    'create_tg_session', 'verify_tg_session', 'delete_tg_session',
+    'get_user_token_count', 'get_user_tokens', 'bind_token_to_user', 'unbind_token_from_user',
+    'cleanup_expired_codes', 'cleanup_expired_sessions',
+    'consume_web_verify_code', 'get_web_verify_status',
 ]

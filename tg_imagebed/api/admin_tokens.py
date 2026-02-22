@@ -33,6 +33,7 @@ def admin_tokens_api():
     try:
         if request.method == 'GET':
             status = (request.args.get('status') or 'all').strip().lower()
+            search = (request.args.get('search') or '').strip() or None
             try:
                 page = int(request.args.get('page', 1))
             except (TypeError, ValueError):
@@ -42,7 +43,7 @@ def admin_tokens_api():
             except (TypeError, ValueError):
                 page_size = 20
 
-            data = admin_list_tokens(status=status, page=page, page_size=page_size)
+            data = admin_list_tokens(status=status, page=page, page_size=page_size, search=search)
             return _admin_json({'success': True, 'data': data})
 
         # POST: 创建新 Token
@@ -75,7 +76,7 @@ def admin_tokens_api():
 
     except Exception as e:
         logger.error(f"Token 管理 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '操作失败，请稍后重试'}, 500)
 
 
 @admin_bp.route('/api/admin/tokens/<int:token_id>', methods=['GET', 'PATCH', 'DELETE', 'OPTIONS'])
@@ -133,7 +134,7 @@ def admin_token_detail_api(token_id: int):
 
     except Exception as e:
         logger.error(f"Token 详情 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '操作失败，请稍后重试'}, 500)
 
 
 @admin_bp.route('/api/admin/tokens/<int:token_id>/uploads', methods=['GET', 'OPTIONS'])
@@ -162,7 +163,7 @@ def admin_token_uploads_api(token_id: int):
 
     except Exception as e:
         logger.error(f"Token 上传记录 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '获取上传记录失败'}, 500)
 
 
 @admin_bp.route('/api/admin/tokens/<int:token_id>/galleries', methods=['GET', 'OPTIONS'])
@@ -190,7 +191,7 @@ def admin_token_galleries_api(token_id: int):
 
     except Exception as e:
         logger.error(f"Token 画集 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '获取画集失败'}, 500)
 
 
 @admin_bp.route('/api/admin/tokens/<int:token_id>/impact', methods=['GET', 'OPTIONS'])
@@ -208,7 +209,7 @@ def admin_token_impact_api(token_id: int):
 
     except Exception as e:
         logger.error(f"Token 影响范围 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '查询影响范围失败'}, 500)
 
 
 @admin_bp.route('/api/admin/tokens/batch', methods=['POST', 'OPTIONS'])
@@ -250,4 +251,4 @@ def admin_tokens_batch_api():
 
     except Exception as e:
         logger.error(f"Token 批量操作 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': '批量操作失败'}, 500)

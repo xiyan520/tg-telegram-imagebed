@@ -56,7 +56,7 @@ def admin_telegram_bot_config():
 
     except Exception as e:
         logger.error(f"Telegram Bot 配置 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': 'Bot 配置操作失败'}, 500)
 
 
 @admin_bp.route('/api/admin/telegram/bot/restart', methods=['POST', 'OPTIONS'])
@@ -81,4 +81,4 @@ def admin_telegram_bot_restart():
 
     except Exception as e:
         logger.error(f"Telegram Bot 重启 API 失败: {e}")
-        return _admin_json({'success': False, 'error': str(e)}, 500)
+        return _admin_json({'success': False, 'error': 'Bot 重启操作失败'}, 500)

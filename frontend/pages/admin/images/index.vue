@@ -47,6 +47,33 @@
 
         <!-- 右侧：筛选和搜索 -->
         <div class="flex items-center gap-2 md:ml-auto">
+          <!-- 视图切换 -->
+          <div class="flex items-center border border-stone-200 dark:border-neutral-700 rounded-lg overflow-hidden">
+            <button
+              class="p-1.5 transition-colors"
+              :class="viewMode === 'grid' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' : 'text-stone-400 hover:text-stone-600'"
+              title="网格视图"
+              @click="viewMode = 'grid'"
+            >
+              <UIcon name="heroicons:squares-2x2" class="w-4 h-4" />
+            </button>
+            <button
+              class="p-1.5 transition-colors"
+              :class="viewMode === 'list' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' : 'text-stone-400 hover:text-stone-600'"
+              title="列表视图"
+              @click="viewMode = 'list'"
+            >
+              <UIcon name="heroicons:list-bullet" class="w-4 h-4" />
+            </button>
+            <button
+              class="p-1.5 transition-colors"
+              :class="viewMode === 'masonry' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600' : 'text-stone-400 hover:text-stone-600'"
+              title="瀑布流视图"
+              @click="viewMode = 'masonry'"
+            >
+              <UIcon name="heroicons:view-columns" class="w-4 h-4" />
+            </button>
+          </div>
           <USelect
             v-model="filterType"
             :options="filterOptions"
@@ -96,6 +123,61 @@
         <p class="text-sm text-stone-600 dark:text-stone-400">还没有上传任何图片</p>
       </div>
 
+      <!-- 列表视图 -->
+      <AdminImageListView
+        v-else-if="viewMode === 'list'"
+        :images="images"
+        :selected-images="selectedImages"
+        @toggle-select="toggleImageSelection"
+        @view-detail="viewImageDetail"
+        @copy-url="copyImageUrl"
+        @delete="deleteImage"
+      />
+
+      <!-- 瀑布流视图 -->
+      <MasonryGrid
+        v-else-if="viewMode === 'masonry'"
+        :items="images"
+        :column-width="240"
+        :gap="12"
+      >
+        <template #default="{ item: image }">
+          <div
+            class="relative group rounded-xl overflow-hidden border-2 transition-all hover:shadow-lg"
+            :class="[
+              selectedImages.includes(image.id)
+                ? 'border-amber-500 ring-2 ring-amber-500 ring-offset-2'
+                : 'border-stone-200 dark:border-neutral-700 hover:border-amber-400'
+            ]"
+          >
+            <img
+              :src="image.url"
+              :alt="image.filename"
+              loading="lazy"
+              decoding="async"
+              class="w-full h-auto object-cover"
+              @error="handleImageError($event, image)"
+            />
+            <!-- 选择框 -->
+            <div class="absolute top-2 left-2 z-10">
+              <div class="bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg">
+                <UCheckbox :model-value="selectedImages.includes(image.id)" @change="toggleImageSelection(image.id)" />
+              </div>
+            </div>
+            <!-- 操作悬浮层 -->
+            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+              <UButton icon="heroicons:eye" color="white" size="sm" @click="viewImageDetail(image)" />
+              <UButton icon="heroicons:clipboard-document" color="white" size="sm" @click="copyImageUrl(image.url)" />
+              <UButton icon="heroicons:trash" color="red" size="sm" @click="deleteImage(image.id)" />
+            </div>
+            <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+              <p class="text-white text-xs truncate">{{ image.filename }}</p>
+            </div>
+          </div>
+        </template>
+      </MasonryGrid>
+
+      <!-- 网格视图 -->
       <div v-else class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         <div
           v-for="image in images"
@@ -187,8 +269,8 @@
     </UCard>
 
     <!-- 图片详情模态框 -->
-    <UModal v-model="detailModalOpen">
-      <UCard>
+    <UModal v-model="detailModalOpen" :ui="{ width: 'sm:max-w-4xl', height: 'max-h-[90vh]' }">
+      <UCard :ui="{ body: { base: 'overflow-y-auto', padding: 'p-4 sm:p-5' }, ring: '', divide: 'divide-y divide-gray-100 dark:divide-gray-800' }" class="flex flex-col max-h-[85vh]">
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold">图片详情</h3>
@@ -201,54 +283,60 @@
           </div>
         </template>
 
-        <div v-if="selectedImage" class="space-y-4">
-          <img
-            :src="selectedImage.url"
-            :alt="selectedImage.filename"
-            loading="lazy"
-            decoding="async"
-            class="w-full rounded-lg"
-            @error="handleImageError($event, selectedImage)"
-          />
-          <div class="space-y-2 text-sm">
-            <div class="flex justify-between">
-              <span class="text-stone-600 dark:text-stone-400">文件名:</span>
-              <span class="font-semibold">{{ selectedImage.filename }}</span>
+        <div v-if="selectedImage" class="flex flex-col md:flex-row gap-5">
+          <!-- 左侧：图片预览 -->
+          <div class="md:w-1/2 flex-shrink-0">
+            <img
+              :src="selectedImage.url"
+              :alt="selectedImage.filename"
+              loading="lazy"
+              decoding="async"
+              class="w-full rounded-lg object-contain max-h-[60vh]"
+              @error="handleImageError($event, selectedImage)"
+            />
+          </div>
+          <!-- 右侧：信息面板 -->
+          <div class="md:w-1/2 space-y-3 text-sm">
+            <div>
+              <span class="text-stone-500 dark:text-stone-400 text-xs">文件名</span>
+              <p class="font-medium break-all">{{ selectedImage.filename }}</p>
             </div>
-            <div class="flex justify-between">
-              <span class="text-stone-600 dark:text-stone-400">大小:</span>
-              <span class="font-semibold">{{ selectedImage.size }}</span>
+            <div>
+              <span class="text-stone-500 dark:text-stone-400 text-xs">大小</span>
+              <p class="font-medium">{{ formatSizeMB(selectedImage.size) }}</p>
             </div>
-            <div class="flex justify-between">
-              <span class="text-stone-600 dark:text-stone-400">上传时间:</span>
-              <span class="font-semibold">{{ selectedImage.uploadTime }}</span>
+            <div>
+              <span class="text-stone-500 dark:text-stone-400 text-xs">上传时间</span>
+              <p class="font-medium">{{ selectedImage.uploadTime }}</p>
             </div>
-            <div class="flex justify-between">
-              <span class="text-stone-600 dark:text-stone-400">缓存状态:</span>
-              <UBadge :color="selectedImage.cached ? 'green' : 'gray'" size="xs">
-                {{ selectedImage.cached ? '已缓存' : '未缓存' }}
-              </UBadge>
+            <div>
+              <span class="text-stone-500 dark:text-stone-400 text-xs">缓存状态</span>
+              <div class="mt-0.5">
+                <UBadge :color="selectedImage.cached ? 'green' : 'gray'" size="xs">
+                  {{ selectedImage.cached ? '已缓存' : '未缓存' }}
+                </UBadge>
+              </div>
             </div>
 
             <!-- 访问统计 -->
-            <div class="pt-4 mt-4 border-t border-stone-100 dark:border-stone-800">
-              <h4 class="text-sm font-medium text-stone-900 dark:text-stone-200 mb-3">访问统计</h4>
-              <div class="grid grid-cols-3 gap-3">
-                <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3 text-center border border-amber-100 dark:border-amber-800/30">
-                  <div class="text-xs text-stone-500 dark:text-stone-400 mb-1">总访问量</div>
-                  <div class="text-lg font-bold text-amber-600 dark:text-amber-500">
+            <div class="pt-3 mt-3 border-t border-stone-100 dark:border-stone-800">
+              <h4 class="text-xs font-medium text-stone-500 dark:text-stone-400 mb-2">访问统计</h4>
+              <div class="grid grid-cols-3 gap-2">
+                <div class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-2 text-center border border-amber-100 dark:border-amber-800/30">
+                  <div class="text-[10px] text-stone-500 dark:text-stone-400">总访问</div>
+                  <div class="text-base font-bold text-amber-600 dark:text-amber-500">
                     {{ selectedImage.access_count || 0 }}
                   </div>
                 </div>
-                <div class="bg-stone-50 dark:bg-stone-800 rounded-lg p-3 text-center border border-stone-100 dark:border-stone-700">
-                  <div class="text-xs text-stone-500 dark:text-stone-400 mb-1">CDN 回源</div>
-                  <div class="text-lg font-bold text-stone-700 dark:text-stone-300">
+                <div class="bg-stone-50 dark:bg-stone-800 rounded-lg p-2 text-center border border-stone-100 dark:border-stone-700">
+                  <div class="text-[10px] text-stone-500 dark:text-stone-400">CDN 回源</div>
+                  <div class="text-base font-bold text-stone-700 dark:text-stone-300">
                     {{ selectedImage.cdn_hit_count || 0 }}
                   </div>
                 </div>
-                <div class="bg-stone-50 dark:bg-stone-800 rounded-lg p-3 text-center border border-stone-100 dark:border-stone-700">
-                  <div class="text-xs text-stone-500 dark:text-stone-400 mb-1">直连访问</div>
-                  <div class="text-lg font-bold text-stone-700 dark:text-stone-300">
+                <div class="bg-stone-50 dark:bg-stone-800 rounded-lg p-2 text-center border border-stone-100 dark:border-stone-700">
+                  <div class="text-[10px] text-stone-500 dark:text-stone-400">直连访问</div>
+                  <div class="text-base font-bold text-stone-700 dark:text-stone-300">
                     {{ selectedImage.direct_hit_count || 0 }}
                   </div>
                 </div>
@@ -256,7 +344,7 @@
             </div>
 
             <div>
-              <span class="text-stone-600 dark:text-stone-400">URL:</span>
+              <span class="text-stone-500 dark:text-stone-400 text-xs">URL</span>
               <code class="block mt-1 p-2 bg-stone-100 dark:bg-neutral-800 rounded text-xs break-all">
                 {{ selectedImage.url }}
               </code>
@@ -311,6 +399,16 @@ definePageMeta({
 
 const notification = useNotification()
 const { getImages, deleteImages, clearCache } = useImageApi()
+
+// 视图模式（持久化到 localStorage）
+const viewMode = ref<'grid' | 'list' | 'masonry'>('grid')
+if (import.meta.client) {
+  const saved = localStorage.getItem('admin_images_view_mode')
+  if (saved === 'list' || saved === 'grid' || saved === 'masonry') viewMode.value = saved
+}
+watch(viewMode, (v) => {
+  if (import.meta.client) localStorage.setItem('admin_images_view_mode', v)
+})
 
 // 状态
 const loading = ref(false)
@@ -454,6 +552,24 @@ const handleClearCache = async () => {
   } catch (error) {
     notification.error('错误', '清理缓存失败')
   }
+}
+
+// 文件大小格式化为 MB
+const formatSizeMB = (size: any): string => {
+  if (!size) return '--'
+  // 如果是字符串（如 "1.2 MB"），尝试提取数值
+  if (typeof size === 'string') {
+    const num = parseFloat(size)
+    if (isNaN(num)) return size
+    // 已经包含单位的直接返回
+    if (/[a-zA-Z]/.test(size)) return size
+    // 纯数字字符串当作字节处理
+    return (num / (1024 * 1024)).toFixed(2) + ' MB'
+  }
+  if (typeof size === 'number') {
+    return (size / (1024 * 1024)).toFixed(2) + ' MB'
+  }
+  return String(size)
 }
 
 // 处理图片加载错误

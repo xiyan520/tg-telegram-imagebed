@@ -45,8 +45,8 @@ def initial_setup():
         return jsonify({'success': False, 'error': '用户名至少需要3个字符'}), 400
 
     # 密码强度校验
-    from ..admin_module import _validate_password_strength
-    valid, msg = _validate_password_strength(password)
+    from ..admin_module import validate_password_strength
+    valid, msg = validate_password_strength(password)
     if not valid:
         return jsonify({'success': False, 'error': msg}), 400
 

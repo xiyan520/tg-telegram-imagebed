@@ -134,6 +134,8 @@
 </template>
 
 <script setup lang="ts">
+import type { AdminStats, AdminConfig } from '~/types/api'
+
 definePageMeta({
   layout: 'admin',
   middleware: 'auth'
@@ -144,8 +146,8 @@ const { getAdminStats } = useImageApi()
 
 // 状态
 const loading = ref(false)
-const stats = ref<any>({})
-const systemConfig = ref<any>({})
+const stats = ref<Partial<AdminStats>>({})
+const systemConfig = ref<Partial<AdminConfig>>({})
 
 // 加载统计信息
 const loadStats = async () => {

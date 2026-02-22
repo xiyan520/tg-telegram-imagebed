@@ -157,8 +157,16 @@ const handleSetup = async () => {
     errorMsg.value = '用户名至少需要3个字符'
     return
   }
-  if (setupForm.value.password.length < 6) {
-    errorMsg.value = '密码至少需要6个字符'
+  if (setupForm.value.password.length < 8) {
+    errorMsg.value = '密码长度至少需要8个字符'
+    return
+  }
+  if (!/[a-zA-Z]/.test(setupForm.value.password)) {
+    errorMsg.value = '密码必须包含字母'
+    return
+  }
+  if (!/[0-9]/.test(setupForm.value.password)) {
+    errorMsg.value = '密码必须包含数字'
     return
   }
   if (setupForm.value.password !== setupForm.value.confirmPassword) {

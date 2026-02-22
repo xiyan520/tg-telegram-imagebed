@@ -62,7 +62,6 @@
                 fetchpriority="high"
               />
             </div>
-
             <!-- 下一张 -->
             <div
               v-if="nextImage"
@@ -95,21 +94,70 @@
                 <p class="text-xs text-white/70">{{ safeIndex + 1 }} / {{ images.length }}</p>
               </div>
               <div class="flex items-center gap-2 shrink-0">
+                <!-- 复制链接按钮 -->
                 <UButton
-                  icon="heroicons:arrow-down-tray"
-                  color="white"
+                  icon="heroicons:link"
+                  color="gray"
                   variant="ghost"
                   size="md"
+                  class="lightbox-btn"
+                  :aria-label="copyFeedback ? '已复制' : '复制链接'"
+                  :disabled="!currentImage"
+                  @click.stop="copyCurrentLink"
+                >
+                  <template v-if="copyFeedback" #trailing>
+                    <UIcon name="heroicons:check" class="w-3 h-3 text-green-400" />
+                  </template>
+                </UButton>
+                <!-- 信息面板按钮 -->
+                <UButton
+                  icon="heroicons:information-circle"
+                  color="gray"
+                  variant="ghost"
+                  size="md"
+                  class="lightbox-btn"
+                  aria-label="图片信息"
+                  :class="{ '!bg-white/20': showInfoPanel }"
+                  @click.stop="showInfoPanel = !showInfoPanel"
+                />
+                <!-- 管理操作按钮 -->
+                <UButton
+                  v-if="showAdminActions"
+                  icon="heroicons:folder-plus"
+                  color="gray"
+                  variant="ghost"
+                  size="md"
+                  class="lightbox-btn"
+                  aria-label="添加到画集"
+                  @click.stop="emit('add-to-gallery', currentImage!)"
+                />
+                <UButton
+                  icon="heroicons:arrow-down-tray"
+                  color="gray"
+                  variant="ghost"
+                  size="md"
+                  class="lightbox-btn"
                   aria-label="下载图片"
                   :disabled="!currentImage"
                   @click.stop="downloadCurrent"
                 />
+                <!-- 快捷键帮助 -->
+                <UButton
+                  icon="heroicons:question-mark-circle"
+                  color="gray"
+                  variant="ghost"
+                  size="md"
+                  class="lightbox-btn hidden sm:flex"
+                  aria-label="快捷键帮助"
+                  @click.stop="showHelpOverlay = !showHelpOverlay"
+                />
                 <UButton
                   ref="closeButtonRef"
                   icon="heroicons:x-mark"
-                  color="white"
+                  color="gray"
                   variant="ghost"
                   size="md"
+                  class="lightbox-btn"
                   aria-label="关闭"
                   @click.stop="close"
                 />
@@ -122,10 +170,10 @@
             <UButton
               v-if="hasPrev"
               icon="heroicons:chevron-left"
-              color="white"
+              color="gray"
               variant="ghost"
               size="xl"
-              class="pointer-events-auto hidden sm:flex bg-black/30 hover:bg-black/50 rounded-full !p-3"
+              class="lightbox-btn pointer-events-auto hidden sm:flex !bg-black/30 hover:!bg-black/50 rounded-full !p-3"
               aria-label="上一张"
               @click.stop="goPrev"
             />
@@ -133,24 +181,120 @@
             <UButton
               v-if="hasNext"
               icon="heroicons:chevron-right"
-              color="white"
+              color="gray"
               variant="ghost"
               size="xl"
-              class="pointer-events-auto hidden sm:flex bg-black/30 hover:bg-black/50 rounded-full !p-3"
+              class="lightbox-btn pointer-events-auto hidden sm:flex !bg-black/30 hover:!bg-black/50 rounded-full !p-3"
               aria-label="下一张"
               @click.stop="goNext"
             />
           </div>
 
-          <!-- 底部提示 -->
+          <!-- 底部区域：缩略图条 + 提示 -->
           <div
-            class="bg-gradient-to-t from-black/70 to-transparent px-4 pb-6 pt-16 text-center pointer-events-none"
-            :style="{ paddingBottom: 'max(env(safe-area-inset-bottom), 24px)' }"
+            class="bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-16 pointer-events-auto"
+            :style="{ paddingBottom: 'max(env(safe-area-inset-bottom), 16px)' }"
           >
-            <p class="text-xs text-white/50 hidden sm:block">← → 切换图片 · ESC 关闭</p>
-            <p class="text-xs text-white/50 sm:hidden">左右滑动切换 · 下滑关闭 · 双指缩放</p>
+            <!-- 缩略图条（桌面端） -->
+            <div v-if="images.length > 1" class="hidden sm:flex justify-center gap-1.5 mb-3">
+              <button
+                v-for="(img, idx) in thumbnailImages"
+                :key="img._thumbIdx"
+                class="w-12 h-12 rounded-lg overflow-hidden border-2 transition-all flex-shrink-0 focus:outline-none"
+                :class="img._thumbIdx === safeIndex
+                  ? 'border-white ring-1 ring-white/50 scale-110'
+                  : 'border-white/30 opacity-60 hover:opacity-90 hover:border-white/60'"
+                @click.stop="setIndex(img._thumbIdx)"
+              >
+                <img
+                  :src="img.image_url"
+                  :alt="img.original_filename"
+                  class="w-full h-full object-cover"
+                  loading="lazy"
+                  draggable="false"
+                />
+              </button>
+            </div>
+            <p class="text-xs text-white/50 text-center hidden sm:block">← → 切换 · ESC 关闭 · C 复制链接 · I 信息 · ? 帮助</p>
+            <p class="text-xs text-white/50 text-center sm:hidden">左右滑动切换 · 下滑关闭 · 双指缩放</p>
           </div>
         </div>
+
+        <!-- 信息面板（底部上滑抽屉） -->
+        <Transition
+          enter-active-class="transition duration-200 ease-out"
+          enter-from-class="translate-y-full"
+          enter-to-class="translate-y-0"
+          leave-active-class="transition duration-150 ease-in"
+          leave-from-class="translate-y-0"
+          leave-to-class="translate-y-full"
+        >
+          <div
+            v-if="showInfoPanel && currentImage"
+            class="absolute bottom-0 left-0 right-0 bg-black/90 backdrop-blur-md text-white p-5 rounded-t-2xl max-h-[40vh] overflow-y-auto pointer-events-auto"
+            @click.stop
+          >
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-sm font-semibold">图片信息</h3>
+              <UButton
+                icon="heroicons:x-mark"
+                color="gray"
+                variant="ghost"
+                size="xs"
+                class="lightbox-btn"
+                @click="showInfoPanel = false"
+              />
+            </div>
+            <div class="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span class="text-white/50 text-xs">文件名</span>
+                <p class="truncate">{{ currentImage.original_filename }}</p>
+              </div>
+              <div>
+                <span class="text-white/50 text-xs">大小</span>
+                <p>{{ formatFileSize(currentImage.file_size) }}</p>
+              </div>
+              <div>
+                <span class="text-white/50 text-xs">类型</span>
+                <p>{{ currentImage.mime_type || guessType(currentImage.original_filename) }}</p>
+              </div>
+              <div>
+                <span class="text-white/50 text-xs">上传时间</span>
+                <p>{{ formatInfoDate(currentImage.created_at || currentImage.added_at) }}</p>
+              </div>
+            </div>
+          </div>
+        </Transition>
+
+        <!-- 快捷键帮助浮层 -->
+        <Transition
+          enter-active-class="transition duration-150 ease-out"
+          enter-from-class="opacity-0 scale-95"
+          enter-to-class="opacity-100 scale-100"
+          leave-active-class="transition duration-100 ease-in"
+          leave-from-class="opacity-100 scale-100"
+          leave-to-class="opacity-0 scale-95"
+        >
+          <div
+            v-if="showHelpOverlay"
+            class="absolute inset-0 flex items-center justify-center pointer-events-auto"
+            @click.stop="showHelpOverlay = false"
+          >
+            <div class="bg-black/90 backdrop-blur-md rounded-2xl p-6 text-white max-w-sm w-full mx-4" @click.stop>
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-semibold">快捷键</h3>
+                <UButton icon="heroicons:x-mark" color="gray" variant="ghost" size="xs" class="lightbox-btn" @click="showHelpOverlay = false" />
+              </div>
+              <div class="space-y-2 text-sm">
+                <div class="flex justify-between"><span class="text-white/60">← →</span><span>切换图片</span></div>
+                <div class="flex justify-between"><span class="text-white/60">ESC</span><span>关闭</span></div>
+                <div class="flex justify-between"><span class="text-white/60">C</span><span>复制链接</span></div>
+                <div class="flex justify-between"><span class="text-white/60">I</span><span>图片信息</span></div>
+                <div class="flex justify-between"><span class="text-white/60">?</span><span>快捷键帮助</span></div>
+              </div>
+            </div>
+          </div>
+        </Transition>
       </div>
     </Transition>
   </Teleport>
@@ -164,13 +308,17 @@ const props = withDefaults(defineProps<{
   open: boolean
   index: number
   images: GalleryImage[]
+  showAdminActions?: boolean
 }>(), {
-  images: () => []
+  images: () => [],
+  showAdminActions: false
 })
 
 const emit = defineEmits<{
   (e: 'update:open', v: boolean): void
   (e: 'update:index', v: number): void
+  (e: 'copy-link', image: GalleryImage): void
+  (e: 'add-to-gallery', image: GalleryImage): void
 }>()
 
 const { width: vw, height: vh } = useWindowSize()
@@ -187,6 +335,60 @@ const prevImage = computed(() => props.images[safeIndex.value - 1] || null)
 const nextImage = computed(() => props.images[safeIndex.value + 1] || null)
 const hasPrev = computed(() => safeIndex.value > 0)
 const hasNext = computed(() => safeIndex.value < props.images.length - 1)
+
+// 缩略图条：最多9张，当前居中
+const thumbnailImages = computed(() => {
+  const len = props.images.length
+  if (len <= 9) return props.images.map((img, i) => ({ ...img, _thumbIdx: i }))
+  const half = 4
+  let start = safeIndex.value - half
+  let end = safeIndex.value + half
+  if (start < 0) { end -= start; start = 0 }
+  if (end >= len) { start -= (end - len + 1); end = len - 1 }
+  start = Math.max(0, start)
+  const result = []
+  for (let i = start; i <= end; i++) result.push({ ...props.images[i], _thumbIdx: i })
+  return result
+})
+
+// 信息面板 / 帮助浮层 / 复制反馈
+const showInfoPanel = ref(false)
+const showHelpOverlay = ref(false)
+const copyFeedback = ref(false)
+
+// 格式化工具
+const formatFileSize = (bytes?: number) => {
+  if (!bytes) return '--'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+const formatInfoDate = (dateStr?: string) => {
+  if (!dateStr) return '--'
+  return new Date(dateStr).toLocaleString('zh-CN')
+}
+
+const guessType = (filename?: string) => {
+  if (!filename) return '--'
+  const ext = filename.split('.').pop()?.toLowerCase()
+  const map: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' }
+  return map[ext || ''] || '--'
+}
+
+// 复制链接
+const copyCurrentLink = async () => {
+  if (!currentImage.value) return
+  emit('copy-link', currentImage.value)
+  const url = currentImage.value.image_url || currentImage.value.cdn_url
+  if (url && import.meta.client) {
+    try {
+      await navigator.clipboard.writeText(url)
+      copyFeedback.value = true
+      setTimeout(() => { copyFeedback.value = false }, 1500)
+    } catch { /* 静默失败 */ }
+  }
+}
 
 // 定时器管理
 let resetAfterCloseTimer: ReturnType<typeof setTimeout> | undefined
@@ -210,12 +412,19 @@ if (import.meta.client) {
   watch(() => props.open, (v) => { locked.value = v }, { immediate: true })
 }
 
-// 键盘导航
+// 键盘导航（增强）
 useEventListener(import.meta.client ? window : undefined, 'keydown', (e: KeyboardEvent) => {
   if (!props.open) return
-  if (e.key === 'Escape') { e.preventDefault(); close() }
+  // 忽略输入框内的按键
+  const tag = (e.target as HTMLElement)?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+  if (e.key === 'Escape') { e.preventDefault(); showHelpOverlay.value ? (showHelpOverlay.value = false) : showInfoPanel.value ? (showInfoPanel.value = false) : close() }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev() }
   else if (e.key === 'ArrowRight') { e.preventDefault(); goNext() }
+  else if (e.key === 'c' || e.key === 'C') { if (!e.ctrlKey && !e.metaKey) { e.preventDefault(); copyCurrentLink() } }
+  else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); showInfoPanel.value = !showInfoPanel.value }
+  else if (e.key === '?') { e.preventDefault(); showHelpOverlay.value = !showHelpOverlay.value }
 }, { passive: false })
 
 // 下载当前图片
@@ -325,7 +534,6 @@ const overlayStyle = computed(() => ({
 // 触摸事件处理
 const onTouchStart = (e: TouchEvent) => {
   if (!props.open) return
-
   touchStartPoints = Array.from(e.touches).map(t => ({ x: t.clientX, y: t.clientY }))
   startScale = scale.value
   startTranslateX = translateX.value
@@ -334,12 +542,8 @@ const onTouchStart = (e: TouchEvent) => {
   swipeStartTime = performance.now()
   dragAxis = 'none'
   isAnimating.value = false
-
   if (e.touches.length === 2) {
-    const dist = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    )
+    const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY)
     startDist = dist || 1
     isZooming.value = true
     isDragging.value = false
@@ -351,18 +555,13 @@ const onTouchStart = (e: TouchEvent) => {
 
 const onTouchMove = (e: TouchEvent) => {
   if (!props.open) return
-
   if (e.touches.length === 2 && isZooming.value) {
     if (startDist <= 0) return
-    const dist = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    )
+    const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY)
     scale.value = Math.max(1, Math.min(5, startScale * (dist / startDist)))
   } else if (e.touches.length === 1 && isDragging.value && touchStartPoints.length > 0) {
     const dx = e.touches[0].clientX - touchStartPoints[0].x
     const dy = e.touches[0].clientY - touchStartPoints[0].y
-
     if (isZoomed.value) {
       translateX.value = startTranslateX + dx
       translateY.value = startTranslateY + dy
@@ -370,11 +569,8 @@ const onTouchMove = (e: TouchEvent) => {
       if (dragAxis === 'none') {
         const ax = Math.abs(dx)
         const ay = Math.abs(dy)
-        if (ax > 12 || ay > 12) {
-          dragAxis = ax > ay * 1.3 ? 'x' : ay > ax * 1.3 ? 'y' : 'none'
-        }
+        if (ax > 12 || ay > 12) dragAxis = ax > ay * 1.3 ? 'x' : ay > ax * 1.3 ? 'y' : 'none'
       }
-
       if (dragAxis === 'x') {
         const edgeDamp = (dx > 0 && !hasPrev.value) || (dx < 0 && !hasNext.value) ? 0.3 : 1
         swipeX.value = startSwipeX + dx * edgeDamp
@@ -389,15 +585,12 @@ const onTouchMove = (e: TouchEvent) => {
 
 const onTouchEnd = () => {
   if (!props.open) return
-
   touchStartPoints = []
   const dt = Math.max(16, performance.now() - swipeStartTime)
   const velocity = swipeX.value / dt * 1000
-
   isDragging.value = false
   isZooming.value = false
   isAnimating.value = true
-
   // 下滑关闭
   if (dragAxis === 'y' && !isZoomed.value && dismissY.value > 100) {
     close()
@@ -406,21 +599,16 @@ const onTouchEnd = () => {
     return
   }
   dismissY.value = 0
-
   // 左右滑动切换
   const threshold = Math.max(80, vw.value * 0.2)
   const velocityThreshold = 800
-
   if (dragAxis === 'x' && !isZoomed.value) {
     if ((swipeX.value < -threshold || velocity < -velocityThreshold) && hasNext.value) {
       swipeX.value = -vw.value
       if (swipeCommitTimer) clearTimeout(swipeCommitTimer)
       swipeCommitTimer = setTimeout(() => {
         if (!props.open) return
-        isAnimating.value = false
-        goNext()
-        swipeX.value = 0
-        dragAxis = 'none'
+        isAnimating.value = false; goNext(); swipeX.value = 0; dragAxis = 'none'
       }, 300)
       return
     } else if ((swipeX.value > threshold || velocity > velocityThreshold) && hasPrev.value) {
@@ -428,15 +616,11 @@ const onTouchEnd = () => {
       if (swipeCommitTimer) clearTimeout(swipeCommitTimer)
       swipeCommitTimer = setTimeout(() => {
         if (!props.open) return
-        isAnimating.value = false
-        goPrev()
-        swipeX.value = 0
-        dragAxis = 'none'
+        isAnimating.value = false; goPrev(); swipeX.value = 0; dragAxis = 'none'
       }, 300)
       return
     }
   }
-
   swipeX.value = 0
   if (scale.value < 1) scale.value = 1
   dragAxis = 'none'
@@ -445,55 +629,50 @@ const onTouchEnd = () => {
 // 点击/双击处理
 const onTap = (e: MouseEvent) => {
   if (isDragging.value || isZooming.value) return
-
   const now = Date.now()
   if (now - lastTapTime < 300) {
-    // 双击缩放
     isAnimating.value = true
-    if (scale.value > 1) {
-      scale.value = 1
-      translateX.value = 0
-      translateY.value = 0
-    } else {
-      scale.value = 2.5
-    }
+    if (scale.value > 1) { scale.value = 1; translateX.value = 0; translateY.value = 0 }
+    else { scale.value = 2.5 }
   } else {
-    // 单击切换控件
     if (tapToggleTimer) clearTimeout(tapToggleTimer)
     tapToggleTimer = setTimeout(() => {
-      if (Date.now() - lastTapTime > 280 && swipeX.value === 0) {
-        showControls.value = !showControls.value
-      }
+      if (Date.now() - lastTapTime > 280 && swipeX.value === 0) showControls.value = !showControls.value
     }, 300)
   }
   lastTapTime = now
 }
 
-// 打开时重置状态并聚焦关闭按钮
+// 打开时重置状态
 watch(() => props.open, (isOpen) => {
-  if (!isOpen) {
-    clearTimers()
-    return
-  }
+  if (!isOpen) { clearTimers(); return }
   resetTransform()
   showControls.value = true
+  showInfoPanel.value = false
+  showHelpOverlay.value = false
+  copyFeedback.value = false
   preloadedUrls.clear()
-  nextTick(() => {
-    closeButtonRef.value?.$el?.focus?.() || closeButtonRef.value?.focus?.()
-  })
+  nextTick(() => { closeButtonRef.value?.$el?.focus?.() || closeButtonRef.value?.focus?.() })
 })
 
 // 切换图片时重置缩放
 watch(safeIndex, () => {
-  if (props.open) {
-    scale.value = 1
-    translateX.value = 0
-    translateY.value = 0
-  }
+  if (props.open) { scale.value = 1; translateX.value = 0; translateY.value = 0 }
 })
 
-// 组件卸载时清理定时器
-onBeforeUnmount(() => {
-  clearTimers()
-})
+onBeforeUnmount(() => { clearTimers() })
 </script>
+
+<style scoped>
+/* 灯箱背景始终为深色，强制所有按钮图标为白色 */
+:deep(.lightbox-btn) {
+  --tw-text-opacity: 1;
+  color: rgb(255 255 255 / var(--tw-text-opacity)) !important;
+}
+:deep(.lightbox-btn:hover) {
+  background-color: rgb(255 255 255 / 0.2) !important;
+}
+:deep(.lightbox-btn:disabled) {
+  color: rgb(255 255 255 / 0.4) !important;
+}
+</style>

@@ -7,6 +7,7 @@ Telegram 消息处理器模块
 """
 import asyncio
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -22,9 +23,19 @@ _DOWNLOAD_TIMEOUT = 60
 
 async def start(update: Update, context):
     """处理 /start 命令"""
-    from ..database import get_stats
+    from ..database import get_stats, upsert_tg_user
     from ..utils import get_domain
     from .state import _get_bot_status
+
+    # 记录用户到 tg_users 表
+    user = update.effective_user
+    if user:
+        upsert_tg_user(
+            tg_user_id=user.id,
+            username=user.username,
+            first_name=user.first_name,
+            last_name=user.last_name
+        )
 
     stats = get_stats()
     bot_status = _get_bot_status()
@@ -296,3 +307,26 @@ async def handle_photo(update: Update, context):
                 await status_msg.edit_text(err_msg)
             except Exception:
                 pass
+
+
+async def handle_verify_text(update: Update, context):
+    """处理文本消息 — web_verify 验证码登录"""
+    from ..database import consume_web_verify_code, upsert_tg_user
+
+    text = (update.message.text or '').strip()
+    # 仅处理 6 位纯数字
+    if not re.match(r'^\d{6}$', text):
+        return  # 非验证码格式，静默忽略
+
+    user = update.effective_user
+    if not user:
+        return
+
+    # 确保用户已注册
+    upsert_tg_user(user.id, user.username, user.first_name, user.last_name)
+
+    result = consume_web_verify_code(text, user.id)
+    if result:
+        await update.message.reply_text("✅ 登录成功！请返回 Web 端")
+    else:
+        await update.message.reply_text("❌ 验证码无效或已过期")

@@ -67,7 +67,7 @@
 
 <script setup lang="ts">
 const toast = useNotification()
-const { uploadFiles } = useUpload()
+const { uploadFiles, abortUpload } = useUpload()
 const { triggerStatsRefresh } = useStatsRefresh()
 const runtimeConfig = useRuntimeConfig()
 
@@ -196,6 +196,7 @@ const handleFiles = async (files: File[]) => {
 }
 
 const cancelUpload = () => {
+  abortUpload()
   uploading.value = false
   uploadProgress.value = { label: '上传中...', percent: 0 }
 }

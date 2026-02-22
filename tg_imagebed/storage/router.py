@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import threading
 from typing import Any, Dict, List, Optional
 
 from .base import PutResult, StorageBackend
@@ -252,6 +253,7 @@ class StorageRouter:
 # 全局路由器缓存
 _router: Optional[StorageRouter] = None
 _router_ts: float = 0.0
+_router_lock = threading.Lock()  # 保护缓存读写的线程锁
 
 
 def _load_storage_config() -> Dict[str, Any]:
@@ -284,7 +286,7 @@ def _load_storage_config() -> Dict[str, Any]:
 
 def get_storage_router(*, ttl_seconds: int = 5) -> StorageRouter:
     """
-    获取存储路由器实例（带缓存）
+    获取存储路由器实例（带缓存，线程安全）
 
     Args:
         ttl_seconds: 缓存有效期（秒）
@@ -294,18 +296,25 @@ def get_storage_router(*, ttl_seconds: int = 5) -> StorageRouter:
     """
     global _router, _router_ts
     now = time.time()
+    # 快速路径：缓存有效时直接返回（无锁读取）
     if _router and (now - _router_ts) < ttl_seconds:
         return _router
-    cfg = _load_storage_config()
-    _router = StorageRouter(cfg)
-    _router_ts = now
-    return _router
+    with _router_lock:
+        # 双重检查：进入锁后再次验证，避免重复创建
+        now = time.time()
+        if _router and (now - _router_ts) < ttl_seconds:
+            return _router
+        cfg = _load_storage_config()
+        _router = StorageRouter(cfg)
+        _router_ts = now
+        return _router
 
 
 def reload_storage_router() -> StorageRouter:
-    """强制重新加载存储路由器"""
+    """强制重新加载存储路由器（线程安全）"""
     global _router, _router_ts
-    cfg = _load_storage_config()
-    _router = StorageRouter(cfg)
-    _router_ts = time.time()
-    return _router
+    with _router_lock:
+        cfg = _load_storage_config()
+        _router = StorageRouter(cfg)
+        _router_ts = time.time()
+        return _router

@@ -100,6 +100,15 @@ def _format_settings_for_response(settings: dict) -> dict:
         'proxy_env_set': bool(PROXY_URL),
         # 允许的文件后缀
         'allowed_extensions': settings.get('allowed_extensions', 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico'),
+        # TG 认证
+        'tg_auth_enabled': settings.get('tg_auth_enabled', '0') == '1',
+        'tg_auth_required_for_token': settings.get('tg_auth_required_for_token', '0') == '1',
+        'tg_bind_token_enabled': settings.get('tg_bind_token_enabled', '0') == '1',
+        'tg_max_tokens_per_user': _safe_int(settings.get('tg_max_tokens_per_user'), 5, 1, 100),
+        'tg_login_code_expire_minutes': _safe_int(settings.get('tg_login_code_expire_minutes'), 5, 1, 60),
+        'tg_session_expire_days': _safe_int(settings.get('tg_session_expire_days'), 30, 1, 365),
+        # 非 TG 用户 Token 限制
+        'max_guest_tokens_per_ip': _safe_int(settings.get('max_guest_tokens_per_ip'), 3, 1, 100),
     }
 
 
@@ -126,7 +135,7 @@ def get_public_settings_api():
 
     except Exception as e:
         logger.error(f"获取公共设置失败: {e}")
-        response = jsonify({'success': False, 'error': str(e)})
+        response = jsonify({'success': False, 'error': '获取设置失败，请稍后重试'})
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 500
 
@@ -334,6 +343,40 @@ def admin_system_settings():
                     # 空值清除代理
                     settings_to_update['proxy_url'] = ''
 
+            # TG 认证配置
+            for tg_bool_key in ('tg_auth_enabled', 'tg_auth_required_for_token', 'tg_bind_token_enabled'):
+                if tg_bool_key in data:
+                    settings_to_update[tg_bool_key] = '1' if data[tg_bool_key] else '0'
+
+            if 'tg_max_tokens_per_user' in data:
+                val = _safe_int(data['tg_max_tokens_per_user'], 5)
+                if val < 1 or val > 100:
+                    errors.append('每用户 Token 上限必须在 1-100 之间')
+                else:
+                    settings_to_update['tg_max_tokens_per_user'] = str(val)
+
+            if 'tg_login_code_expire_minutes' in data:
+                val = _safe_int(data['tg_login_code_expire_minutes'], 5)
+                if val < 1 or val > 60:
+                    errors.append('验证码有效期必须在 1-60 分钟之间')
+                else:
+                    settings_to_update['tg_login_code_expire_minutes'] = str(val)
+
+            if 'tg_session_expire_days' in data:
+                val = _safe_int(data['tg_session_expire_days'], 30)
+                if val < 1 or val > 365:
+                    errors.append('会话有效期必须在 1-365 天之间')
+                else:
+                    settings_to_update['tg_session_expire_days'] = str(val)
+
+            # 非 TG 用户 Token 限制
+            if 'max_guest_tokens_per_ip' in data:
+                val = _safe_int(data['max_guest_tokens_per_ip'], 3)
+                if val < 1 or val > 100:
+                    errors.append('每 IP Token 上限必须在 1-100 之间')
+                else:
+                    settings_to_update['max_guest_tokens_per_ip'] = str(val)
+
             # 允许的文件后缀
             svg_warning = ''
             if 'allowed_extensions' in data:
@@ -406,7 +449,7 @@ def admin_system_settings():
 
     except Exception as e:
         logger.error(f"系统设置操作失败: {e}")
-        response = jsonify({'success': False, 'error': str(e)})
+        response = jsonify({'success': False, 'error': '系统设置操作失败'})
         return _set_admin_cors_headers(response), 500
 
 
@@ -442,5 +485,5 @@ def admin_revoke_tokens():
 
     except Exception as e:
         logger.error(f"批量禁用 Token 失败: {e}")
-        response = jsonify({'success': False, 'error': str(e)})
+        response = jsonify({'success': False, 'error': '批量禁用失败，请稍后重试'})
         return _set_admin_cors_headers(response), 500

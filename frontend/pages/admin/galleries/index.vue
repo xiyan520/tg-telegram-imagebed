@@ -34,8 +34,30 @@
       </div>
     </div>
 
-    <!-- 画集网格 -->
+    <!-- 搜索筛选栏 + 画集网格 -->
     <UCard>
+      <!-- 搜索和排序 -->
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center mb-4">
+        <UInput
+          v-model="searchQuery"
+          placeholder="搜索画集名称..."
+          size="sm"
+          class="flex-1 sm:max-w-xs"
+          @input="handleSearch"
+        >
+          <template #leading>
+            <UIcon name="heroicons:magnifying-glass" class="w-4 h-4" />
+          </template>
+        </UInput>
+        <USelect
+          v-model="sortBy"
+          :options="sortOptions"
+          size="sm"
+          class="w-40"
+          @change="handleSortChange"
+        />
+      </div>
+
       <div v-if="loading" class="flex flex-col justify-center items-center py-16">
         <div class="w-14 h-14 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4"></div>
         <p class="text-stone-600 dark:text-stone-400">加载中...</p>
@@ -227,6 +249,16 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 
+// 搜索和排序
+const searchQuery = ref('')
+const sortBy = ref('newest')
+const sortOptions = [
+  { label: '最新更新', value: 'newest' },
+  { label: '最早创建', value: 'oldest' },
+  { label: '图片最多', value: 'most_images' },
+  { label: '名称排序', value: 'name' },
+]
+
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 
 const createModalOpen = ref(false)
@@ -241,14 +273,32 @@ const shareAllAction = ref(false)
 const loadGalleries = async () => {
   loading.value = true
   try {
-    const result = await galleryApi.getGalleries(page.value, pageSize.value)
-    galleries.value = result.items
-    total.value = result.total
+    const params: Record<string, any> = { page: page.value, limit: pageSize.value }
+    if (searchQuery.value.trim()) params.search = searchQuery.value.trim()
+    if (sortBy.value && sortBy.value !== 'newest') params.sort = sortBy.value
+
+    const response = await $fetch<any>(`${config.public.apiBase}/api/admin/galleries`, {
+      params,
+      credentials: 'include'
+    })
+    if (!response?.success) throw new Error(response?.error || '加载失败')
+    galleries.value = response.data.items
+    total.value = response.data.total
   } catch (error: any) {
     notification.error('加载失败', error.message || '无法加载画集列表')
   } finally {
     loading.value = false
   }
+}
+
+const handleSearch = useDebounceFn(() => {
+  page.value = 1
+  loadGalleries()
+}, 400)
+
+const handleSortChange = () => {
+  page.value = 1
+  loadGalleries()
 }
 
 const openCreateModal = () => {

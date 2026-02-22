@@ -124,6 +124,15 @@ DEFAULT_SYSTEM_SETTINGS = {
     'proxy_url': '',
     # 允许的文件后缀（逗号分隔）
     'allowed_extensions': 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico',
+    # TG 认证配置
+    'tg_auth_enabled': '0',                  # TG 认证总开关
+    'tg_auth_required_for_token': '0',       # 生成 Token 需要 TG 登录
+    'tg_max_tokens_per_user': '5',           # 每用户 Token 上限
+    'tg_login_code_expire_minutes': '5',     # 验证码/链接有效期
+    'tg_session_expire_days': '30',          # TG 会话有效期
+    'tg_bind_token_enabled': '0',            # Token 自动绑定 TG 用户
+    # 非 TG 用户 Token 限制
+    'max_guest_tokens_per_ip': '3',          # 非 TG 用户每 IP Token 上限
 }
 
 def init_system_settings() -> None:
@@ -292,6 +301,9 @@ def get_public_settings() -> Dict[str, Any]:
         'guest_token_max_upload_limit': max(1, _safe_int(settings.get('guest_token_max_upload_limit', '1000'), 1000)),
         'guest_token_max_expires_days': max(1, _safe_int(settings.get('guest_token_max_expires_days', '365'), 365)),
         'allowed_extensions': settings.get('allowed_extensions', 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico'),
+        'tg_auth_enabled': settings.get('tg_auth_enabled', '0') == '1',
+        'tg_auth_required_for_token': settings.get('tg_auth_required_for_token', '0') == '1',
+        'tg_bind_token_enabled': settings.get('tg_bind_token_enabled', '0') == '1',
     }
 
 def is_guest_upload_allowed() -> bool:

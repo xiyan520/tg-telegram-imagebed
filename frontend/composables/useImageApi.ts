@@ -1,3 +1,8 @@
+import type {
+  ApiResponse, UploadResult, PublicStats,
+  AdminStatsData, AdminImagesData, AdminDeleteData
+} from '~/types/api'
+
 export const useImageApi = () => {
   const config = useRuntimeConfig()
   const baseURL = config.public.apiBase
@@ -7,7 +12,7 @@ export const useImageApi = () => {
     files: File[],
     onProgress?: (progress: { label: string; percent: number }) => void
   ) => {
-    const results = []
+    const results: UploadResult[] = []
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i]
@@ -22,12 +27,12 @@ export const useImageApi = () => {
       }
 
       try {
-        const response = await $fetch<any>(`${baseURL}/api/upload`, {
+        const response = await $fetch<ApiResponse<UploadResult>>(`${baseURL}/api/upload`, {
           method: 'POST',
           body: formData
         })
 
-        if (response.success) {
+        if (response.success && response.data) {
           results.push(response.data)
         } else {
           throw new Error(response.message || '上传失败')
@@ -41,23 +46,23 @@ export const useImageApi = () => {
   }
 
   // 获取统计信息
-  const getStats = async () => {
+  const getStats = async (): Promise<PublicStats> => {
     try {
-      const response = await $fetch<any>(`${baseURL}/api/stats`)
-      return response.data || {}
+      const response = await $fetch<ApiResponse<PublicStats>>(`${baseURL}/api/stats`)
+      return response.data || {} as PublicStats
     } catch (error) {
       console.error('获取统计信息失败:', error)
-      return {}
+      return {} as PublicStats
     }
   }
 
   // 获取管理员统计信息
-  const getAdminStats = async () => {
+  const getAdminStats = async (): Promise<AdminStatsData> => {
     try {
-      const response = await $fetch<any>('/api/admin/stats', {
+      const response = await $fetch<ApiResponse<AdminStatsData>>('/api/admin/stats', {
         credentials: 'include'
       })
-      return response.data || { stats: {}, config: {} }
+      return response.data || { stats: {} as any, config: {} as any }
     } catch (error) {
       console.error('获取管理员统计信息失败:', error)
       throw error
@@ -71,13 +76,13 @@ export const useImageApi = () => {
     filter?: string
     search?: string
     sort?: string
-  }) => {
+  }): Promise<AdminImagesData> => {
     try {
-      const response = await $fetch<any>('/api/admin/images', {
+      const response = await $fetch<ApiResponse<AdminImagesData>>('/api/admin/images', {
         params,
         credentials: 'include'
       })
-      return response.data || { images: [], totalPages: 1, total: 0 }
+      return response.data || { images: [], totalPages: 1, total: 0, page: 1, limit: 20 }
     } catch (error) {
       console.error('获取图片列表失败:', error)
       throw error
@@ -87,7 +92,7 @@ export const useImageApi = () => {
   // 删除图片
   const deleteImages = async (ids: string[]) => {
     try {
-      const response = await $fetch<any>('/api/admin/delete', {
+      const response = await $fetch<ApiResponse<AdminDeleteData>>('/api/admin/delete', {
         method: 'POST',
         body: { ids },
         credentials: 'include'
@@ -102,7 +107,7 @@ export const useImageApi = () => {
   // 清理缓存
   const clearCache = async () => {
     try {
-      const response = await $fetch<any>('/api/admin/clear-cache', {
+      const response = await $fetch<ApiResponse>('/api/admin/clear-cache', {
         method: 'POST',
         credentials: 'include'
       })

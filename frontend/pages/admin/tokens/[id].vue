@@ -46,105 +46,85 @@
     <template v-else-if="tokenDetail">
       <!-- Token 信息卡片 -->
       <UCard>
-        <div class="space-y-5">
-          <!-- 完整 Token -->
-          <div>
-            <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">完整 Token</label>
-            <div class="mt-1.5 flex items-center gap-2">
-              <code class="flex-1 font-mono text-xs p-3 rounded-lg bg-stone-100 dark:bg-neutral-800 break-all select-all">
-                {{ tokenDetail.token }}
-              </code>
-              <UButton
-                icon="heroicons:clipboard-document"
-                color="primary"
-                variant="soft"
-                @click="copyToken"
-              >
-                复制
-              </UButton>
+        <!-- Token 值 -->
+        <div class="flex items-center gap-2 mb-5">
+          <code class="flex-1 font-mono text-xs p-2.5 rounded-lg bg-stone-100 dark:bg-neutral-800 break-all select-all truncate">
+            {{ tokenDetail.token }}
+          </code>
+          <UButton
+            icon="heroicons:clipboard-document"
+            color="primary"
+            variant="soft"
+            size="sm"
+            @click="copyToken"
+          >
+            复制
+          </UButton>
+        </div>
+
+        <!-- 核心指标卡片 -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
+            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">状态</div>
+            <div class="flex items-center gap-2">
+              <UBadge
+                v-if="tokenDetail.is_expired"
+                color="amber" variant="subtle" size="xs"
+              >已过期</UBadge>
+              <UBadge
+                v-else
+                :color="tokenDetail.is_active ? 'green' : 'gray'" variant="subtle" size="xs"
+              >{{ tokenDetail.is_active ? '启用' : '禁用' }}</UBadge>
+              <UToggle
+                :model-value="tokenDetail.is_active"
+                size="sm"
+                :disabled="tokenDetail.is_expired || updatingStatus"
+                @update:model-value="toggleStatus"
+              />
             </div>
           </div>
-
-          <!-- 描述 + 状态 -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">描述</label>
-              <p class="mt-1 text-stone-800 dark:text-stone-200">
-                {{ tokenDetail.description?.trim() || '--' }}
-              </p>
+          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
+            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">上传用量</div>
+            <div class="text-sm font-semibold text-stone-800 dark:text-stone-200">
+              {{ tokenDetail.upload_count }} / {{ tokenDetail.upload_limit ?? '∞' }}
             </div>
-            <div>
-              <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">状态</label>
-              <div class="mt-1 flex items-center gap-3">
-                <UBadge
-                  v-if="tokenDetail.is_expired"
-                  color="amber"
-                  variant="subtle"
-                >
-                  已过期
-                </UBadge>
-                <UBadge
-                  v-else
-                  :color="tokenDetail.is_active ? 'green' : 'gray'"
-                  variant="subtle"
-                >
-                  {{ tokenDetail.is_active ? '启用' : '禁用' }}
-                </UBadge>
-                <UToggle
-                  :model-value="tokenDetail.is_active"
-                  :disabled="tokenDetail.is_expired || updatingStatus"
-                  @update:model-value="toggleStatus"
-                />
-              </div>
-            </div>
-          </div>
-
-          <!-- 时间信息 -->
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">创建时间</label>
-              <p class="mt-1 text-stone-800 dark:text-stone-200">{{ formatDate(tokenDetail.created_at) }}</p>
-            </div>
-            <div>
-              <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">过期时间</label>
-              <p class="mt-1 text-stone-800 dark:text-stone-200">{{ tokenDetail.expires_at ? formatDate(tokenDetail.expires_at) : '永不过期' }}</p>
-            </div>
-            <div>
-              <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">最后使用</label>
-              <p class="mt-1 text-stone-800 dark:text-stone-200">{{ tokenDetail.last_used ? formatDate(tokenDetail.last_used) : '从未使用' }}</p>
-            </div>
-          </div>
-
-          <!-- 上传次数/限制 -->
-          <div>
-            <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">上传次数 / 限制</label>
-            <div class="mt-1.5 flex items-center gap-3">
-              <span class="text-stone-800 dark:text-stone-200 font-medium">
-                {{ tokenDetail.upload_count }} / {{ tokenDetail.upload_limit ?? '无限制' }}
-              </span>
-            </div>
-            <div v-if="tokenDetail.upload_limit" class="mt-2">
-              <div class="w-full bg-stone-200 dark:bg-neutral-700 rounded-full h-2">
+            <div v-if="tokenDetail.upload_limit" class="mt-1.5">
+              <div class="w-full bg-stone-200 dark:bg-neutral-700 rounded-full h-1.5">
                 <div
-                  class="h-2 rounded-full transition-all"
+                  class="h-1.5 rounded-full transition-all"
                   :class="uploadPercent >= 90 ? 'bg-red-500' : uploadPercent >= 70 ? 'bg-amber-500' : 'bg-green-500'"
                   :style="{ width: `${Math.min(100, uploadPercent)}%` }"
                 />
               </div>
-              <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">{{ uploadPercent.toFixed(1) }}% 已使用</p>
             </div>
           </div>
+          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
+            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">创建时间</div>
+            <div class="text-sm font-medium text-stone-800 dark:text-stone-200">{{ formatDate(tokenDetail.created_at) }}</div>
+          </div>
+          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
+            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">过期时间</div>
+            <div class="text-sm font-medium text-stone-800 dark:text-stone-200">{{ tokenDetail.expires_at ? formatDate(tokenDetail.expires_at) : '永不过期' }}</div>
+          </div>
+        </div>
 
-          <!-- IP / UA -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">IP 地址</label>
-              <p class="mt-1 text-stone-800 dark:text-stone-200 font-mono text-sm">{{ tokenDetail.ip_address || '--' }}</p>
-            </div>
-            <div>
-              <label class="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wide">User-Agent</label>
-              <p class="mt-1 text-stone-800 dark:text-stone-200 text-xs break-all">{{ tokenDetail.user_agent || '--' }}</p>
-            </div>
+        <!-- 详细信息 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
+          <div>
+            <span class="text-[11px] text-stone-400 dark:text-stone-500">描述</span>
+            <p class="text-stone-800 dark:text-stone-200">{{ tokenDetail.description?.trim() || '--' }}</p>
+          </div>
+          <div>
+            <span class="text-[11px] text-stone-400 dark:text-stone-500">最后使用</span>
+            <p class="text-stone-800 dark:text-stone-200">{{ tokenDetail.last_used ? formatDate(tokenDetail.last_used) : '从未使用' }}</p>
+          </div>
+          <div>
+            <span class="text-[11px] text-stone-400 dark:text-stone-500">IP 地址</span>
+            <p class="text-stone-800 dark:text-stone-200 font-mono text-xs">{{ tokenDetail.ip_address || '--' }}</p>
+          </div>
+          <div>
+            <span class="text-[11px] text-stone-400 dark:text-stone-500">User-Agent</span>
+            <p class="text-stone-800 dark:text-stone-200 text-xs break-all line-clamp-2" :title="tokenDetail.user_agent">{{ tokenDetail.user_agent || '--' }}</p>
           </div>
         </div>
       </UCard>
@@ -189,9 +169,10 @@
 
           <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
             <div
-              v-for="img in uploads"
+              v-for="(img, idx) in uploads"
               :key="img.encrypted_id"
-              class="group relative aspect-square rounded-xl overflow-hidden border border-stone-200 dark:border-neutral-700 hover:shadow-lg transition-all"
+              class="group relative aspect-square rounded-xl overflow-hidden border border-stone-200 dark:border-neutral-700 hover:shadow-lg transition-all cursor-pointer"
+              @click="openLightbox(idx)"
             >
               <img
                 :src="getImageSrc(img)"
@@ -269,6 +250,16 @@
         </template>
       </UCard>
     </template>
+
+    <!-- 图片灯箱 -->
+    <GalleryLightbox
+      :open="lightboxOpen"
+      :index="lightboxIndex"
+      :images="lightboxImages"
+      @update:open="lightboxOpen = $event"
+      @update:index="lightboxIndex = $event"
+      @copy-link="handleCopyLink"
+    />
 
     <!-- 编辑 Token 模态框 -->
     <UModal v-model="editModalOpen">
@@ -365,6 +356,29 @@ const galleriesTotal = ref(0)
 const galleriesPage = ref(1)
 const galleriesPageSize = ref(50)
 const loadingGalleries = ref(false)
+
+// 灯箱
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+
+const lightboxImages = computed(() =>
+  uploads.value.map(img => ({
+    ...img,
+    image_url: getImageSrc(img),
+  }))
+)
+
+const openLightbox = (idx: number) => {
+  lightboxIndex.value = idx
+  lightboxOpen.value = true
+}
+
+const handleCopyLink = (image: any) => {
+  const url = image.image_url || image.cdn_url
+  if (url && import.meta.client) {
+    navigator.clipboard.writeText(url).catch(() => {})
+  }
+}
 
 const uploadPercent = computed(() => {
   if (!tokenDetail.value?.upload_limit) return 0
@@ -566,6 +580,7 @@ watch(galleriesPage, () => { if (activeTab.value === 'galleries') loadGalleries(
 
 onMounted(async () => {
   await loadDetail()
-  await loadUploads()
+  // 并行加载两个 tab 的数据，确保计数立即可用
+  await Promise.all([loadUploads(), loadGalleries()])
 })
 </script>

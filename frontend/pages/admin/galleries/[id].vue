@@ -53,6 +53,9 @@
           </UButton>
         </div>
         <div class="flex items-center gap-2 md:ml-auto">
+          <UButton icon="heroicons:sparkles" color="amber" variant="soft" size="sm" :disabled="images.length === 0" @click="openCoverRecommend">
+            推荐封面
+          </UButton>
           <UButton icon="heroicons:plus" color="primary" size="sm" @click="openAddModal">
             添加图片
           </UButton>
@@ -78,7 +81,7 @@
 
       <div v-else class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
         <div
-          v-for="image in images"
+          v-for="(image, idx) in images"
           :key="image.encrypted_id"
           class="relative group aspect-square rounded-xl overflow-hidden border-2 transition-all hover:shadow-lg cursor-pointer"
           :class="[
@@ -88,7 +91,7 @@
                 ? 'border-green-500 ring-2 ring-green-500 ring-offset-2'
                 : 'border-stone-200 dark:border-neutral-700 hover:border-amber-400'
           ]"
-          @click="toggleSelection(image.encrypted_id)"
+          @click="openLightbox(idx)"
         >
           <img
             :src="getGalleryImageSrc(image)"
@@ -104,9 +107,9 @@
             </div>
           </div>
           <!-- 选择框 -->
-          <div class="absolute top-2 left-2 z-10">
+          <div class="absolute top-2 left-2 z-10" @click.stop>
             <div class="bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg">
-              <UCheckbox :model-value="selectedImages.includes(image.encrypted_id)" @click.stop />
+              <UCheckbox :model-value="selectedImages.includes(image.encrypted_id)" @change="toggleSelection(image.encrypted_id)" />
             </div>
           </div>
           <!-- 设为封面按钮 -->
@@ -415,11 +418,66 @@
         </template>
       </UCard>
     </UModal>
+
+    <!-- 灯箱 -->
+    <GalleryLightbox
+      :open="lightboxOpen"
+      :index="lightboxIndex"
+      :images="lightboxImages"
+      :show-admin-actions="true"
+      @update:open="lightboxOpen = $event"
+      @update:index="lightboxIndex = $event"
+      @copy-link="handleLightboxCopyLink"
+    />
+
+    <!-- 推荐封面模态框 -->
+    <UModal v-model="coverRecommendOpen">
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">推荐封面</h3>
+            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="coverRecommendOpen = false" />
+          </div>
+        </template>
+        <div class="space-y-3">
+          <p class="text-sm text-stone-600 dark:text-stone-400">根据文件大小、类型和文件名智能推荐，点击即可设为封面</p>
+          <div v-if="recommendedCovers.length === 0" class="text-center py-6 text-stone-500">
+            暂无足够图片进行推荐
+          </div>
+          <div v-else class="grid grid-cols-3 gap-3">
+            <div
+              v-for="(img, i) in recommendedCovers"
+              :key="img.encrypted_id"
+              class="relative aspect-square rounded-xl overflow-hidden border-2 cursor-pointer transition-all hover:border-amber-500 hover:shadow-lg"
+              :class="img.encrypted_id === gallery?.cover_image ? 'border-green-500 ring-2 ring-green-500' : 'border-stone-200 dark:border-neutral-700'"
+              @click="setCoverFromRecommend(img.encrypted_id)"
+            >
+              <img :src="getGalleryImageSrc(img)" :alt="img.original_filename" class="w-full h-full object-cover" loading="lazy" />
+              <div class="absolute top-1 left-1">
+                <UBadge color="amber" variant="solid" size="xs">{{ i + 1 }}</UBadge>
+              </div>
+              <div v-if="img.encrypted_id === gallery?.cover_image" class="absolute inset-0 bg-green-500/20 flex items-center justify-center">
+                <UIcon name="heroicons:check-circle" class="w-8 h-8 text-green-500" />
+              </div>
+              <div class="absolute bottom-0 left-0 right-0 p-1.5 bg-gradient-to-t from-black/70 to-transparent">
+                <p class="text-white text-xs truncate">{{ img.original_filename }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <template #footer>
+          <div class="flex justify-end">
+            <UButton color="gray" variant="ghost" @click="coverRecommendOpen = false">关闭</UButton>
+          </div>
+        </template>
+      </UCard>
+    </UModal>
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Gallery, GalleryImage } from '~/composables/useGalleryApi'
+import { useCoverRecommend } from '~/composables/useCoverRecommend'
 
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 
@@ -921,6 +979,45 @@ const revokeTokenAccess = async (token: string) => {
   } finally {
     revokingToken.value = ''
   }
+}
+
+// ===================== 灯箱 =====================
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+const lightboxImages = computed(() =>
+  images.value.map(img => ({
+    ...img,
+    image_url: getGalleryImageSrc(img),
+  }))
+)
+
+const openLightbox = (idx: number) => {
+  lightboxIndex.value = idx
+  lightboxOpen.value = true
+}
+
+const handleLightboxCopyLink = (image: any) => {
+  const url = image.image_url || image.cdn_url
+  if (url) {
+    navigator.clipboard.writeText(url).then(() => {
+      notification.success('已复制', '图片链接已复制到剪贴板')
+    }).catch(() => {})
+  }
+}
+
+// ===================== 推荐封面 =====================
+const { recommend } = useCoverRecommend()
+const coverRecommendOpen = ref(false)
+const recommendedCovers = ref<GalleryImage[]>([])
+
+const openCoverRecommend = () => {
+  recommendedCovers.value = recommend(images.value as any)
+  coverRecommendOpen.value = true
+}
+
+const setCoverFromRecommend = async (encryptedId: string) => {
+  await setCoverImage(encryptedId)
+  // 不关闭弹窗，让用户看到选择结果
 }
 
 watch(page, loadImages)

@@ -5,6 +5,8 @@
  * 统一 XHR 进度回调，Token 模式上传后自动 verifyToken()。
  */
 
+import type { ApiResponse, UploadResult, TokenUploadResult } from '~/types/api'
+
 export interface UploadProgress {
   label: string
   percent: number
@@ -14,6 +16,9 @@ export const useUpload = () => {
   const config = useRuntimeConfig()
   const authStore = useAuthStore()
   const tokenStore = useTokenStore()
+
+  // 当前活跃的 XHR 实例引用，用于支持取消上传
+  let _currentXhr: XMLHttpRequest | null = null
 
   /** 单文件 XHR 上传（支持实时进度） */
   const _xhrUpload = (
@@ -26,13 +31,15 @@ export const useUpload = () => {
       total: number
       onProgress?: (p: UploadProgress) => void
     }
-  ): Promise<any> => {
+  ): Promise<ApiResponse<UploadResult | TokenUploadResult>> => {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest()
+      _currentXhr = xhr
       const fd = new FormData()
       fd.append('file', file)
 
       xhr.addEventListener('load', () => {
+        _currentXhr = null
         if (xhr.status >= 200 && xhr.status < 300) {
           try { resolve(JSON.parse(xhr.responseText)) }
           catch { reject(new Error('解析响应失败')) }
@@ -43,8 +50,8 @@ export const useUpload = () => {
           } catch { reject(new Error(`上传失败: ${xhr.status}`)) }
         }
       })
-      xhr.addEventListener('error', () => reject(new Error('网络错误')))
-      xhr.addEventListener('abort', () => reject(new Error('上传已取消')))
+      xhr.addEventListener('error', () => { _currentXhr = null; reject(new Error('网络错误')) })
+      xhr.addEventListener('abort', () => { _currentXhr = null; reject(new Error('上传已取消')) })
 
       xhr.open('POST', url)
       if (opts.withCredentials) xhr.withCredentials = true
@@ -55,12 +62,20 @@ export const useUpload = () => {
     })
   }
 
+  /** 中止当前上传请求 */
+  const abortUpload = () => {
+    if (_currentXhr) {
+      _currentXhr.abort()
+      _currentXhr = null
+    }
+  }
+
   /** 上传文件列表，自动检测模式 */
   const uploadFiles = async (
     files: File[],
     onProgress?: (p: UploadProgress) => void
-  ): Promise<any[]> => {
-    const results: any[] = []
+  ): Promise<(UploadResult | TokenUploadResult)[]> => {
+    const results: (UploadResult | TokenUploadResult)[] = []
 
     // 确定上传 URL 和认证方式
     // Token 优先：确保上传记录关联到 token，便于在上传历史和相册中查看
@@ -97,5 +112,5 @@ export const useUpload = () => {
     return results
   }
 
-  return { uploadFiles }
+  return { uploadFiles, abortUpload }
 }

@@ -6,6 +6,7 @@
 from flask import request, jsonify, make_response, session
 
 from . import auth_bp
+from .auth_helpers import extract_bearer_token, verify_request_token
 from ..config import logger, SECRET_KEY
 from ..utils import add_cache_headers, get_domain
 from ..database import (
@@ -23,14 +24,8 @@ from ..database import (
 
 
 def _extract_bearer_token() -> str:
-    """从 Authorization 头提取 Bearer Token"""
-    auth_header = (request.headers.get('Authorization') or '').strip()
-    if not auth_header:
-        return ''
-    parts = auth_header.split(None, 1)
-    if len(parts) == 2 and parts[0].lower() == 'bearer':
-        return parts[1].strip()
-    return auth_header
+    """从 Authorization 头提取 Bearer Token（委托给 auth_helpers）"""
+    return extract_bearer_token()
 
 
 def _is_admin_logged_in() -> bool:
@@ -39,16 +34,8 @@ def _is_admin_logged_in() -> bool:
 
 
 def _verify_token():
-    """验证 Token 并返回验证结果"""
-    token = _extract_bearer_token()
-    if not token:
-        token = request.args.get('token', '')
-    if not token:
-        return None, jsonify({'success': False, 'error': '未提供Token'}), 401
-    verification = verify_auth_token(token)
-    if not verification['valid']:
-        return None, jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 401
-    return token, None, None
+    """验证 Token 并返回验证结果（委托给 auth_helpers）"""
+    return verify_request_token()
 
 
 def _cors_response(data, status=200, cache='no-cache'):

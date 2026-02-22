@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
@@ -40,6 +41,7 @@ PORT = 18793
 HOST = '0.0.0.0'
 ALLOWED_ORIGINS = '*'
 SESSION_LIFETIME = 3600
+REMEMBER_ME_LIFETIME = 30 * 24 * 3600  # "记住我"session有效期：30天
 
 # ===================== 版本 & 启动时间 =====================
 STATIC_VERSION = str(int(time.time()))
@@ -91,7 +93,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=getattr(logging, LOG_LEVEL),
     handlers=[
-        logging.FileHandler(LOG_FILE, encoding='utf-8'),
+        RotatingFileHandler(
+            LOG_FILE, encoding='utf-8',
+            maxBytes=10 * 1024 * 1024,  # 10MB 单文件上限
+            backupCount=5,              # 保留 5 个历史日志
+        ),
         logging.StreamHandler()
     ]
 )
@@ -145,7 +151,7 @@ __all__ = [
     # 数据库 & 日志
     'DATABASE_PATH', 'LOG_FILE', 'LOG_LEVEL', 'logger',
     # 服务器
-    'PORT', 'HOST', 'ALLOWED_ORIGINS', 'SESSION_LIFETIME',
+    'PORT', 'HOST', 'ALLOWED_ORIGINS', 'SESSION_LIFETIME', 'REMEMBER_ME_LIFETIME',
     # 版本 & 时间
     'STATIC_VERSION', 'START_TIME',
     # 安全

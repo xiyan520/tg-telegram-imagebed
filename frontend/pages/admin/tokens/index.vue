@@ -32,8 +32,19 @@
     <!-- 操作栏 -->
     <UCard>
       <div class="flex flex-col gap-4 md:flex-row md:items-center">
-        <div class="flex items-center gap-2">
-          <span class="text-sm text-stone-600 dark:text-stone-400">状态筛选</span>
+        <div class="flex items-center gap-2 flex-wrap">
+          <UInput
+            v-model="searchQuery"
+            placeholder="搜索 Token / 描述..."
+            size="sm"
+            class="w-48"
+            @input="handleSearch"
+          >
+            <template #leading>
+              <UIcon name="heroicons:magnifying-glass" class="w-4 h-4" />
+            </template>
+          </UInput>
+          <span class="text-sm text-stone-600 dark:text-stone-400">状态</span>
           <USelect
             v-model="status"
             :options="statusOptions"
@@ -51,160 +62,149 @@
           <UButton size="sm" color="red" variant="soft" @click="batchAction('delete')">批量删除</UButton>
           <UButton size="sm" color="gray" variant="ghost" @click="clearSelection">取消选择</UButton>
         </div>
-
-        <div class="md:ml-auto text-xs text-stone-500 dark:text-stone-400">
-          固定按创建时间倒序排序
-        </div>
       </div>
     </UCard>
 
-    <!-- 列表表格 -->
+    <!-- Token 列表 -->
     <UCard>
-      <div v-if="loading" class="flex flex-col justify-center items-center py-16">
-        <div class="w-14 h-14 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p class="text-stone-600 dark:text-stone-400">加载中...</p>
-      </div>
-
-      <div v-else-if="tokens.length === 0" class="text-center py-16">
-        <div class="w-20 h-20 bg-stone-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4">
-          <UIcon name="heroicons:key" class="w-10 h-10 text-stone-400" />
-        </div>
-        <p class="text-lg font-medium text-stone-900 dark:text-white mb-2">暂无Token</p>
-        <p class="text-sm text-stone-600 dark:text-stone-400">点击右上角"创建Token"开始使用</p>
-      </div>
-
-      <div v-else class="overflow-x-auto">
-        <table class="min-w-full text-sm">
-          <thead>
-            <tr class="text-left text-stone-600 dark:text-stone-300 border-b border-stone-200/60 dark:border-neutral-700/60">
-              <th class="py-3 pr-2 font-medium w-10">
-                <input
-                  type="checkbox"
-                  :checked="isAllSelected"
-                  :indeterminate="isPartialSelected"
-                  class="rounded border-stone-300 dark:border-neutral-600 text-amber-500 focus:ring-amber-500"
-                  @change="toggleSelectAll"
-                />
-              </th>
-              <th class="py-3 pr-4 font-medium">ID</th>
-              <th class="py-3 pr-4 font-medium">Token</th>
-              <th class="py-3 pr-4 font-medium">描述</th>
-              <th class="py-3 pr-4 font-medium whitespace-nowrap">创建时间</th>
-              <th class="py-3 pr-4 font-medium whitespace-nowrap">过期时间</th>
-              <th class="py-3 pr-4 font-medium whitespace-nowrap">上传次数/限制</th>
-              <th class="py-3 pr-4 font-medium">状态</th>
-              <th class="py-3 text-right font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-stone-200/50 dark:divide-neutral-700/50">
-            <tr
-              v-for="t in tokens"
-              :key="t.id"
-              class="text-stone-800 dark:text-stone-100"
-              :class="{ 'bg-amber-50/50 dark:bg-amber-900/10': selectedIds.includes(t.id) }"
-            >
-              <td class="py-3 pr-2">
-                <input
-                  type="checkbox"
-                  :checked="selectedIds.includes(t.id)"
-                  class="rounded border-stone-300 dark:border-neutral-600 text-amber-500 focus:ring-amber-500"
-                  @change="toggleSelect(t.id)"
-                />
-              </td>
-              <td class="py-3 pr-4">
-                <span class="font-mono text-xs text-stone-700 dark:text-stone-300">{{ t.id }}</span>
-              </td>
-              <td class="py-3 pr-4">
-                <NuxtLink :to="`/admin/tokens/${t.id}`" class="hover:underline">
-                  <code class="font-mono text-xs px-2 py-1 rounded bg-stone-100 dark:bg-neutral-800 cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
-                    {{ t.token_masked }}
-                  </code>
-                </NuxtLink>
-              </td>
-              <td class="py-3 pr-4 max-w-[18rem]">
-                <span class="text-stone-700 dark:text-stone-300 truncate block">
-                  {{ t.description?.trim() ? t.description : '--' }}
-                </span>
-              </td>
-              <td class="py-3 pr-4 whitespace-nowrap text-stone-700 dark:text-stone-300">
-                {{ formatDate(t.created_at) }}
-              </td>
-              <td class="py-3 pr-4 whitespace-nowrap text-stone-700 dark:text-stone-300">
-                {{ t.expires_at ? formatDate(t.expires_at) : '--' }}
-              </td>
-              <td class="py-3 pr-4 whitespace-nowrap">
-                <span class="text-stone-700 dark:text-stone-300">
-                  {{ t.upload_count }} / {{ t.upload_limit ?? '--' }}
-                </span>
-              </td>
-              <td class="py-3 pr-4">
-                <div class="flex items-center gap-3">
-                  <UBadge
-                    v-if="isExpired(t)"
-                    color="amber"
-                    variant="subtle"
-                    size="xs"
-                  >
-                    已过期
-                  </UBadge>
-                  <UBadge
-                    v-else
-                    :color="t.is_active ? 'green' : 'gray'"
-                    variant="subtle"
-                    size="xs"
-                  >
-                    {{ t.is_active ? '启用' : '禁用' }}
-                  </UBadge>
-
-                  <div class="flex items-center gap-2">
-                    <UToggle
-                      :model-value="t.is_active"
-                      size="md"
-                      :disabled="isExpired(t) || updatingId === t.id"
-                      @update:model-value="(v) => updateStatus(t, v)"
-                    />
-                    <span v-if="updatingId === t.id" class="text-xs text-stone-500 dark:text-stone-400">
-                      更新中...
-                    </span>
-                  </div>
-                </div>
-              </td>
-              <td class="py-3 text-right">
-                <div class="flex items-center justify-end gap-1">
-                  <UButton
-                    icon="heroicons:eye"
-                    color="gray"
-                    variant="ghost"
-                    size="sm"
-                    :to="`/admin/tokens/${t.id}`"
-                  />
-                  <UButton
-                    icon="heroicons:trash"
-                    color="red"
-                    variant="ghost"
-                    size="sm"
-                    @click="askDelete(t)"
-                  />
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- 分页 -->
-      <template #footer>
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div class="text-xs text-stone-500 dark:text-stone-400">
-            第 {{ page }} / {{ totalPages }} 页
+          <div v-if="loading" class="flex flex-col justify-center items-center py-16">
+            <div class="w-14 h-14 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p class="text-stone-600 dark:text-stone-400">加载中...</p>
           </div>
-          <UPagination
-            v-model="page"
-            :total="totalPages"
-          />
-        </div>
-      </template>
-    </UCard>
+
+          <div v-else-if="tokens.length === 0" class="text-center py-16">
+            <div class="w-20 h-20 bg-stone-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4">
+              <UIcon name="heroicons:key" class="w-10 h-10 text-stone-400" />
+            </div>
+            <p class="text-lg font-medium text-stone-900 dark:text-white mb-2">暂无Token</p>
+            <p class="text-sm text-stone-600 dark:text-stone-400">点击右上角"创建Token"开始使用</p>
+          </div>
+
+          <div v-else class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead>
+                <tr class="text-left text-stone-600 dark:text-stone-300 border-b border-stone-200/60 dark:border-neutral-700/60">
+                  <th class="py-3 pr-2 font-medium w-10">
+                    <input
+                      type="checkbox"
+                      :checked="isAllSelected"
+                      :indeterminate="isPartialSelected"
+                      class="rounded border-stone-300 dark:border-neutral-600 text-amber-500 focus:ring-amber-500"
+                      @change="toggleSelectAll"
+                    />
+                  </th>
+                  <th class="py-3 pr-4 font-medium">Token</th>
+                  <th class="py-3 pr-4 font-medium">描述</th>
+                  <th class="py-3 pr-4 font-medium">状态</th>
+                  <th class="py-3 pr-4 font-medium hidden md:table-cell">上传</th>
+                  <th class="py-3 pr-4 font-medium hidden lg:table-cell">TG 绑定</th>
+                  <th class="py-3 pr-4 font-medium hidden lg:table-cell">创建时间</th>
+                  <th class="py-3 text-right font-medium">操作</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-stone-200/50 dark:divide-neutral-700/50">
+                <tr
+                  v-for="t in tokens"
+                  :key="t.id"
+                  class="text-stone-800 dark:text-stone-100 cursor-pointer transition-colors"
+                  :class="[
+                    selectedIds.includes(t.id) ? 'bg-amber-50/50 dark:bg-amber-900/10' : 'hover:bg-stone-50 dark:hover:bg-neutral-800/50'
+                  ]"
+                  @click="selectToken(t.id)"
+                >
+                  <td class="py-3 pr-2" @click.stop>
+                    <input
+                      type="checkbox"
+                      :checked="selectedIds.includes(t.id)"
+                      class="rounded border-stone-300 dark:border-neutral-600 text-amber-500 focus:ring-amber-500"
+                      @change="toggleSelect(t.id)"
+                    />
+                  </td>
+                  <td class="py-3 pr-4">
+                    <code class="font-mono text-xs px-2 py-1 rounded bg-stone-100 dark:bg-neutral-800">
+                      {{ t.token_masked }}
+                    </code>
+                  </td>
+                  <td class="py-3 pr-4 max-w-[16rem]">
+                    <span class="text-stone-700 dark:text-stone-300 truncate block text-xs">
+                      {{ t.description?.trim() ? t.description : '--' }}
+                    </span>
+                  </td>
+                  <td class="py-3 pr-4">
+                    <UBadge
+                      v-if="isExpired(t)"
+                      color="amber"
+                      variant="subtle"
+                      size="xs"
+                    >
+                      已过期
+                    </UBadge>
+                    <UBadge
+                      v-else
+                      :color="t.is_active ? 'green' : 'gray'"
+                      variant="subtle"
+                      size="xs"
+                    >
+                      {{ t.is_active ? '启用' : '禁用' }}
+                    </UBadge>
+                  </td>
+                  <td class="py-3 pr-4 text-xs text-stone-500 dark:text-stone-400 hidden md:table-cell">
+                    {{ t.upload_count }} / {{ t.upload_limit ?? '∞' }}
+                  </td>
+                  <td class="py-3 pr-4 text-xs text-stone-500 dark:text-stone-400 hidden lg:table-cell">
+                    <template v-if="t.tg_username || t.tg_first_name">
+                      <UIcon name="heroicons:chat-bubble-left-right" class="w-3.5 h-3.5 inline" />
+                      {{ t.tg_first_name || '' }}{{ t.tg_username ? ` @${t.tg_username}` : '' }}
+                    </template>
+                    <span v-else>--</span>
+                  </td>
+                  <td class="py-3 pr-4 text-xs text-stone-500 dark:text-stone-400 hidden lg:table-cell">
+                    {{ formatDate(t.created_at) }}
+                  </td>
+                  <td class="py-3 text-right" @click.stop>
+                    <div class="flex items-center justify-end gap-1">
+                      <UButton
+                        icon="heroicons:eye"
+                        color="gray"
+                        variant="ghost"
+                        size="sm"
+                        title="查看详情"
+                        @click="navigateTo(`/admin/tokens/${t.id}`)"
+                      />
+                      <UToggle
+                        :model-value="t.is_active"
+                        size="sm"
+                        :disabled="isExpired(t) || updatingId === t.id"
+                        @update:model-value="(v) => updateStatus(t, v)"
+                      />
+                      <UButton
+                        icon="heroicons:trash"
+                        color="red"
+                        variant="ghost"
+                        size="sm"
+                        @click="askDelete(t)"
+                      />
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 分页 -->
+          <template #footer>
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div class="text-xs text-stone-500 dark:text-stone-400">
+                第 {{ page }} / {{ totalPages }} 页
+              </div>
+              <UPagination
+                v-model="page"
+                :total="totalPages"
+              />
+            </div>
+          </template>
+        </UCard>
+
     <!-- 创建Token模态框 -->
     <UModal v-model="createModalOpen">
       <UCard>
@@ -408,6 +408,9 @@ interface AdminTokenItem {
   upload_limit?: number | null
   is_active: boolean
   is_expired?: boolean
+  tg_user_id?: number | null
+  tg_username?: string | null
+  tg_first_name?: string | null
 }
 
 interface TokenListData {
@@ -442,6 +445,11 @@ const total = ref(0)
 const tokens = ref<AdminTokenItem[]>([])
 const loading = ref(false)
 const updatingId = ref<number | null>(null)
+const searchQuery = ref('')
+
+const selectToken = (id: number) => {
+  navigateTo(`/admin/tokens/${id}`)
+}
 
 const totalPages = computed(() => {
   const pages = Math.ceil(total.value / pageSize.value)
@@ -552,6 +560,7 @@ const loadTokens = async () => {
       page: String(page.value),
       page_size: String(pageSize.value),
     })
+    if (searchQuery.value.trim()) qs.set('search', searchQuery.value.trim())
 
     const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens?${qs.toString()}`, {
       credentials: 'include'
@@ -587,6 +596,11 @@ watch(status, async () => {
   page.value = 1
   await loadTokens()
 })
+
+const handleSearch = useDebounceFn(() => {
+  page.value = 1
+  loadTokens()
+}, 400)
 
 watch(page, async () => {
   await loadTokens()

@@ -54,14 +54,41 @@
               <span class="relative z-10">首页</span>
               <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </NuxtLink>
-            <NuxtLink to="/album" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
-              <span class="relative z-10">相册</span>
-              <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
-            </NuxtLink>
             <NuxtLink to="/docs" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
               <span class="relative z-10">文档</span>
               <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </NuxtLink>
+
+            <!-- 游客登录 / 用户入口 -->
+            <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
+            <template v-if="tgAuthStore.isLoggedIn">
+              <!-- TG 模式：显示用户名，点击跳转控制台 -->
+              <NuxtLink
+                to="/me"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
+              >
+                <UIcon name="heroicons:chat-bubble-left-right" class="w-4 h-4" />
+                {{ tgAuthStore.user?.first_name || tgAuthStore.user?.username || 'TG 用户' }}
+              </NuxtLink>
+            </template>
+            <template v-else-if="tokenStore.hasToken">
+              <!-- Token 已登录：跳转控制台 -->
+              <NuxtLink
+                to="/me"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
+              >
+                <UIcon name="heroicons:key" class="w-4 h-4" />
+                Token 登录
+              </NuxtLink>
+            </template>
+            <template v-else>
+              <!-- 未登录：显示「游客登录」 -->
+              <UButton size="xs" color="gray" variant="soft" @click="showTgLogin = true">
+                <template #leading><UIcon name="heroicons:user-plus" /></template>
+                游客登录
+              </UButton>
+            </template>
+
             <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-2"></div>
             <NuxtLink to="/admin" class="relative px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-lg transition-all shadow-md hover:shadow-lg transform hover:-translate-y-0.5">
               管理
@@ -82,15 +109,41 @@
           <NuxtLink to="/" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
             首页
           </NuxtLink>
-          <NuxtLink to="/album" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
-            相册
-          </NuxtLink>
           <NuxtLink to="/docs" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
             文档
           </NuxtLink>
           <NuxtLink to="/admin" class="block px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-lg transition-all text-center shadow-md">
             管理
           </NuxtLink>
+          <!-- 移动端游客登录 / 用户入口 -->
+          <template v-if="tgAuthStore.isLoggedIn">
+            <NuxtLink
+              to="/me"
+              class="block w-full px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all text-left"
+              @click="mobileMenuOpen = false"
+            >
+              <UIcon name="heroicons:chat-bubble-left-right" class="w-4 h-4 inline -mt-0.5" />
+              {{ tgAuthStore.user?.first_name || 'TG 用户' }}
+            </NuxtLink>
+          </template>
+          <template v-else-if="tokenStore.hasToken">
+            <NuxtLink
+              to="/me"
+              class="block w-full px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all text-left"
+              @click="mobileMenuOpen = false"
+            >
+              <UIcon name="heroicons:key" class="w-4 h-4 inline -mt-0.5" />
+              Token 登录
+            </NuxtLink>
+          </template>
+          <template v-else>
+            <button
+              class="block w-full px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all text-left"
+              @click="showTgLogin = true; mobileMenuOpen = false"
+            >
+              游客登录
+            </button>
+          </template>
         </div>
       </div>
     </header>
@@ -163,18 +216,31 @@
 
     <!-- 公告弹窗 -->
     <AnnouncementModal />
+
+    <!-- TG 登录弹窗 -->
+    <TgLoginModal v-model="showTgLogin" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { useDocumentVisibility } from '@vueuse/core'
+
 const config = useRuntimeConfig()
 const mobileMenuOpen = ref(false)
 const tokenStore = useTokenStore()
+const tgAuthStore = useTgAuthStore()
 const { getStats } = useImageApi()
 const { onStatsRefresh } = useStatsRefresh()
+const { publicSettings, tgEffective, loadSettings } = useGuestAuth()
+
+// TG 登录弹窗
+const showTgLogin = ref(false)
 
 // 统计数据
 const stats = ref<any>({})
+
+// 页面可见性检测
+const visibility = useDocumentVisibility()
 
 // 加载统计信息
 const loadStats = async () => {
@@ -188,27 +254,59 @@ const loadStats = async () => {
 // 定时刷新统计数据
 let statsRefreshInterval: NodeJS.Timeout | null = null
 
+// 启动轮询
+const startPolling = () => {
+  if (statsRefreshInterval) return
+  statsRefreshInterval = setInterval(() => {
+    loadStats()
+  }, 30000)
+}
+
+// 停止轮询
+const stopPolling = () => {
+  if (statsRefreshInterval) {
+    clearInterval(statsRefreshInterval)
+    statsRefreshInterval = null
+  }
+}
+
+// 监听页面可见性变化：不可见时暂停轮询，恢复可见时立即刷新并重启轮询
+watch(visibility, (current) => {
+  if (current === 'visible') {
+    loadStats()
+    startPolling()
+  } else {
+    stopPolling()
+  }
+})
+
 // 页面加载时恢复游客token和加载统计
 onMounted(async () => {
   tokenStore.restoreToken()
   await loadStats()
+
+  // 加载公共设置
+  await loadSettings()
+
+  // TG 认证启用时恢复会话
+  if (publicSettings.value.tgAuthEnabled) {
+    tgAuthStore.checkSession()
+  }
 
   // 监听全局统计刷新事件
   onStatsRefresh(() => {
     loadStats()
   })
 
-  // 每30秒自动刷新统计数据
-  statsRefreshInterval = setInterval(() => {
-    loadStats()
-  }, 30000)
+  // 仅在页面可见时启动轮询
+  if (visibility.value === 'visible') {
+    startPolling()
+  }
 })
 
 // 页面卸载时清除定时器
 onUnmounted(() => {
-  if (statsRefreshInterval) {
-    clearInterval(statsRefreshInterval)
-  }
+  stopPolling()
 })
 </script>
 

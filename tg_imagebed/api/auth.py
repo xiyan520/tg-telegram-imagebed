@@ -8,27 +8,24 @@ from datetime import datetime
 from flask import request, jsonify
 
 from . import auth_bp
+from .auth_helpers import extract_bearer_token
 from ..config import logger
 from ..utils import add_cache_headers, format_size, get_domain
 from ..database import (
     verify_auth_token, verify_auth_token_access, get_token_info, update_token_usage,
     update_token_description, is_token_generation_allowed, is_token_upload_allowed,
     get_system_setting_int, get_upload_count_today,
-    create_auth_token, get_token_uploads
+    create_auth_token, get_token_uploads,
+    get_system_setting, verify_tg_session, get_user_token_count, bind_token_to_user, unbind_token_from_user,
+    count_tokens_by_ip,
 )
 from ..services.file_service import process_upload
 from .upload import validate_image_magic, is_extension_allowed
 
 
 def _extract_bearer_token() -> str:
-    """从 Authorization 头提取 Bearer Token"""
-    auth_header = (request.headers.get('Authorization') or '').strip()
-    if not auth_header:
-        return ''
-    parts = auth_header.split(None, 1)
-    if len(parts) == 2 and parts[0].lower() == 'bearer':
-        return parts[1].strip()
-    return auth_header
+    """从 Authorization 头提取 Bearer Token（委托给 auth_helpers）"""
+    return extract_bearer_token()
 
 
 @auth_bp.route('/api/auth/token/generate', methods=['POST'])
@@ -46,6 +43,40 @@ def generate_token():
         xff = (request.headers.get('X-Forwarded-For') or '').strip()
         ip_address = xff.split(',')[0].strip() if xff else request.remote_addr
         user_agent = request.headers.get('User-Agent', '')
+
+        # TG 认证检查：如果要求 TG 登录才能生成 Token
+        tg_user_id = None
+        if get_system_setting('tg_auth_required_for_token') == '1':
+            tg_session_token = request.cookies.get('tg_session', '')
+            session_info = verify_tg_session(tg_session_token)
+            if not session_info:
+                return add_cache_headers(jsonify({
+                    'success': False, 'error': '需要先通过 Telegram 登录'
+                }), 'no-cache'), 401
+            tg_user_id = session_info['tg_user_id']
+            # 检查 Token 数量限制
+            max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
+            if get_user_token_count(tg_user_id) >= max_tokens:
+                return add_cache_headers(jsonify({
+                    'success': False, 'error': f'已达到 Token 上限（{max_tokens}个）'
+                }), 'no-cache'), 403
+
+        # 不强制 TG 登录，但开启了绑定开关 + 用户已 TG 登录
+        elif get_system_setting('tg_bind_token_enabled') == '1':
+            tg_session_token = request.cookies.get('tg_session', '')
+            if tg_session_token:
+                session_info = verify_tg_session(tg_session_token)
+                if session_info:
+                    tg_user_id = session_info['tg_user_id']
+
+        # 非 TG 用户：限制每个 IP 最多生成 N 个 Token
+        if not tg_user_id:
+            max_guest_tokens = get_system_setting_int('max_guest_tokens_per_ip', 3, minimum=1, maximum=100)
+            ip_token_count = count_tokens_by_ip(ip_address)
+            if ip_token_count >= max_guest_tokens:
+                return add_cache_headers(jsonify({
+                    'success': False, 'error': f'已达到每 IP Token 上限（{max_guest_tokens}个）'
+                }), 'no-cache'), 403
 
         data = request.get_json(silent=True) or {}
 
@@ -83,6 +114,10 @@ def generate_token():
         if not token:
             return add_cache_headers(jsonify({'success': False, 'error': '生成Token失败'}), 'no-cache'), 500
 
+        # TG 用户绑定
+        if tg_user_id:
+            bind_token_to_user(token, tg_user_id)
+
         token_info = get_token_info(token)
 
         return add_cache_headers(jsonify({
@@ -98,7 +133,7 @@ def generate_token():
 
     except Exception as e:
         logger.error(f"生成token失败: {e}")
-        return add_cache_headers(jsonify({'success': False, 'error': str(e)}), 'no-cache'), 500
+        return add_cache_headers(jsonify({'success': False, 'error': '生成Token失败，请稍后重试'}), 'no-cache'), 500
 
 @auth_bp.route('/api/auth/token/verify', methods=['POST'])
 def verify_token_api():
@@ -128,7 +163,8 @@ def verify_token_api():
                     'description': token_data.get('description'),
                     'expires_at': token_data['expires_at'],
                     'created_at': token_data['created_at'],
-                    'last_used': token_data['last_used']
+                    'last_used': token_data['last_used'],
+                    'tg_user_id': token_data.get('tg_user_id'),
                 }
             }), 'no-cache')
         else:
@@ -140,7 +176,7 @@ def verify_token_api():
 
     except Exception as e:
         logger.error(f"验证token失败: {e}")
-        return add_cache_headers(jsonify({'success': False, 'valid': False, 'error': str(e)}), 'no-cache'), 500
+        return add_cache_headers(jsonify({'success': False, 'valid': False, 'error': '验证失败，请稍后重试'}), 'no-cache'), 500
 
 @auth_bp.route('/api/auth/upload', methods=['POST'])
 def upload_with_token():
@@ -244,7 +280,7 @@ def upload_with_token():
 
     except Exception as e:
         logger.error(f"Token上传错误: {e}")
-        return add_cache_headers(jsonify({'success': False, 'error': str(e)}), 'no-cache'), 500
+        return add_cache_headers(jsonify({'success': False, 'error': '上传失败，请稍后重试'}), 'no-cache'), 500
 
 @auth_bp.route('/api/auth/uploads', methods=['GET'])
 def get_token_uploads_api():
@@ -295,14 +331,22 @@ def get_token_uploads_api():
 
     except Exception as e:
         logger.error(f"获取token上传列表失败: {e}")
-        return add_cache_headers(jsonify({'success': False, 'error': str(e)}), 'no-cache'), 500
+        return add_cache_headers(jsonify({'success': False, 'error': '获取上传列表失败，请稍后重试'}), 'no-cache'), 500
 
-@auth_bp.route('/api/auth/token', methods=['GET', 'PATCH'])
+@auth_bp.route('/api/auth/token', methods=['GET', 'PATCH', 'DELETE'])
 def token_profile_api():
-    """Token(=相册)信息：获取/更新描述（相册名称）"""
+    """Token(=相册)信息：获取/更新描述（相册名称）/ 用户侧删除"""
     token = _extract_bearer_token()
     if not token:
         return add_cache_headers(jsonify({'success': False, 'error': '未提供Token'}), 'no-cache'), 401
+
+    # DELETE: 用户侧删除 Token（级联删除）
+    if request.method == 'DELETE':
+        from ..database.tokens import delete_token_by_string
+        deleted = delete_token_by_string(token)
+        if not deleted:
+            return add_cache_headers(jsonify({'success': False, 'error': 'Token 不存在'}), 'no-cache'), 404
+        return add_cache_headers(jsonify({'success': True, 'message': 'Token 已删除'}), 'no-cache')
 
     verification = verify_auth_token_access(token)
     if not verification['valid']:
@@ -336,3 +380,59 @@ def token_profile_api():
             'description': new_description
         }
     }), 'no-cache')
+
+
+@auth_bp.route('/api/auth/token/bind', methods=['POST'])
+def bind_token_to_tg():
+    """将当前 Token 绑定到当前 TG 用户"""
+    # 检查 TG 认证总开关
+    if get_system_setting('tg_auth_enabled') != '1':
+        return add_cache_headers(jsonify({'success': False, 'error': 'TG 认证未启用'}), 'no-cache'), 403
+
+    # 检查绑定开关
+    if get_system_setting('tg_bind_token_enabled') != '1':
+        return add_cache_headers(jsonify({'success': False, 'error': '绑定功能未开启'}), 'no-cache'), 403
+
+    # 验证 TG 登录
+    tg_session_token = request.cookies.get('tg_session', '')
+    session_info = verify_tg_session(tg_session_token)
+    if not session_info:
+        return add_cache_headers(jsonify({'success': False, 'error': '需要先通过 Telegram 登录'}), 'no-cache'), 401
+
+    # 验证 Token
+    token = _extract_bearer_token()
+    if not token:
+        return add_cache_headers(jsonify({'success': False, 'error': '未提供Token'}), 'no-cache'), 401
+
+    result = verify_auth_token_access(token)
+    if not result.get('valid'):
+        return add_cache_headers(jsonify({'success': False, 'error': 'Token无效'}), 'no-cache'), 401
+
+    bind_token_to_user(token, session_info['tg_user_id'])
+    return add_cache_headers(jsonify({'success': True, 'message': '绑定成功'}), 'no-cache')
+
+
+@auth_bp.route('/api/auth/token/unbind', methods=['POST'])
+def unbind_token_from_tg():
+    """解除当前 Token 与 TG 用户的绑定"""
+    # 检查 TG 认证总开关
+    if get_system_setting('tg_auth_enabled') != '1':
+        return add_cache_headers(jsonify({'success': False, 'error': 'TG 认证未启用'}), 'no-cache'), 403
+
+    # 验证 TG 登录
+    tg_session_token = request.cookies.get('tg_session', '')
+    session_info = verify_tg_session(tg_session_token)
+    if not session_info:
+        return add_cache_headers(jsonify({'success': False, 'error': '需要先通过 Telegram 登录'}), 'no-cache'), 401
+
+    # 验证 Token
+    token = _extract_bearer_token()
+    if not token:
+        return add_cache_headers(jsonify({'success': False, 'error': '未提供Token'}), 'no-cache'), 401
+
+    result = verify_auth_token_access(token)
+    if not result.get('valid'):
+        return add_cache_headers(jsonify({'success': False, 'error': 'Token无效'}), 'no-cache'), 401
+
+    unbind_token_from_user(token, session_info['tg_user_id'])
+    return add_cache_headers(jsonify({'success': True, 'message': '解绑成功'}), 'no-cache')

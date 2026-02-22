@@ -200,6 +200,56 @@ def init_database(quiet: bool = False) -> None:
                 except Exception as e:
                     logger.debug(f"回填 storage 字段失败（可忽略）: {e}")
 
+            # ===================== TG 认证相关表 =====================
+            # TG 用户表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS tg_users (
+                    tg_user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_login_at TIMESTAMP,
+                    is_blocked INTEGER DEFAULT 0
+                )
+            ''')
+
+            # TG 登录验证码/链接表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS tg_login_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    tg_user_id INTEGER,
+                    code TEXT NOT NULL UNIQUE,
+                    code_type TEXT NOT NULL DEFAULT 'verify',
+                    username_hint TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    used_at TIMESTAMP,
+                    ip_address TEXT,
+                    session_token TEXT
+                )
+            ''')
+
+            # 兼容升级：tg_login_codes 新增 session_token 列
+            cursor.execute("PRAGMA table_info(tg_login_codes)")
+            tg_code_columns = [col[1] for col in cursor.fetchall()]
+            if 'session_token' not in tg_code_columns:
+                logger.info("添加 session_token 列到 tg_login_codes")
+                cursor.execute('ALTER TABLE tg_login_codes ADD COLUMN session_token TEXT')
+
+            # TG 会话表
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS tg_sessions (
+                    session_token TEXT PRIMARY KEY,
+                    tg_user_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP NOT NULL,
+                    ip_address TEXT,
+                    user_agent TEXT,
+                    FOREIGN KEY (tg_user_id) REFERENCES tg_users(tg_user_id) ON DELETE CASCADE
+                )
+            ''')
+
             # 检查并添加 auth_tokens 表的新列
             cursor.execute("PRAGMA table_info(auth_tokens)")
             auth_columns = [column[1] for column in cursor.fetchall()]
@@ -215,6 +265,7 @@ def init_database(quiet: bool = False) -> None:
                 ('ip_address', 'TEXT'),
                 ('user_agent', 'TEXT'),
                 ('description', 'TEXT'),
+                ('tg_user_id', 'INTEGER'),
             ]
 
             for col_name, col_type in auth_new_columns:
@@ -427,6 +478,12 @@ def init_database(quiet: bool = False) -> None:
                 ('idx_gallery_token_access_gallery', 'gallery_token_access(gallery_id)'),
                 ('idx_gallery_token_access_token', 'gallery_token_access(token)'),
                 ('idx_gallery_token_access_expires', 'gallery_token_access(expires_at)'),
+                # TG 认证相关索引
+                ('idx_tg_login_codes_code', 'tg_login_codes(code)'),
+                ('idx_tg_login_codes_expires', 'tg_login_codes(expires_at)'),
+                ('idx_tg_sessions_expires', 'tg_sessions(expires_at)'),
+                ('idx_tg_sessions_user', 'tg_sessions(tg_user_id)'),
+                ('idx_auth_tokens_tg_user', 'auth_tokens(tg_user_id)'),
             ]
 
             for idx_name, idx_def in indexes:

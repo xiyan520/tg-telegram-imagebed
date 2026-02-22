@@ -42,22 +42,24 @@
 </template>
 
 <script setup lang="ts">
+import type { UploadResult } from '~/types/api'
+
 const tokenStore = useTokenStore()
 const authStore = useAuthStore()
 
 // 状态
-const uploadedImages = ref<any[]>([])
+const uploadedImages = ref<UploadResult[]>([])
 const previewOpen = ref(false)
-const previewingImage = ref<any>(null)
+const previewingImage = ref<UploadResult | null>(null)
 const historyOpen = ref(false)
 
 // 上传完成回调
-const onUploaded = (images: any[]) => {
+const onUploaded = (images: UploadResult[]) => {
   uploadedImages.value = images
 }
 
 // 预览图片
-const openPreview = (image: any) => {
+const openPreview = (image: UploadResult) => {
   previewingImage.value = image
   previewOpen.value = true
 }

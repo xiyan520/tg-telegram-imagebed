@@ -344,6 +344,19 @@
               <span class="text-xs text-stone-500">游客生成的 Token 最长有效天数</span>
             </template>
           </UFormGroup>
+
+          <UFormGroup label="非 TG 用户每 IP Token 上限">
+            <UInput
+              v-model.number="settings.max_guest_tokens_per_ip"
+              type="number"
+              min="1"
+              max="100"
+              placeholder="3"
+            />
+            <template #hint>
+              <span class="text-xs text-stone-500">未通过 TG 登录的用户，每个 IP 最多可生成的 Token 数量</span>
+            </template>
+          </UFormGroup>
         </div>
       </UCard>
 
@@ -470,6 +483,74 @@
               <template #hint>
                 <span class="text-xs text-stone-500">上传历史每页显示的图片数量（1-50）</span>
               </template>
+            </UFormGroup>
+          </div>
+        </div>
+      </UCard>
+
+      <!-- TG 认证配置 -->
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg flex items-center justify-center">
+                <UIcon name="heroicons:shield-check" class="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">TG 认证</h3>
+                <p class="text-xs text-stone-500 dark:text-stone-400">通过 Telegram Bot 认证用户身份</p>
+              </div>
+            </div>
+            <UToggle v-model="settings.tg_auth_enabled" size="lg" />
+          </div>
+        </template>
+
+        <div v-if="!settings.tg_auth_enabled" class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+          <div class="flex items-center gap-3">
+            <UIcon name="heroicons:information-circle" class="w-5 h-5 text-stone-400" />
+            <p class="text-sm text-stone-500 dark:text-stone-400">
+              TG 认证未启用。开启后用户可通过 Telegram Bot 登录 Web 端，Token 将绑定 TG 账号。
+            </p>
+          </div>
+        </div>
+
+        <div v-else class="space-y-4">
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">Token 生成需要 TG 登录</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                开启后，用户必须先通过 TG 登录才能生成新 Token
+              </p>
+            </div>
+            <UToggle v-model="settings.tg_auth_required_for_token" size="lg" />
+          </div>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">Token 绑定 TG 用户</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                开启后，已 TG 登录的用户生成 Token 时自动绑定，也支持手动绑定已有 Token
+              </p>
+              <p v-if="settings.tg_auth_required_for_token" class="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                强制 TG 登录时，Token 自动绑定
+              </p>
+            </div>
+            <UToggle
+              v-model="settings.tg_bind_token_enabled"
+              size="lg"
+              :disabled="settings.tg_auth_required_for_token"
+            />
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <UFormGroup label="每用户 Token 上限">
+              <UInput v-model.number="settings.tg_max_tokens_per_user" type="number" min="1" max="100" placeholder="5" />
+            </UFormGroup>
+            <UFormGroup label="验证码有效期（分钟）">
+              <UInput v-model.number="settings.tg_login_code_expire_minutes" type="number" min="1" max="60" placeholder="5" />
+            </UFormGroup>
+            <UFormGroup label="会话有效期（天）">
+              <UInput v-model.number="settings.tg_session_expire_days" type="number" min="1" max="365" placeholder="30" />
             </UFormGroup>
           </div>
         </div>
@@ -643,6 +724,15 @@ const settings = ref({
   proxy_env_set: false,
   // 允许的文件后缀
   allowed_extensions: 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico',
+  // TG 认证
+  tg_auth_enabled: false,
+  tg_auth_required_for_token: false,
+  tg_bind_token_enabled: false,
+  tg_max_tokens_per_user: 5,
+  tg_login_code_expire_minutes: 5,
+  tg_session_expire_days: 30,
+  // 非 TG 用户 Token 限制
+  max_guest_tokens_per_ip: 3,
 })
 
 const originalSettings = ref<typeof settings.value | null>(null)
@@ -855,6 +945,13 @@ const revokeTokens = async (type: 'guest' | 'all') => {
     revokingTokens.value = false
   }
 }
+
+// P1-a: tg_auth_required 开启时自动联动 tg_bind_token_enabled
+watch(() => settings.value.tg_auth_required_for_token, (required) => {
+  if (required) {
+    settings.value.tg_bind_token_enabled = true
+  }
+})
 
 onMounted(() => {
   loadSettings()

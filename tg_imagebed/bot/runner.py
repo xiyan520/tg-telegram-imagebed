@@ -13,9 +13,9 @@ from ..config import get_proxy_url, logger
 from ..bot_control import (
     get_effective_bot_token, is_bot_token_configured, wait_for_restart_signal
 )
-from .state import _set_bot_status, _get_bot_status, _utc_iso
-from .handlers import start, handle_photo
-from .commands import help_command, myuploads_command, delete_command, id_command, callback_handler
+from .state import _set_bot_status, _get_bot_status, _utc_iso, set_bot_instance, set_bot_loop
+from .handlers import start, handle_photo, handle_verify_text
+from .commands import help_command, myuploads_command, delete_command, id_command, callback_handler, login_command, mytokens_command
 
 
 def start_telegram_bot_thread():
@@ -151,9 +151,15 @@ def run_telegram_bot():
                 telegram_app.add_handler(CommandHandler("id", id_command))
                 telegram_app.add_handler(CommandHandler("myuploads", myuploads_command))
                 telegram_app.add_handler(CommandHandler("delete", delete_command))
+                telegram_app.add_handler(CommandHandler("login", login_command))
+                telegram_app.add_handler(CommandHandler("mytokens", mytokens_command))
                 telegram_app.add_handler(MessageHandler(
                     filters.PHOTO | filters.Document.ALL,
                     handle_photo
+                ))
+                telegram_app.add_handler(MessageHandler(
+                    filters.TEXT & ~filters.COMMAND,
+                    handle_verify_text
                 ))
                 telegram_app.add_handler(CallbackQueryHandler(callback_handler))
                 telegram_app.add_error_handler(application_error_handler)
@@ -161,6 +167,10 @@ def run_telegram_bot():
                 logger.info("Telegram 机器人启动中...")
                 bot_info = await telegram_app.bot.get_me()
                 logger.info(f"机器人信息: @{bot_info.username} (ID: {bot_info.id})")
+
+                # 保存 Bot 实例和事件循环引用（供 Web 端跨线程调用）
+                set_bot_instance(telegram_app.bot)
+                set_bot_loop(asyncio.get_event_loop())
 
                 # 注册命令菜单（让 Telegram 客户端显示命令提示）
                 from telegram import BotCommand
@@ -170,6 +180,8 @@ def run_telegram_bot():
                     BotCommand("id", "查看你的 Telegram ID"),
                     BotCommand("myuploads", "查看个人上传历史"),
                     BotCommand("delete", "删除你上传的图片"),
+                    BotCommand("login", "获取 Web 端登录链接"),
+                    BotCommand("mytokens", "查看我的 Token"),
                 ])
                 logger.info("Bot 命令菜单已注册")
 
