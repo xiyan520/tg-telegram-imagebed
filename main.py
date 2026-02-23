@@ -109,6 +109,24 @@ def create_app() -> Flask:
             "vary_header": True,
             "max_age": 3600
         },
+        # 画集认证 API - 需要 credentials（Bearer Token + 可能的 Cookie）
+        r"/api/auth/galleries/*": {
+            "origins": admin_origins,
+            "methods": ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+            "supports_credentials": True,
+            "vary_header": True,
+            "max_age": 3600
+        },
+        # 公开分享 API - 需要 credentials（解锁 Cookie）
+        r"/api/shared/*": {
+            "origins": admin_origins,
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+            "supports_credentials": True,
+            "vary_header": True,
+            "max_age": 3600
+        },
         # 公共 API - 不需要 credentials，允许所有来源
         r"/api/*": {
             "origins": "*",
