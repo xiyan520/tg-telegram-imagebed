@@ -16,11 +16,62 @@ import requests
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import session, request, jsonify, render_template, make_response, redirect, url_for
+from flask.sessions import SecureCookieSessionInterface
 
 from .database.connection import get_connection
 
 # 日志配置
 logger = logging.getLogger(__name__)
+
+# ===================== 画集域名 SSO Token 存储 =====================
+# 格式: {token_str: {'created_at': float, 'username': str, 'used': bool}}
+_gallery_auth_tokens: dict[str, dict] = {}
+
+_GALLERY_TOKEN_EXPIRE_SECONDS = 60  # token 有效期 60 秒
+
+
+def _cleanup_gallery_tokens():
+    """清理过期的画集 SSO token"""
+    now = time.time()
+    expired = [
+        t for t, info in _gallery_auth_tokens.items()
+        if now - info['created_at'] > _GALLERY_TOKEN_EXPIRE_SECONDS
+    ]
+    for t in expired:
+        del _gallery_auth_tokens[t]
+
+
+def generate_gallery_auth_token(username: str) -> str:
+    """生成一次性画集 SSO token（60秒有效，一次性使用）"""
+    _cleanup_gallery_tokens()
+    token = secrets.token_urlsafe(32)
+    _gallery_auth_tokens[token] = {
+        'created_at': time.time(),
+        'username': username,
+        'used': False,
+    }
+    return token
+
+
+def verify_gallery_auth_token(token: str) -> tuple[bool, str]:
+    """
+    验证画集 SSO token
+    返回: (valid, username)
+    验证后立即标记为已使用，防止重放
+    """
+    _cleanup_gallery_tokens()
+    info = _gallery_auth_tokens.get(token)
+    if not info:
+        return False, ''
+    if info['used']:
+        return False, ''
+    if time.time() - info['created_at'] > _GALLERY_TOKEN_EXPIRE_SECONDS:
+        del _gallery_auth_tokens[token]
+        return False, ''
+    # 标记为已使用
+    info['used'] = True
+    return True, info['username']
+
 
 # 从 utils.py 导入 get_domain 和 format_size
 try:
@@ -409,13 +460,28 @@ def update_admin_credentials(new_username=None, new_password=None):
         logger.error(f"更新管理员凭据失败: {e}")
         return False
 
+class _AutoSecureSessionInterface(SecureCookieSessionInterface):
+    """自动根据请求协议设置 cookie Secure 标记的 Session 接口
+    HTTPS 请求 → Secure=True（cookie 仅通过 HTTPS 发送）
+    HTTP 请求 → Secure=False（cookie 可通过 HTTP 发送）
+    同时兼容反向代理（X-Forwarded-Proto）"""
+
+    def get_cookie_secure(self, app):
+        try:
+            return (
+                request.is_secure
+                or request.headers.get('X-Forwarded-Proto', '').lower() == 'https'
+            )
+        except RuntimeError:
+            # 请求上下文之外
+            return False
+
+
 def configure_admin_session(app):
     """配置管理员会话"""
+    app.session_interface = _AutoSecureSessionInterface()
     app.config['SESSION_COOKIE_HTTPONLY'] = True
-    # 生产环境默认启用 Secure（ProxyFix x_proto=1 确保反代后 HTTPS 正确识别）
-    # 开发环境可通过 FLASK_ENV=development 关闭
-    is_dev = os.getenv('FLASK_ENV', '').lower() == 'development'
-    app.config['SESSION_COOKIE_SECURE'] = not is_dev
+    app.config['SESSION_COOKIE_SECURE'] = False  # 由 _AutoSecureSessionInterface 动态覆盖
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=SESSION_LIFETIME)
 
@@ -1181,5 +1247,120 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         except Exception as e:
             logger.error(f"踢出 Session 失败: {e}")
             return jsonify({'success': False, 'error': '操作失败'}), 500
+
+    @app.route('/api/admin/gallery-auth-token', methods=['POST'])
+    @login_required
+    def admin_gallery_auth_token():
+        """生成画集域名 SSO 一次性 token（60秒有效）"""
+        try:
+            username = session.get('admin_username', 'admin')
+            token = generate_gallery_auth_token(username)
+            return jsonify({'success': True, 'data': {'token': token}})
+        except Exception as e:
+            logger.error(f"生成画集 SSO token 失败: {e}")
+            return jsonify({'success': False, 'error': '生成 token 失败'}), 500
+
+    @app.route('/api/admin/gallery-sso-callback', methods=['GET'])
+    def admin_gallery_sso_callback():
+        """主站 SSO 回调：检查 session，生成 token 并重定向回画集站点"""
+        from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
+        from .database.domains import get_active_gallery_domains, get_default_domain
+
+        return_url = request.args.get('return_url', '')
+
+        # 安全校验 return_url，防止开放重定向
+        if not return_url:
+            return jsonify({'success': False, 'error': '缺少 return_url 参数'}), 400
+
+        if return_url.startswith('/'):
+            # 相对路径，安全
+            pass
+        elif return_url.startswith('http://') or return_url.startswith('https://'):
+            # 绝对 URL，校验域名
+            parsed = urlparse(return_url)
+            target_host = parsed.hostname
+            if not target_host:
+                return jsonify({'success': False, 'error': 'return_url 无效'}), 400
+
+            # 获取合法域名列表
+            allowed_domains = set()
+            gallery_domains = get_active_gallery_domains()
+            for d in gallery_domains:
+                allowed_domains.add(d['domain'].lower())
+
+            # 主站域名也允许
+            default_domain = get_default_domain()
+            if default_domain:
+                allowed_domains.add(default_domain['domain'].lower())
+
+            # 已保存的主站 URL 的域名也允许
+            try:
+                from .database import get_system_setting
+                saved_main_url = get_system_setting('gallery_sso_main_url')
+                if saved_main_url:
+                    from urllib.parse import urlparse as _urlparse
+                    _parsed_main = _urlparse(saved_main_url)
+                    if _parsed_main.hostname:
+                        allowed_domains.add(_parsed_main.hostname.lower())
+            except Exception:
+                pass
+
+            # 当前请求的 Host 也允许（回调在主站执行，主站自身是可信的）
+            try:
+                req_host = (request.headers.get('X-Forwarded-Host') or request.host or '').split(':')[0].lower()
+                if req_host:
+                    allowed_domains.add(req_host)
+            except Exception:
+                pass
+
+            # 内网 IP 地址直接放行（不存在开放重定向风险）
+            import ipaddress
+            _is_private = False
+            try:
+                _is_private = ipaddress.ip_address(target_host).is_private
+            except ValueError:
+                pass
+
+            if not _is_private and target_host.lower() not in allowed_domains:
+                logger.warning(f"SSO 回调 return_url 域名不合法: {target_host}")
+                return jsonify({'success': False, 'error': 'return_url 域名不合法'}), 400
+        else:
+            return jsonify({'success': False, 'error': 'return_url 格式无效'}), 400
+
+        # 在 return_url 中追加参数的辅助函数
+        def _append_query_param(url: str, key: str, value: str) -> str:
+            """在 URL 中追加查询参数，正确处理已有 query 参数的情况"""
+            if url.startswith('/'):
+                # 相对路径，简单拼接
+                separator = '&' if '?' in url else '?'
+                return f"{url}{separator}{key}={value}"
+            parsed = urlparse(url)
+            qs = parse_qs(parsed.query, keep_blank_values=True)
+            qs[key] = [value]
+            # 重新构建 query string
+            new_query = urlencode(qs, doseq=True)
+            return urlunparse((
+                parsed.scheme, parsed.netloc, parsed.path,
+                parsed.params, new_query, parsed.fragment
+            ))
+
+        if session.get('admin_logged_in'):
+            # 已登录，生成 token 并回跳
+            # 同时更新主站 URL 记录（确保 SSO 重定向始终指向正确的主站）
+            try:
+                from .utils import get_domain
+                from .database import update_system_setting
+                main_url = get_domain(request)
+                update_system_setting('gallery_sso_main_url', main_url)
+            except Exception:
+                pass
+            username = session.get('admin_username', 'admin')
+            token = generate_gallery_auth_token(username)
+            final_url = _append_query_param(return_url, 'auth_token', token)
+            return redirect(final_url)
+        else:
+            # 未登录，回跳并标记失败
+            final_url = _append_query_param(return_url, 'sso_failed', '1')
+            return redirect(final_url)
 
     logger.info("管理员路由注册完成")

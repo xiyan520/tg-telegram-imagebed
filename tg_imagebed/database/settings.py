@@ -160,6 +160,11 @@ DEFAULT_SYSTEM_SETTINGS = {
     'image_domain_restriction_enabled': '0',  # 图片域名限制开关
     # 域名场景路由策略
     'domain_upload_policy_json': '',           # 上传场景→图片域名映射（JSON）
+    # 画集站点配置
+    'gallery_site_name': '画集',               # 画集站点名称
+    'gallery_site_description': '精选图片画集', # 画集站点描述
+    'gallery_site_enabled': '1',               # 画集站点总开关
+    'gallery_site_images_per_page': '20',      # 画集站点每页图片数
 }
 
 def init_system_settings() -> None:

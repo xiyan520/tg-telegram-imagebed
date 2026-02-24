@@ -81,6 +81,7 @@ from .domains import (
     get_all_domains, get_domains_by_type, get_active_image_domains,
     get_default_domain, add_domain, update_domain, delete_domain,
     set_default_domain, get_random_image_domain, is_allowed_image_domain,
+    get_active_gallery_domains, is_gallery_domain,
 )
 
 __all__ = [
@@ -144,4 +145,5 @@ __all__ = [
     'get_all_domains', 'get_domains_by_type', 'get_active_image_domains',
     'get_default_domain', 'add_domain', 'update_domain', 'delete_domain',
     'set_default_domain', 'get_random_image_domain', 'is_allowed_image_domain',
+    'get_active_gallery_domains', 'is_gallery_domain',
 ]

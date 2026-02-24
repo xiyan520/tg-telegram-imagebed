@@ -13,6 +13,7 @@ from ..utils import add_cache_headers
 from ..database import (
     get_all_domains, get_active_image_domains,
     add_domain, update_domain, delete_domain, set_default_domain,
+    get_active_gallery_domains, update_system_setting,
 )
 from .. import admin_module
 
@@ -72,8 +73,8 @@ def admin_domains_api():
             return _set_admin_cors_headers(response), 400
 
         domain_type = data.get('domain_type', 'image')
-        if domain_type not in ('default', 'image'):
-            response = jsonify({'success': False, 'error': '无效的域名类型，仅支持 default 和 image'})
+        if domain_type not in ('default', 'image', 'gallery'):
+            response = jsonify({'success': False, 'error': '无效的域名类型，仅支持 default、image 和 gallery'})
             return _set_admin_cors_headers(response), 400
 
         use_https = 1 if data.get('use_https', True) else 0
@@ -83,6 +84,12 @@ def admin_domains_api():
         if not domain_id:
             response = jsonify({'success': False, 'error': '添加域名失败，该域名可能已存在'})
             return _set_admin_cors_headers(response), 400
+
+        # 添加 gallery 域名时，自动记录当前主站 URL（用于 SSO 回调）
+        if domain_type == 'gallery':
+            from ..utils import get_domain
+            main_url = get_domain(request)
+            update_system_setting('gallery_sso_main_url', main_url)
 
         # 清除域名缓存
         from ..utils import clear_domains_cache
@@ -140,8 +147,8 @@ def admin_domain_detail(domain_id):
             kwargs['domain'] = domain
 
         if 'domain_type' in data:
-            if data['domain_type'] not in ('default', 'image'):
-                response = jsonify({'success': False, 'error': '无效的域名类型，仅支持 default 和 image'})
+            if data['domain_type'] not in ('default', 'image', 'gallery'):
+                response = jsonify({'success': False, 'error': '无效的域名类型，仅支持 default、image 和 gallery'})
                 return _set_admin_cors_headers(response), 400
             kwargs['domain_type'] = data['domain_type']
 
@@ -297,3 +304,51 @@ def public_domains_api():
         response = jsonify({'success': False, 'error': '获取域名列表失败'})
         response.headers['Access-Control-Allow-Origin'] = '*'
         return add_cache_headers(response, 'no-cache'), 500
+
+
+# ===================== 画集站点入口 API =====================
+@admin_bp.route('/api/admin/gallery-site/entry', methods=['GET', 'OPTIONS'])
+@admin_module.login_required
+def admin_gallery_site_entry():
+    """返回画集域名信息（用于主站"进入画集管理"按钮）"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache')
+
+    try:
+        # 管理员从主站访问此端点，更新主站 URL 记录
+        from ..utils import get_domain
+        main_url = get_domain(request)
+        update_system_setting('gallery_sso_main_url', main_url)
+
+        gallery_domains = get_active_gallery_domains()
+        if not gallery_domains:
+            response = jsonify({
+                'success': True,
+                'data': {'available': False, 'domain': None, 'url': None}
+            })
+            return _set_admin_cors_headers(add_cache_headers(response, 'no-cache'))
+
+        # 返回第一个活跃画集域名
+        d = gallery_domains[0]
+        scheme = 'https' if d.get('use_https', 1) else 'http'
+        domain = d['domain']
+        response = jsonify({
+            'success': True,
+            'data': {
+                'available': True,
+                'domain': domain,
+                'url': f"{scheme}://{domain}",
+                'remark': d.get('remark', ''),
+            }
+        })
+        return _set_admin_cors_headers(add_cache_headers(response, 'no-cache'))
+
+    except Exception as e:
+        logger.error(f"获取画集站点入口失败: {e}")
+        response = jsonify({'success': False, 'error': '获取失败'})
+        return _set_admin_cors_headers(response), 500

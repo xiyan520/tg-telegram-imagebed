@@ -7,7 +7,7 @@
 export interface DomainItem {
   id: number
   domain: string
-  domain_type: 'default' | 'image'
+  domain_type: 'default' | 'image' | 'gallery'
   is_active: number | boolean
   use_https: number | boolean
   is_default: number | boolean

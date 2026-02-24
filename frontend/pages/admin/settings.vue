@@ -125,6 +125,102 @@
               </div>
             </div>
 
+            <!-- 画集域名列表 -->
+            <div>
+              <p class="text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">画集域名（画集站点专用）</p>
+              <div v-if="galleryDomains.length > 0" class="space-y-2">
+                <div
+                  v-for="d in galleryDomains"
+                  :key="d.id"
+                  class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700"
+                >
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}</span>
+                    <UBadge color="violet" variant="subtle" size="xs">画集</UBadge>
+                    <UBadge :color="d.is_active ? 'green' : 'gray'" variant="subtle" size="xs">
+                      {{ d.is_active ? '活跃' : '停用' }}
+                    </UBadge>
+                    <UBadge :color="d.use_https ? 'green' : 'gray'" variant="subtle" size="xs">
+                      {{ d.use_https ? 'HTTPS' : 'HTTP' }}
+                    </UBadge>
+                    <span v-if="d.remark" class="text-xs text-stone-400 dark:text-stone-500">{{ d.remark }}</span>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <UButton
+                      :icon="d.is_active ? 'heroicons:pause' : 'heroicons:play'"
+                      :color="d.is_active ? 'gray' : 'green'"
+                      variant="ghost"
+                      size="xs"
+                      :title="d.is_active ? '停用' : '启用'"
+                      @click="toggleDomainActive(d)"
+                    />
+                    <UButton
+                      icon="heroicons:trash"
+                      color="red"
+                      variant="ghost"
+                      size="xs"
+                      @click="confirmDeleteDomain(d)"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div v-else class="p-3 bg-stone-50 dark:bg-neutral-800 rounded-xl text-sm text-stone-500 dark:text-stone-400">
+                暂无画集域名，添加后可通过该域名访问画集站点
+              </div>
+            </div>
+
+            <!-- 画集站点设置（仅在没有独立画集域名时显示，有独立域名时通过画集站点的管理按钮进入） -->
+            <div v-if="!activeGalleryDomain" class="space-y-4 p-4 bg-amber-50/50 dark:bg-amber-900/10 border border-amber-200/60 dark:border-amber-800/40 rounded-xl">
+              <div class="flex items-center gap-2 mb-3">
+                <UIcon name="heroicons:cog-6-tooth" class="w-4 h-4 text-amber-500" />
+                <p class="text-sm font-medium text-stone-700 dark:text-stone-300">画集站点设置</p>
+                <UBadge color="amber" variant="subtle" size="xs">无独立域名</UBadge>
+              </div>
+              <UFormGroup label="站点名称" class="max-w-sm">
+                <UInput v-model="gallerySiteSettings.name" placeholder="画集" size="sm" />
+              </UFormGroup>
+              <UFormGroup label="站点描述" class="max-w-md">
+                <UInput v-model="gallerySiteSettings.description" placeholder="精选图片画集" size="sm" />
+              </UFormGroup>
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm font-medium text-stone-700 dark:text-stone-300">启用画集站点</p>
+                  <p class="text-xs text-stone-500 dark:text-stone-400">关闭后画集公开浏览功能不可用</p>
+                </div>
+                <UToggle v-model="gallerySiteSettings.enabled" />
+              </div>
+              <div class="flex justify-end">
+                <UButton
+                  color="amber"
+                  variant="soft"
+                  size="sm"
+                  :loading="gallerySiteSettingsSaving"
+                  @click="saveGallerySiteSettings"
+                >
+                  保存画集设置
+                </UButton>
+              </div>
+            </div>
+
+            <!-- 有独立画集域名时的提示 -->
+            <div v-else class="flex items-center justify-between p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
+              <div>
+                <p class="font-medium text-stone-900 dark:text-white">画集站点已启用独立域名</p>
+                <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  请通过画集站点页面顶部的"管理"按钮进入后台设置
+                </p>
+              </div>
+              <UButton
+                color="amber"
+                variant="soft"
+                icon="heroicons:arrow-top-right-on-square"
+                :loading="gallerySiteEntryLoading"
+                @click="openGallerySiteAdmin"
+              >
+                打开画集站点
+              </UButton>
+            </div>
+
             <!-- 图片域名限制开关 -->
             <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
               <div>
@@ -1216,6 +1312,7 @@ const domainForm = ref({
 const domainTypeOptions = [
   { value: 'default', label: '默认域名（管理后台/API）' },
   { value: 'image', label: '图片域名（图片访问专用）' },
+  { value: 'gallery', label: '画集域名（画集站点专用）' },
 ]
 
 // 计算属性：默认域名列表
@@ -1223,6 +1320,85 @@ const defaultDomains = computed(() => domains.value.filter(d => d.domain_type ==
 
 // 计算属性：图片域名列表
 const imageDomains = computed(() => domains.value.filter(d => d.domain_type === 'image'))
+
+// 计算属性：画集域名列表
+const galleryDomains = computed(() => domains.value.filter(d => d.domain_type === 'gallery'))
+
+// 计算属性：活跃画集域名（用于"进入画集管理"按钮）
+const activeGalleryDomain = computed(() => galleryDomains.value.find(d => d.is_active))
+
+// 画集管理入口（打开画集站点首页）
+const gallerySiteEntryLoading = ref(false)
+const openGallerySiteAdmin = async () => {
+  gallerySiteEntryLoading.value = true
+  try {
+    // 1. 生成 SSO token（让画集域名自动建立管理员 session）
+    const tokenRes = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/gallery-auth-token`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    // 2. 获取画集域名 URL
+    const entryRes = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/gallery-site/entry`, {
+      credentials: 'include'
+    })
+    if (!entryRes?.success || !entryRes.data?.url) {
+      throw new Error(entryRes?.error || '获取画集域名失败')
+    }
+    // 3. 带 SSO token 打开画集站点（自动建立 session，管理按钮可见）
+    let url = entryRes.data.url
+    if (tokenRes?.success && tokenRes.data?.token) {
+      url += `/gallery-site/admin?auth_token=${tokenRes.data.token}`
+    }
+    window.open(url, '_blank')
+  } catch (e: any) {
+    notification.error('操作失败', e.message || '无法打开画集站点')
+  } finally {
+    gallerySiteEntryLoading.value = false
+  }
+}
+
+// 画集站点内联设置（无独立域名时在主站设置）
+const gallerySiteSettings = ref({
+  name: '',
+  description: '',
+  enabled: true,
+})
+const gallerySiteSettingsSaving = ref(false)
+
+const loadGallerySiteSettings = async () => {
+  try {
+    const res = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/gallery-site/admin/settings`, {
+      credentials: 'include'
+    })
+    if (res?.success && res.data) {
+      gallerySiteSettings.value.name = res.data.gallery_site_name || ''
+      gallerySiteSettings.value.description = res.data.gallery_site_description || ''
+      gallerySiteSettings.value.enabled = String(res.data.gallery_site_enabled) !== '0'
+    }
+  } catch {
+    // 静默失败
+  }
+}
+
+const saveGallerySiteSettings = async () => {
+  gallerySiteSettingsSaving.value = true
+  try {
+    await $fetch(`${runtimeConfig.public.apiBase}/api/gallery-site/admin/settings`, {
+      method: 'PUT',
+      credentials: 'include',
+      body: {
+        gallery_site_name: gallerySiteSettings.value.name,
+        gallery_site_description: gallerySiteSettings.value.description,
+        gallery_site_enabled: gallerySiteSettings.value.enabled ? '1' : '0',
+      }
+    })
+    notification.success('保存成功', '画集站点设置已更新')
+  } catch (e: any) {
+    notification.error('保存失败', e.message || '无法保存画集站点设置')
+  } finally {
+    gallerySiteSettingsSaving.value = false
+  }
+}
 
 // 加载域名列表
 const loadDomains = async () => {
@@ -1368,5 +1544,6 @@ onMounted(() => {
   loadSettings()
   loadDomains()
   loadDomainPolicy()
+  loadGallerySiteSettings()
 })
 </script>

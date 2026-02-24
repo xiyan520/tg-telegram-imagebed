@@ -234,3 +234,41 @@ def is_allowed_image_domain(host: str) -> bool:
     except Exception as e:
         logger.error(f"检查图片域名失败: {e}")
         return False
+
+
+# ===================== 画集域名 =====================
+@db_retry()
+def get_active_gallery_domains() -> List[Dict[str, Any]]:
+    """获取所有活跃画集域名"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, domain, use_https, is_default, sort_order, remark
+                FROM custom_domains
+                WHERE domain_type = 'gallery' AND is_active = 1
+                ORDER BY sort_order ASC, id ASC
+            ''')
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"获取活跃画集域名失败: {e}")
+        return []
+
+
+@db_retry()
+def is_gallery_domain(host: str) -> bool:
+    """检查 host 是否为画集域名"""
+    if not host:
+        return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM custom_domains
+                WHERE domain = ? AND domain_type = 'gallery' AND is_active = 1
+            ''', (host,))
+            row = cursor.fetchone()
+            return row[0] > 0 if row else False
+    except Exception as e:
+        logger.error(f"检查画集域名失败: {e}")
+        return False

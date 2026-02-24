@@ -519,6 +519,7 @@ def init_database(quiet: bool = False) -> None:
                 ('idx_tg_sessions_user', 'tg_sessions(tg_user_id)'),
                 ('idx_auth_tokens_tg_user', 'auth_tokens(tg_user_id)'),
                 # 自定义域名相关索引
+                ('idx_custom_domains_domain', 'custom_domains(domain)'),
                 ('idx_custom_domains_type', 'custom_domains(domain_type)'),
                 ('idx_custom_domains_active', 'custom_domains(is_active)'),
                 ('idx_custom_domains_default', 'custom_domains(is_default)'),

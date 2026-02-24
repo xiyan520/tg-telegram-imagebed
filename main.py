@@ -176,13 +176,14 @@ def create_app() -> Flask:
     app.jinja_env.globals.update(get_static_file_version=get_static_file_version)
 
     # 注册蓝图 - 必须先导入路由模块以触发路由注册
-    from tg_imagebed.api import upload_bp, images_bp, admin_bp, auth_bp
+    from tg_imagebed.api import upload_bp, images_bp, admin_bp, auth_bp, gallery_site_bp
     # 导入路由模块，触发 @bp.route 装饰器执行
-    from tg_imagebed.api import upload, images, admin, auth, settings, galleries, tg_auth
+    from tg_imagebed.api import upload, images, admin, auth, settings, galleries, tg_auth, gallery_site
 
     app.register_blueprint(upload_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(gallery_site_bp)
     # images_bp 必须最后注册，因为它包含 /<path:path> catch-all 路由
     app.register_blueprint(images_bp)
 
