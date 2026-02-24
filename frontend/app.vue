@@ -9,13 +9,46 @@
 </template>
 
 <script setup lang="ts">
-useHead({
-  htmlAttrs: {
-    lang: 'zh-CN'
-  },
-  bodyAttrs: {
-    class: 'bg-gray-50 dark:bg-neutral-950'
+const { seoSettings, displayName, displayDescription, displayKeywords, loadSeoSettings } = useSeoSettings()
+
+// 动态 SEO head 配置
+useHead(computed(() => {
+  const head: any = {
+    htmlAttrs: { lang: 'zh-CN' },
+    bodyAttrs: { class: 'bg-gray-50 dark:bg-neutral-950' },
+    title: displayName.value,
+    meta: [
+      { name: 'description', content: displayDescription.value },
+      { name: 'keywords', content: displayKeywords.value },
+      // OG 标签
+      { property: 'og:title', content: seoSettings.value.ogTitle || displayName.value },
+      { property: 'og:description', content: seoSettings.value.ogDescription || displayDescription.value },
+      { property: 'og:type', content: 'website' },
+      // Twitter 标签
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:title', content: seoSettings.value.ogTitle || displayName.value },
+      { name: 'twitter:description', content: seoSettings.value.ogDescription || displayDescription.value },
+    ],
+    link: [] as any[],
   }
+
+  // OG 图片
+  if (seoSettings.value.ogImage) {
+    head.meta.push({ property: 'og:image', content: seoSettings.value.ogImage })
+    head.meta.push({ name: 'twitter:image', content: seoSettings.value.ogImage })
+  }
+
+  // 自定义 Favicon
+  if (seoSettings.value.faviconUrl) {
+    head.link.push({ rel: 'icon', href: seoSettings.value.faviconUrl })
+  }
+
+  return head
+}))
+
+// 加载 SEO 设置
+onMounted(() => {
+  loadSeoSettings()
 })
 </script>
 

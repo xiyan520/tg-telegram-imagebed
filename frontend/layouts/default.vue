@@ -36,14 +36,19 @@
           <!-- Logo -->
           <NuxtLink to="/" class="flex items-center gap-3 group">
             <div class="relative">
-              <div class="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl blur opacity-50 group-hover:opacity-75 transition-opacity"></div>
-              <div class="relative w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center transform group-hover:scale-105 group-hover:rotate-3 transition-all shadow-lg">
-                <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
-              </div>
+              <template v-if="seoSettings.logoMode === 'custom' && seoSettings.logoUrl">
+                <img :src="seoSettings.logoUrl" :alt="displayName" class="w-10 h-10 rounded-xl object-contain" />
+              </template>
+              <template v-else>
+                <div class="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl blur opacity-50 group-hover:opacity-75 transition-opacity"></div>
+                <div class="relative w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center transform group-hover:scale-105 group-hover:rotate-3 transition-all shadow-lg">
+                  <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
+                </div>
+              </template>
             </div>
             <div>
               <span class="text-xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-400 dark:to-orange-400 bg-clip-text text-transparent">
-                图床 Pro
+                {{ displayName }}
               </span>
             </div>
           </NuxtLink>
@@ -209,7 +214,12 @@
     <footer class="relative" style="z-index: 10;">
       <div class="container mx-auto px-4 py-6">
         <div class="text-center text-sm text-stone-400 dark:text-neutral-500">
-          &copy; {{ new Date().getFullYear() }} 图床 Pro
+          <template v-if="seoSettings.footerText">
+            {{ seoSettings.footerText }}
+          </template>
+          <template v-else>
+            &copy; {{ new Date().getFullYear() }} {{ displayName }}
+          </template>
         </div>
       </div>
     </footer>
@@ -232,6 +242,7 @@ const tgAuthStore = useTgAuthStore()
 const { getStats } = useImageApi()
 const { onStatsRefresh } = useStatsRefresh()
 const { publicSettings, tgEffective, loadSettings } = useGuestAuth()
+const { seoSettings, displayName } = useSeoSettings()
 
 // TG 登录弹窗
 const showTgLogin = ref(false)

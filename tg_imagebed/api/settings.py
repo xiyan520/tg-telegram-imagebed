@@ -117,6 +117,17 @@ def _format_settings_for_response(settings: dict) -> dict:
         'bot_private_upload_enabled': settings.get('bot_private_upload_enabled', '1') == '1',
         'bot_private_upload_mode': settings.get('bot_private_upload_mode', 'open'),
         'bot_private_admin_ids': settings.get('bot_private_admin_ids', ''),
+        # SEO 配置
+        'seo_site_name': settings.get('seo_site_name', ''),
+        'seo_site_description': settings.get('seo_site_description', ''),
+        'seo_site_keywords': settings.get('seo_site_keywords', ''),
+        'seo_logo_mode': settings.get('seo_logo_mode', 'icon'),
+        'seo_logo_url': settings.get('seo_logo_url', ''),
+        'seo_favicon_url': settings.get('seo_favicon_url', ''),
+        'seo_og_title': settings.get('seo_og_title', ''),
+        'seo_og_description': settings.get('seo_og_description', ''),
+        'seo_og_image': settings.get('seo_og_image', ''),
+        'seo_footer_text': settings.get('seo_footer_text', ''),
     }
 
 
@@ -414,6 +425,60 @@ def admin_system_settings():
                     except ValueError:
                         errors.append('私聊管理员 ID 格式无效')
                 settings_to_update['bot_private_admin_ids'] = ids_str
+
+            # SEO 配置
+            if 'seo_site_name' in data:
+                val = str(data.get('seo_site_name') or '').strip()
+                if len(val) > 100:
+                    errors.append('网站名称不能超过 100 个字符')
+                else:
+                    settings_to_update['seo_site_name'] = val
+
+            if 'seo_site_description' in data:
+                val = str(data.get('seo_site_description') or '').strip()
+                if len(val) > 500:
+                    errors.append('网站描述不能超过 500 个字符')
+                else:
+                    settings_to_update['seo_site_description'] = val
+
+            if 'seo_site_keywords' in data:
+                val = str(data.get('seo_site_keywords') or '').strip()
+                if len(val) > 500:
+                    errors.append('网站关键词不能超过 500 个字符')
+                else:
+                    settings_to_update['seo_site_keywords'] = val
+
+            if 'seo_logo_mode' in data:
+                mode = str(data.get('seo_logo_mode') or '').strip().lower()
+                if mode not in ('icon', 'custom'):
+                    errors.append('无效的 Logo 模式')
+                else:
+                    settings_to_update['seo_logo_mode'] = mode
+
+            for seo_url_key in ('seo_logo_url', 'seo_favicon_url', 'seo_og_image'):
+                if seo_url_key in data:
+                    settings_to_update[seo_url_key] = str(data.get(seo_url_key) or '').strip()
+
+            if 'seo_og_title' in data:
+                val = str(data.get('seo_og_title') or '').strip()
+                if len(val) > 200:
+                    errors.append('OG 标题不能超过 200 个字符')
+                else:
+                    settings_to_update['seo_og_title'] = val
+
+            if 'seo_og_description' in data:
+                val = str(data.get('seo_og_description') or '').strip()
+                if len(val) > 500:
+                    errors.append('OG 描述不能超过 500 个字符')
+                else:
+                    settings_to_update['seo_og_description'] = val
+
+            if 'seo_footer_text' in data:
+                val = str(data.get('seo_footer_text') or '').strip()
+                if len(val) > 200:
+                    errors.append('页脚文字不能超过 200 个字符')
+                else:
+                    settings_to_update['seo_footer_text'] = val
 
             # 允许的文件后缀
             svg_warning = ''

@@ -10,12 +10,17 @@
     <!-- Logo 区域 -->
     <div class="h-16 flex items-center px-4 border-b border-stone-200/50 dark:border-neutral-700/50">
       <NuxtLink to="/" class="flex items-center gap-2.5 overflow-hidden">
-        <div class="w-9 h-9 flex-shrink-0 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
-          <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
-        </div>
+        <template v-if="seoSettings.logoMode === 'custom' && seoSettings.logoUrl">
+          <img :src="seoSettings.logoUrl" :alt="displayName" class="w-9 h-9 flex-shrink-0 rounded-lg object-contain" />
+        </template>
+        <template v-else>
+          <div class="w-9 h-9 flex-shrink-0 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
+            <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
+          </div>
+        </template>
         <Transition name="fade">
           <div v-if="!adminUiStore.sidebarCollapsed" class="flex items-center gap-2">
-            <span class="text-lg font-semibold text-stone-800 dark:text-stone-100 whitespace-nowrap">图床 Pro</span>
+            <span class="text-lg font-semibold text-stone-800 dark:text-stone-100 whitespace-nowrap">{{ displayName }}</span>
             <UBadge color="red" variant="subtle" size="xs">管理</UBadge>
           </div>
         </Transition>
@@ -92,11 +97,16 @@
       <!-- Logo 区域 -->
       <div class="h-16 flex items-center justify-between px-4 border-b border-stone-200 dark:border-neutral-700">
         <NuxtLink to="/" class="flex items-center gap-2.5" @click="adminUiStore.closeMobileSidebar()">
-          <div class="w-9 h-9 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
-            <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
-          </div>
+          <template v-if="seoSettings.logoMode === 'custom' && seoSettings.logoUrl">
+            <img :src="seoSettings.logoUrl" :alt="displayName" class="w-9 h-9 rounded-lg object-contain" />
+          </template>
+          <template v-else>
+            <div class="w-9 h-9 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
+              <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
+            </div>
+          </template>
           <div class="flex items-center gap-2">
-            <span class="text-lg font-semibold text-stone-800 dark:text-stone-100">图床 Pro</span>
+            <span class="text-lg font-semibold text-stone-800 dark:text-stone-100">{{ displayName }}</span>
             <UBadge color="red" variant="subtle" size="xs">管理</UBadge>
           </div>
         </NuxtLink>
@@ -152,6 +162,7 @@
 <script setup lang="ts">
 const adminUiStore = useAdminUiStore()
 const { menu, isActive } = useAdminMenu()
+const { seoSettings, displayName } = useSeoSettings()
 
 // 路由变化时关闭移动端侧边栏
 const route = useRoute()

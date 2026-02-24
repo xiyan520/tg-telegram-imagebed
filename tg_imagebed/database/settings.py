@@ -139,6 +139,17 @@ DEFAULT_SYSTEM_SETTINGS = {
     'bot_private_upload_enabled': '1',       # 私聊上传总开关
     'bot_private_upload_mode': 'open',       # open / tg_bound / admin_only
     'bot_private_admin_ids': '',             # 私聊管理员 ID（mode=admin_only 时生效）
+    # SEO 配置
+    'seo_site_name': '',                    # 网站名称（留空使用默认"图床 Pro"）
+    'seo_site_description': '',             # 网站描述（留空使用默认值）
+    'seo_site_keywords': '',                # 网站关键词（留空使用默认值）
+    'seo_logo_mode': 'icon',                # Logo 模式：icon=默认图标 / custom=自定义图片
+    'seo_logo_url': '',                     # 自定义 Logo 图片 URL
+    'seo_favicon_url': '',                  # 自定义 Favicon URL
+    'seo_og_title': '',                     # OG 标题（留空 fallback 到 site_name）
+    'seo_og_description': '',               # OG 描述（留空 fallback 到 description）
+    'seo_og_image': '',                     # OG 图片 URL
+    'seo_footer_text': '',                  # 自定义页脚文字（留空用默认格式）
 }
 
 def init_system_settings() -> None:
@@ -311,6 +322,17 @@ def get_public_settings() -> Dict[str, Any]:
         'tg_auth_required_for_token': settings.get('tg_auth_required_for_token', '0') == '1',
         'tg_bind_token_enabled': settings.get('tg_bind_token_enabled', '0') == '1',
         'tg_sync_delete_enabled': settings.get('tg_sync_delete_enabled', '1') == '1',
+        # SEO 配置
+        'seo_site_name': settings.get('seo_site_name', ''),
+        'seo_site_description': settings.get('seo_site_description', ''),
+        'seo_site_keywords': settings.get('seo_site_keywords', ''),
+        'seo_logo_mode': settings.get('seo_logo_mode', 'icon'),
+        'seo_logo_url': settings.get('seo_logo_url', ''),
+        'seo_favicon_url': settings.get('seo_favicon_url', ''),
+        'seo_og_title': settings.get('seo_og_title', ''),
+        'seo_og_description': settings.get('seo_og_description', ''),
+        'seo_og_image': settings.get('seo_og_image', ''),
+        'seo_footer_text': settings.get('seo_footer_text', ''),
     }
 
 def is_guest_upload_allowed() -> bool:

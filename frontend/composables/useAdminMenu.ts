@@ -61,6 +61,14 @@ export const adminMenu: AdminMenuItem[] = [
     activeMatch: { type: 'prefix', prefixes: ['/admin/settings'] },
   },
   {
+    key: 'seo',
+    label: 'SEO 设置',
+    to: '/admin/seo',
+    icon: 'heroicons:magnifying-glass',
+    permissions: ['admin'],
+    activeMatch: { type: 'prefix', prefixes: ['/admin/seo'] },
+  },
+  {
     key: 'storage',
     label: '存储设置',
     to: '/admin/storage',

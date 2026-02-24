@@ -174,7 +174,7 @@
         class="inline-flex items-center gap-1.5 text-xs text-stone-400 dark:text-stone-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
       >
         <UIcon name="heroicons:cloud-arrow-up" class="w-3.5 h-3.5" />
-        <span>Powered by 图床 Pro</span>
+        <span>Powered by {{ displayName }}</span>
       </NuxtLink>
     </footer>
 
@@ -197,6 +197,7 @@ definePageMeta({ layout: false })
 
 const route = useRoute()
 const galleryApi = useGalleryApi()
+const { displayName } = useSeoSettings()
 
 const shareAllToken = computed(() => route.params.token as string)
 const galleryId = computed(() => parseInt(route.params.id as string, 10))
