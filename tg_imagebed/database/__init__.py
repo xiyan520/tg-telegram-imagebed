@@ -69,7 +69,9 @@ from .tg_auth import (
     upsert_tg_user, get_tg_user, get_tg_user_by_username,
     create_login_code, verify_login_code,
     create_tg_session, verify_tg_session, delete_tg_session,
-    get_user_token_count, get_user_tokens, bind_token_to_user, unbind_token_from_user,
+    has_bound_tokens, get_user_token_count, get_user_tokens,
+    bind_token_to_user, unbind_token_from_user,
+    get_active_user_tokens, get_default_upload_token, set_default_upload_token,
     cleanup_expired_codes, cleanup_expired_sessions,
     consume_web_verify_code, get_web_verify_status,
 )
@@ -126,7 +128,9 @@ __all__ = [
     'upsert_tg_user', 'get_tg_user', 'get_tg_user_by_username',
     'create_login_code', 'verify_login_code',
     'create_tg_session', 'verify_tg_session', 'delete_tg_session',
-    'get_user_token_count', 'get_user_tokens', 'bind_token_to_user', 'unbind_token_from_user',
+    'has_bound_tokens', 'get_user_token_count', 'get_user_tokens',
+    'bind_token_to_user', 'unbind_token_from_user',
+    'get_active_user_tokens', 'get_default_upload_token', 'set_default_upload_token',
     'cleanup_expired_codes', 'cleanup_expired_sessions',
     'consume_web_verify_code', 'get_web_verify_status',
 ]

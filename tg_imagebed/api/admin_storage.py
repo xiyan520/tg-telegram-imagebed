@@ -252,9 +252,15 @@ def get_storage_config():
 
     try:
         config = _load_storage_config()
+        current_bot_token = str(get_system_setting('telegram_bot_token') or '').strip()
         masked_backends = {}
         for name, cfg in (config.get('backends') or {}).items():
-            masked_backends[name] = _mask_sensitive(cfg)
+            masked = _mask_sensitive(cfg)
+            # 为 telegram 驱动标记是否正在用作机器人
+            if cfg.get('driver') == 'telegram' and current_bot_token:
+                raw_token = (cfg.get('bot_token') or '').strip()
+                masked['is_bot'] = bool(raw_token and raw_token == current_bot_token)
+            masked_backends[name] = masked
 
         return _admin_json({
             'success': True,
@@ -314,6 +320,16 @@ def add_storage_backend():
                 clear_token_cache()
                 request_bot_restart()
                 logger.info("存储 Bot Token 已同步到机器人配置，已触发重启")
+        elif not use_as_bot and backend_config.get('driver') == 'telegram':
+            # 未勾选"用作机器人"：若当前 Bot Token 来自该存储则清除
+            real_token = (backend_config.get('bot_token') or '').strip()
+            current_bot_token = str(get_system_setting('telegram_bot_token') or '').strip()
+            if real_token and current_bot_token == real_token:
+                update_system_setting('telegram_bot_token', '')
+                from ..bot_control import clear_token_cache, request_bot_restart
+                clear_token_cache()
+                request_bot_restart()
+                logger.info("存储未勾选用作机器人，已清除 Bot Token 并触发重启")
 
         logger.info(f"添加存储后端: {name}")
         return _admin_json({
@@ -382,6 +398,16 @@ def modify_storage_backend(name: str):
                 clear_token_cache()
                 request_bot_restart()
                 logger.info("存储 Bot Token 已同步到机器人配置，已触发重启")
+        elif not use_as_bot and merged_config.get('driver') == 'telegram':
+            # 未勾选"用作机器人"：若当前 Bot Token 来自该存储则清除
+            real_token = (merged_config.get('bot_token') or '').strip()
+            current_bot_token = str(get_system_setting('telegram_bot_token') or '').strip()
+            if real_token and current_bot_token == real_token:
+                update_system_setting('telegram_bot_token', '')
+                from ..bot_control import clear_token_cache, request_bot_restart
+                clear_token_cache()
+                request_bot_restart()
+                logger.info("存储未勾选用作机器人，已清除 Bot Token 并触发重启")
 
         logger.info(f"更新存储后端: {name}")
         return _admin_json({

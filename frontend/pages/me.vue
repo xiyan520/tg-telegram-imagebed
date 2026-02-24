@@ -1,14 +1,41 @@
 <template>
   <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-stone-900 dark:text-white">游客控制台</h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">管理你的 Token、上传和画集</p>
+    <!-- 用户信息卡片 -->
+    <div class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 p-6 text-white shadow-lg">
+      <div class="absolute inset-0 bg-[url('data:image/svg+xml,%3Csvg%20width%3D%2220%22%20height%3D%2220%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Ccircle%20cx%3D%2210%22%20cy%3D%2210%22%20r%3D%221.5%22%20fill%3D%22white%22%2F%3E%3C%2Fsvg%3E')] opacity-10" />
+      <div class="relative flex items-center gap-4">
+        <!-- TG 头像或 Token 图标 -->
+        <div v-if="tgAuth.isLoggedIn && tgAuth.user" class="w-14 h-14 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-2xl font-bold flex-shrink-0">
+          {{ (tgAuth.user.first_name || 'U')[0] }}
+        </div>
+        <div v-else class="w-14 h-14 rounded-full bg-white/20 backdrop-blur flex items-center justify-center flex-shrink-0">
+          <UIcon name="heroicons:key" class="w-7 h-7" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <h1 class="text-xl font-bold truncate">
+            {{ tgAuth.isLoggedIn && tgAuth.user ? tgAuth.user.first_name : '游客控制台' }}
+            <span v-if="tgAuth.isLoggedIn && tgAuth.user?.username" class="text-white/70 text-sm font-normal ml-1">@{{ tgAuth.user.username }}</span>
+          </h1>
+          <p class="text-white/80 text-sm mt-0.5">
+            {{ tokenStore.vaultItems.length }} 个 Token · {{ tokenStore.uploadCount }} 次上传
+          </p>
+          <!-- 配额进度条 -->
+          <div v-if="tokenStore.hasToken && tokenStore.uploadLimit > 0" class="mt-2">
+            <div class="flex justify-between text-xs text-white/70 mb-1">
+              <span>配额使用</span>
+              <span>{{ tokenStore.uploadCount }} / {{ tokenStore.uploadLimit }}</span>
+            </div>
+            <div class="h-1.5 bg-white/20 rounded-full overflow-hidden">
+              <div
+                class="h-full rounded-full transition-all duration-500"
+                :class="quotaPercent > 90 ? 'bg-red-300' : quotaPercent > 70 ? 'bg-orange-300' : 'bg-white/80'"
+                :style="{ width: `${Math.min(100, quotaPercent)}%` }"
+              />
+            </div>
+          </div>
+        </div>
+        <UButton color="white" variant="ghost" size="sm" icon="heroicons:arrow-right-start-on-rectangle" @click="handleLogout" class="flex-shrink-0 text-white/80 hover:text-white" />
       </div>
-      <UButton color="red" variant="ghost" size="sm" icon="heroicons:arrow-right-start-on-rectangle" @click="handleLogout">
-        登出
-      </UButton>
     </div>
 
     <!-- 无 Token 引导 -->
@@ -33,18 +60,23 @@
     <!-- 主内容 -->
     <template v-if="tokenStore.hasToken">
       <!-- Tab 导航 -->
-      <div class="flex gap-1 p-1 bg-stone-100 dark:bg-neutral-800 rounded-xl">
+      <div class="flex gap-1 p-1 bg-white/60 dark:bg-neutral-800/60 backdrop-blur-sm rounded-xl border border-stone-200/50 dark:border-neutral-700/50">
         <button
           v-for="tab in tabs"
           :key="tab.key"
-          class="flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all flex-1 justify-center"
+          class="relative flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-all flex-1 justify-center"
           :class="activeTab === tab.key
-            ? 'bg-white dark:bg-neutral-700 text-stone-900 dark:text-white shadow-sm'
-            : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-300'"
+            ? 'bg-amber-500 text-white shadow-sm shadow-amber-500/25'
+            : 'text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-300 hover:bg-stone-100 dark:hover:bg-neutral-700/50'"
           @click="activeTab = tab.key"
         >
           <UIcon :name="tab.icon" class="w-4 h-4" />
           <span class="hidden sm:inline">{{ tab.label }}</span>
+          <!-- TG 未绑定红点 -->
+          <span
+            v-if="tab.key === 'tg' && tgAuth.isLoggedIn && hasUnboundTokens"
+            class="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full"
+          />
         </button>
       </div>
 
@@ -103,6 +135,17 @@ const activeTab = ref<TabKey>('tokens')
 
 const tabs = computed(() =>
   allTabs.filter(t => t.key !== 'tg' || publicSettings.value.tgBindEnabled || publicSettings.value.tgAuthRequired)
+)
+
+// 配额百分比
+const quotaPercent = computed(() => {
+  if (!tokenStore.uploadLimit) return 0
+  return Math.round((tokenStore.uploadCount / tokenStore.uploadLimit) * 100)
+})
+
+// 是否有未绑定 TG 的 Token
+const hasUnboundTokens = computed(() =>
+  tgAuth.isLoggedIn && tokenStore.vaultItems.some(i => !i.tokenInfo?.tg_user_id)
 )
 
 // 灯箱
@@ -182,6 +225,10 @@ onMounted(async () => {
   // TG 认证启用时恢复会话
   if (publicSettings.value.tgAuthEnabled) {
     await tgAuth.checkSession()
+    // TG 已登录时，自动同步该用户下所有 Token 到本地 vault
+    if (tgAuth.isLoggedIn) {
+      await tgAuth.syncTokensToVault()
+    }
   }
   // 无 Token 且未 TG 登录 → 跳转首页
   if (!tokenStore.hasToken && !tgAuth.isLoggedIn) {

@@ -35,7 +35,7 @@
         <div class="flex items-center gap-2 flex-wrap">
           <UInput
             v-model="searchQuery"
-            placeholder="搜索 Token / 描述..."
+            placeholder="搜索 Token / 描述 / TG用户名..."
             size="sm"
             class="w-48"
             @input="handleSearch"
@@ -48,6 +48,12 @@
           <USelect
             v-model="status"
             :options="statusOptions"
+            size="sm"
+          />
+          <span class="text-sm text-stone-600 dark:text-stone-400">TG绑定</span>
+          <USelect
+            v-model="tgBind"
+            :options="tgBindOptions"
             size="sm"
           />
         </div>
@@ -437,8 +443,15 @@ const statusOptions = [
   { label: '已过期', value: 'expired' },
 ]
 
+const tgBindOptions = [
+  { label: '全部', value: 'all' },
+  { label: '已绑定', value: 'bound' },
+  { label: '未绑定', value: 'unbound' },
+]
+
 // 列表状态
 const status = ref<TokenStatus>('all')
+const tgBind = ref('all')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
@@ -561,6 +574,10 @@ const loadTokens = async () => {
       page_size: String(pageSize.value),
     })
     if (searchQuery.value.trim()) qs.set('search', searchQuery.value.trim())
+    if (tgBind.value && tgBind.value !== 'all') qs.set('tg_bind', tgBind.value)
+    // 支持从 URL query 传入 tg_user_id（从详情页跳转）
+    const routeTgUserId = useRoute().query.tg_user_id
+    if (routeTgUserId) qs.set('tg_user_id', String(routeTgUserId))
 
     const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens?${qs.toString()}`, {
       credentials: 'include'
@@ -593,6 +610,11 @@ const loadTokens = async () => {
 }
 
 watch(status, async () => {
+  page.value = 1
+  await loadTokens()
+})
+
+watch(tgBind, async () => {
   page.value = 1
   await loadTokens()
 })

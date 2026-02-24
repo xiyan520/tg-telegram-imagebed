@@ -158,8 +158,8 @@ def _verify_token_core(token: str, *, check_quota: bool = True) -> Dict[str, Any
                         expires_at = expires_at.astimezone().replace(tzinfo=None)
                     if datetime.now() > expires_at:
                         return {'valid': False, 'reason': 'Token已过期'}
-                except Exception:
-                    pass  # 解析失败则忽略过期检查
+                except (ValueError, TypeError):
+                    return {'valid': False, 'reason': 'Token过期时间异常'}
 
             # 计算剩余上传次数
             upload_count = int(token_data.get('upload_count') or 0)
@@ -292,7 +292,9 @@ def admin_list_tokens(
     status: str = 'all',
     page: int = 1,
     page_size: int = 20,
-    search: str = None
+    search: str = None,
+    tg_user_id: int = None,
+    tg_bind: str = None
 ) -> Dict[str, Any]:
     """
     管理员获取 Token 列表（分页）。
@@ -305,7 +307,9 @@ def admin_list_tokens(
             - 'expired': 已过期（无论是否启用）
         page: 页码（从 1 开始）
         page_size: 每页数量（最大 100）
-        search: 搜索关键词（匹配 token 或 description）
+        search: 搜索关键词（匹配 token / description / tg_username / tg_first_name）
+        tg_user_id: 按 TG 用户 ID 筛选
+        tg_bind: TG 绑定筛选（'bound'=已绑定, 'unbound'=未绑定, None/其他=全部）
 
     Returns:
         包含 page, page_size, total, items 的字典
@@ -315,6 +319,13 @@ def admin_list_tokens(
     page = max(1, int(page) if isinstance(page, (int, str)) and str(page).isdigit() else 1)
     page_size = max(1, min(100, int(page_size) if isinstance(page_size, (int, str)) and str(page_size).isdigit() else 20))
     offset = (page - 1) * page_size
+
+    # 搜索或 tg_bind 筛选需要 JOIN tg_users
+    need_join = bool(
+        (search and search.strip()) or
+        tg_user_id is not None or
+        tg_bind in ('bound', 'unbound')
+    )
 
     # 根据状态构建 WHERE 子句
     where_clauses = []
@@ -329,21 +340,39 @@ def admin_list_tokens(
     elif status != 'all':
         raise ValueError(f"无效的状态筛选: {status}")
 
-    # 搜索条件
+    # TG 用户 ID 筛选
+    if tg_user_id is not None:
+        where_clauses.append("a.tg_user_id = ?")
+        where_params_list.append(tg_user_id)
+
+    # TG 绑定状态筛选
+    if tg_bind == 'bound':
+        where_clauses.append("a.tg_user_id IS NOT NULL")
+    elif tg_bind == 'unbound':
+        where_clauses.append("a.tg_user_id IS NULL")
+
+    # 搜索条件（扩展到 tg_username / tg_first_name）
     if search and search.strip():
-        where_clauses.append("(a.token LIKE ? OR a.description LIKE ?)")
         search_pattern = f"%{search.strip()}%"
-        where_params_list.extend([search_pattern, search_pattern])
+        if need_join:
+            where_clauses.append("(a.token LIKE ? OR a.description LIKE ? OR u.username LIKE ? OR u.first_name LIKE ?)")
+            where_params_list.extend([search_pattern, search_pattern, search_pattern, search_pattern])
+        else:
+            where_clauses.append("(a.token LIKE ? OR a.description LIKE ?)")
+            where_params_list.extend([search_pattern, search_pattern])
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     where_params = tuple(where_params_list)
+
+    # COUNT 查询需要与主查询保持一致的 JOIN
+    join_sql = "LEFT JOIN tg_users u ON a.tg_user_id = u.tg_user_id" if need_join else ""
 
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
 
             # 查询总数
-            cursor.execute(f"SELECT COUNT(1) FROM auth_tokens a {where_sql}", where_params)
+            cursor.execute(f"SELECT COUNT(1) FROM auth_tokens a {join_sql} {where_sql}", where_params)
             total = cursor.fetchone()[0] or 0
 
             # 查询列表
@@ -686,26 +715,31 @@ def delete_token_by_string(token: str) -> bool:
 
 
 def admin_get_token_detail(token_id: int) -> Optional[Dict[str, Any]]:
-    """按 rowid 获取完整 Token 信息（含完整 token 字符串）"""
+    """按 rowid 获取完整 Token 信息（含完整 token 字符串 + TG 用户信息）"""
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(f"""
                 SELECT
-                    rowid AS id,
-                    token,
-                    created_at,
-                    expires_at,
-                    last_used,
-                    upload_count,
-                    upload_limit,
-                    is_active,
-                    ip_address,
-                    user_agent,
-                    description,
-                    CASE WHEN {_EXPIRED_EXPR} THEN 1 ELSE 0 END AS is_expired
-                FROM auth_tokens
-                WHERE rowid = ?
+                    a.rowid AS id,
+                    a.token,
+                    a.created_at,
+                    a.expires_at,
+                    a.last_used,
+                    a.upload_count,
+                    a.upload_limit,
+                    a.is_active,
+                    a.ip_address,
+                    a.user_agent,
+                    a.description,
+                    a.tg_user_id,
+                    CASE WHEN a.expires_at IS NOT NULL AND a.expires_at < CURRENT_TIMESTAMP THEN 1 ELSE 0 END AS is_expired,
+                    u.username AS tg_username,
+                    u.first_name AS tg_first_name,
+                    u.last_name AS tg_last_name
+                FROM auth_tokens a
+                LEFT JOIN tg_users u ON a.tg_user_id = u.tg_user_id
+                WHERE a.rowid = ?
             """, (int(token_id),))
 
             row = cursor.fetchone()

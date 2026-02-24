@@ -133,6 +133,12 @@ DEFAULT_SYSTEM_SETTINGS = {
     'tg_bind_token_enabled': '0',            # Token 自动绑定 TG 用户
     # 非 TG 用户 Token 限制
     'max_guest_tokens_per_ip': '3',          # 非 TG 用户每 IP Token 上限
+    # 群组上传 — TG 绑定限制
+    'group_upload_tg_bound_only': '0',       # 仅允许 TG 绑定用户在群组上传
+    # 私聊上传配置
+    'bot_private_upload_enabled': '1',       # 私聊上传总开关
+    'bot_private_upload_mode': 'open',       # open / tg_bound / admin_only
+    'bot_private_admin_ids': '',             # 私聊管理员 ID（mode=admin_only 时生效）
 }
 
 def init_system_settings() -> None:

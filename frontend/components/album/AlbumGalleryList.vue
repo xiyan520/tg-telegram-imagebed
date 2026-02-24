@@ -2,31 +2,38 @@
   <div class="space-y-4">
     <!-- "我的上传"快捷入口 -->
     <div
-      class="relative rounded-xl overflow-hidden border border-amber-200 dark:border-amber-800 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 p-4 cursor-pointer hover:shadow-md transition-shadow"
+      class="relative group rounded-2xl overflow-hidden border border-amber-200/60 dark:border-amber-800/40 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20 p-4 cursor-pointer hover:shadow-md hover:shadow-amber-500/10 transition-all duration-300"
       @click="$emit('navigate', 'uploads')"
     >
       <div class="flex items-center gap-4">
-        <div class="w-12 h-12 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0">
+        <div class="w-12 h-12 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm shadow-amber-500/25 group-hover:scale-105 transition-transform duration-300">
           <UIcon name="heroicons:cloud-arrow-up" class="w-6 h-6 text-white" />
         </div>
         <div class="flex-1 min-w-0">
-          <h3 class="font-semibold text-gray-900 dark:text-white">我的上传</h3>
-          <p class="text-sm text-gray-600 dark:text-gray-400">
+          <h3 class="font-semibold text-stone-800 dark:text-white">我的上传</h3>
+          <p class="text-sm text-stone-500 dark:text-stone-400">
             共 <span class="font-semibold text-amber-600 dark:text-amber-400">{{ uploadCount }}</span> 张图片
           </p>
         </div>
-        <UIcon name="heroicons:chevron-right" class="w-5 h-5 text-gray-400" />
+        <UIcon name="heroicons:chevron-right" class="w-5 h-5 text-stone-300 dark:text-stone-600 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all" />
       </div>
     </div>
 
     <!-- 标题栏 -->
     <div class="flex items-center justify-between">
-      <h2 class="text-lg font-bold text-gray-900 dark:text-white">
-        我的画集 ({{ total }})
+      <h2 class="text-lg font-bold text-stone-900 dark:text-white">
+        我的画集
+        <span v-if="total > 0" class="text-sm font-normal text-stone-400 ml-1">({{ total }})</span>
       </h2>
-      <div class="flex items-center gap-2">
-        <UButton icon="heroicons:arrow-path" color="gray" variant="ghost" size="sm" :loading="loading" @click="loadGalleries" />
-        <UButton icon="heroicons:plus" color="primary" size="sm" @click="showCreate = true">
+      <div class="flex items-center gap-1.5">
+        <button
+          class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-stone-100 dark:hover:bg-neutral-700/50 transition-all"
+          :class="{ 'animate-spin': loading }"
+          @click="loadGalleries"
+        >
+          <UIcon name="heroicons:arrow-path" class="w-4 h-4" />
+        </button>
+        <UButton icon="heroicons:plus" color="primary" size="sm" :ui="{ rounded: 'rounded-xl' }" @click="showCreate = true">
           创建画集
         </UButton>
       </div>
@@ -34,21 +41,23 @@
 
     <!-- 搜索 -->
     <div v-if="galleries.length > 0" class="max-w-xs">
-      <UInput v-model="searchQuery" placeholder="搜索画集..." size="sm">
-        <template #leading><UIcon name="heroicons:magnifying-glass" class="w-4 h-4" /></template>
+      <UInput v-model="searchQuery" placeholder="搜索画集..." size="sm" :ui="{ rounded: 'rounded-xl' }">
+        <template #leading><UIcon name="heroicons:magnifying-glass" class="w-4 h-4 text-stone-400" /></template>
       </UInput>
     </div>
 
     <!-- 加载状态 -->
-    <div v-if="loading && galleries.length === 0" class="flex justify-center py-12">
+    <div v-if="loading && galleries.length === 0" class="flex justify-center py-16">
       <div class="w-10 h-10 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
     </div>
 
     <!-- 空状态 -->
-    <div v-else-if="!loading && galleries.length === 0" class="text-center py-12">
-      <UIcon name="heroicons:rectangle-stack" class="w-16 h-16 text-stone-400 mx-auto mb-4" />
-      <p class="text-stone-600 dark:text-stone-400 mb-4">还没有画集</p>
-      <UButton color="primary" @click="showCreate = true">
+    <div v-else-if="!loading && galleries.length === 0" class="text-center py-16">
+      <div class="w-16 h-16 mx-auto bg-stone-100 dark:bg-neutral-800 rounded-2xl flex items-center justify-center mb-4">
+        <UIcon name="heroicons:rectangle-stack" class="w-8 h-8 text-stone-300 dark:text-neutral-600" />
+      </div>
+      <p class="text-stone-500 dark:text-stone-400 mb-4">还没有画集</p>
+      <UButton color="primary" :ui="{ rounded: 'rounded-xl' }" @click="showCreate = true">
         <template #leading><UIcon name="heroicons:plus" /></template>
         创建第一个画集
       </UButton>
@@ -65,12 +74,12 @@
     </div>
 
     <!-- 搜索无结果 -->
-    <div v-if="!loading && galleries.length > 0 && filteredGalleries.length === 0" class="text-center py-8">
-      <p class="text-stone-500">没有匹配的画集</p>
+    <div v-if="!loading && galleries.length > 0 && filteredGalleries.length === 0" class="text-center py-10">
+      <p class="text-stone-400 text-sm">没有匹配的画集</p>
     </div>
 
     <!-- 分页 -->
-    <div v-if="totalPages > 1" class="flex justify-center">
+    <div v-if="totalPages > 1" class="flex justify-center pt-2">
       <UPagination v-model="currentPage" :total="total" :page-count="pageSize" @update:model-value="loadGalleries" />
     </div>
 

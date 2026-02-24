@@ -272,8 +272,8 @@
     </template>
 
     <!-- 添加/编辑存储模态框 -->
-    <UModal v-model="showBackendModal">
-      <UCard>
+    <UModal v-model="showBackendModal" :ui="{ width: 'sm:max-w-lg', height: 'max-h-[90vh]' }">
+      <UCard :ui="{ body: { base: 'overflow-y-auto' }, ring: '', divide: 'divide-y divide-gray-100 dark:divide-gray-800' }" class="flex flex-col max-h-[85vh]">
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-stone-900 dark:text-white">
@@ -351,6 +351,15 @@
                   <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">Telegram 用户 ID，多个用逗号分隔</p>
                 </div>
 
+                <!-- 仅 TG 绑定用户可上传（admin_only 关闭时显示） -->
+                <div v-if="!groupUpload.admin_only" class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">仅 TG 绑定用户可上传</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">限制只有绑定了 Token 的 Telegram 用户才能通过群组上传</p>
+                  </div>
+                  <UToggle v-model="groupUpload.tg_bound_only" />
+                </div>
+
                 <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
                   <div>
                     <p class="text-sm font-medium text-stone-700 dark:text-stone-300">自动回复链接</p>
@@ -370,6 +379,34 @@
                     <p class="text-xs text-stone-500 dark:text-stone-400">后台删除图片时同步删除 Telegram 群组中的消息</p>
                   </div>
                   <UToggle v-model="groupUpload.sync_delete" />
+                </div>
+              </div>
+            </div>
+
+            <!-- 私聊上传配置 -->
+            <div class="pt-4 border-t border-stone-200 dark:border-neutral-700">
+              <p class="font-medium text-stone-900 dark:text-white mb-4">私聊上传设置</p>
+              <div class="space-y-4">
+                <!-- 总开关 -->
+                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">允许私聊上传</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">关闭后用户无法通过私聊 Bot 上传图片</p>
+                  </div>
+                  <UToggle v-model="privateUpload.enabled" />
+                </div>
+
+                <!-- 上传模式（总开关开启时显示） -->
+                <div v-if="privateUpload.enabled">
+                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">上传权限</label>
+                  <USelect v-model="privateUpload.mode" :options="privateUploadModeOptions" option-attribute="label" value-attribute="value" />
+                </div>
+
+                <!-- 管理员 ID（mode=admin_only 时显示） -->
+                <div v-if="privateUpload.enabled && privateUpload.mode === 'admin_only'">
+                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">管理员 ID</label>
+                  <UInput v-model="privateUpload.admin_ids" placeholder="多个 ID 用逗号分隔" />
+                  <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">Telegram 用户 ID，多个用逗号分隔</p>
                 </div>
               </div>
             </div>
@@ -515,10 +552,24 @@ const policy = ref<{
 const groupUpload = ref({
   admin_only: false,
   admin_ids: '',
+  tg_bound_only: false,
   reply: true,
   delete_delay: 0,
   sync_delete: true
 })
+
+// 私聊上传配置
+const privateUpload = ref({
+  enabled: true,
+  mode: 'open',
+  admin_ids: ''
+})
+
+const privateUploadModeOptions = [
+  { label: '所有人可上传', value: 'open' },
+  { label: '仅 TG 绑定用户', value: 'tg_bound' },
+  { label: '仅指定管理员', value: 'admin_only' },
+]
 
 // 上传相关
 const uploadBackend = ref<string>('')
@@ -654,9 +705,15 @@ const loadAll = async () => {
       groupUpload.value = {
         admin_only: d.group_upload_admin_only ?? false,
         admin_ids: d.group_admin_ids ?? '',
+        tg_bound_only: d.group_upload_tg_bound_only ?? false,
         reply: d.group_upload_reply ?? true,
         delete_delay: d.group_upload_delete_delay ?? 0,
         sync_delete: d.tg_sync_delete_enabled ?? true
+      }
+      privateUpload.value = {
+        enabled: d.bot_private_upload_enabled ?? true,
+        mode: d.bot_private_upload_mode ?? 'open',
+        admin_ids: d.bot_private_admin_ids ?? ''
       }
     }
   } catch (e: any) {
@@ -715,9 +772,13 @@ const saveGroupUpload = async (silent = false) => {
     const payload = {
       group_upload_admin_only: groupUpload.value.admin_only,
       group_admin_ids: groupUpload.value.admin_ids,
+      group_upload_tg_bound_only: groupUpload.value.tg_bound_only,
       group_upload_reply: groupUpload.value.reply,
       group_upload_delete_delay: groupUpload.value.delete_delay,
-      tg_sync_delete_enabled: groupUpload.value.sync_delete
+      tg_sync_delete_enabled: groupUpload.value.sync_delete,
+      bot_private_upload_enabled: privateUpload.value.enabled,
+      bot_private_upload_mode: privateUpload.value.mode,
+      bot_private_admin_ids: privateUpload.value.admin_ids,
     }
     const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
       method: 'PUT',
@@ -845,7 +906,7 @@ const openEditModal = (name: string) => {
     base_path: cfg.base_path || '',
     rclone_bin: cfg.rclone_bin || '',
     config_path: cfg.config_path || '',
-    use_as_bot: false
+    use_as_bot: cfg.is_bot || false
   }
   showBackendModal.value = true
 }

@@ -501,11 +501,20 @@
                 <p class="text-xs text-stone-500 dark:text-stone-400">通过 Telegram Bot 认证用户身份</p>
               </div>
             </div>
-            <UToggle v-model="settings.tg_auth_enabled" size="lg" />
+            <UToggle v-model="settings.tg_auth_enabled" size="lg" :disabled="!settings.bot_token_configured" />
           </div>
         </template>
 
-        <div v-if="!settings.tg_auth_enabled" class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+        <div v-if="!settings.bot_token_configured" class="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl">
+          <div class="flex items-center gap-3">
+            <UIcon name="heroicons:exclamation-triangle" class="w-5 h-5 text-amber-500" />
+            <p class="text-sm text-amber-700 dark:text-amber-400">
+              TG 认证需要先配置 Telegram Bot Token。请在「Telegram 设置」中配置 Bot Token 后再开启。
+            </p>
+          </div>
+        </div>
+
+        <div v-else-if="!settings.tg_auth_enabled" class="p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
           <div class="flex items-center gap-3">
             <UIcon name="heroicons:information-circle" class="w-5 h-5 text-stone-400" />
             <p class="text-sm text-stone-500 dark:text-stone-400">
@@ -726,6 +735,7 @@ const settings = ref({
   allowed_extensions: 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico',
   // TG 认证
   tg_auth_enabled: false,
+  bot_token_configured: false,
   tg_auth_required_for_token: false,
   tg_bind_token_enabled: false,
   tg_max_tokens_per_user: 5,
@@ -853,9 +863,16 @@ const loadSettings = async () => {
 
     if (response.success) {
       const data = response.data
+      // 只提取 settings ref 中已定义的字段，避免 storage.vue 管理的字段被混入
+      const filtered: Record<string, any> = {}
+      for (const key of Object.keys(settings.value)) {
+        if (key in data) {
+          filtered[key] = data[key]
+        }
+      }
       settings.value = {
         ...settings.value,
-        ...data,
+        ...filtered,
         cloudflare_api_token: '',
         proxy_url: '',
       }
@@ -884,7 +901,9 @@ const saveSettings = async () => {
     if (!payload.cloudflare_api_token) {
       delete (payload as any).cloudflare_api_token
     }
-    if (!payload.proxy_url) {
+    // proxy_url：未输入新值时不发送（避免覆盖已有配置）
+    // 但如果后端已有代理且用户主动清空，需要发送空字符串以清除
+    if (!payload.proxy_url && !settings.value.proxy_url_set) {
       delete (payload as any).proxy_url
     }
 
@@ -896,7 +915,15 @@ const saveSettings = async () => {
 
     if (response.success) {
       notification.success('保存成功', response.message || '系统设置已更新')
-      settings.value = { ...settings.value, ...response.data, cloudflare_api_token: '', proxy_url: '' }
+      // 同样用白名单过滤响应数据
+      const respData = response.data || {}
+      const filteredResp: Record<string, any> = {}
+      for (const key of Object.keys(settings.value)) {
+        if (key in respData) {
+          filteredResp[key] = respData[key]
+        }
+      }
+      settings.value = { ...settings.value, ...filteredResp, cloudflare_api_token: '', proxy_url: '' }
       originalSettings.value = { ...settings.value }
 
       if (response.tokens_disabled > 0) {
@@ -950,6 +977,13 @@ const revokeTokens = async (type: 'guest' | 'all') => {
 watch(() => settings.value.tg_auth_required_for_token, (required) => {
   if (required) {
     settings.value.tg_bind_token_enabled = true
+  }
+})
+
+// Bot 未配置时强制关闭 TG 认证
+watch(() => settings.value.bot_token_configured, (configured) => {
+  if (!configured) {
+    settings.value.tg_auth_enabled = false
   }
 })
 

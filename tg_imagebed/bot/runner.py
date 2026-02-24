@@ -15,7 +15,7 @@ from ..bot_control import (
 )
 from .state import _set_bot_status, _get_bot_status, _utc_iso, set_bot_instance, set_bot_loop
 from .handlers import start, handle_photo, handle_verify_text
-from .commands import help_command, myuploads_command, delete_command, id_command, callback_handler, login_command, mytokens_command
+from .commands import help_command, myuploads_command, delete_command, id_command, callback_handler, login_command, mytokens_command, settoken_command
 
 
 def start_telegram_bot_thread():
@@ -153,6 +153,7 @@ def run_telegram_bot():
                 telegram_app.add_handler(CommandHandler("delete", delete_command))
                 telegram_app.add_handler(CommandHandler("login", login_command))
                 telegram_app.add_handler(CommandHandler("mytokens", mytokens_command))
+                telegram_app.add_handler(CommandHandler("settoken", settoken_command))
                 telegram_app.add_handler(MessageHandler(
                     filters.PHOTO | filters.Document.ALL,
                     handle_photo
@@ -182,6 +183,7 @@ def run_telegram_bot():
                     BotCommand("delete", "删除你上传的图片"),
                     BotCommand("login", "获取 Web 端登录链接"),
                     BotCommand("mytokens", "查看我的 Token"),
+                    BotCommand("settoken", "设置默认上传 Token"),
                 ])
                 logger.info("Bot 命令菜单已注册")
 

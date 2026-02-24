@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """TG 认证 API 路由"""
+import time
 import asyncio
+from collections import defaultdict
 from flask import request, jsonify, make_response
 
 from . import auth_bp
@@ -15,6 +17,38 @@ from ..database import (
     get_system_setting_int,
     get_web_verify_status,
 )
+
+
+class SimpleRateLimiter:
+    """简单的内存速率限制器"""
+    def __init__(self, max_requests: int, window_seconds: int):
+        self._max = max_requests
+        self._window = window_seconds
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        cutoff = now - self._window
+        reqs = self._requests[key]
+        # 清理过期记录
+        self._requests[key] = [t for t in reqs if t > cutoff]
+        if len(self._requests[key]) >= self._max:
+            return False
+        self._requests[key].append(now)
+        return True
+
+
+# 速率限制器实例
+_code_limiter = SimpleRateLimiter(max_requests=5, window_seconds=60)    # 验证码请求
+_verify_limiter = SimpleRateLimiter(max_requests=10, window_seconds=60)  # 验证码验证
+
+
+def _is_secure_request() -> bool:
+    """检测当前请求是否通过 HTTPS（兼容反向代理）"""
+    if request.is_secure:
+        return True
+    proto = (request.headers.get('X-Forwarded-Proto') or '').strip().lower()
+    return proto == 'https'
 
 
 def _get_client_ip() -> str:
@@ -46,6 +80,9 @@ def tg_request_code():
     err = _check_tg_auth_enabled()
     if err:
         return err
+
+    if not _code_limiter.is_allowed(_get_client_ip()):
+        return add_cache_headers(jsonify({'success': False, 'error': '请求过于频繁，请稍后再试'}), 'no-cache'), 429
 
     data = request.get_json(silent=True) or {}
     tg_username = (data.get('tg_username') or '').strip().lstrip('@')
@@ -118,6 +155,9 @@ def tg_verify_code():
     if err:
         return err
 
+    if not _verify_limiter.is_allowed(_get_client_ip()):
+        return add_cache_headers(jsonify({'success': False, 'error': '验证过于频繁，请稍后再试'}), 'no-cache'), 429
+
     data = request.get_json(silent=True) or {}
     code = (data.get('code') or '').strip()
     if not code:
@@ -147,7 +187,8 @@ def tg_verify_code():
     resp.set_cookie(
         'tg_session', session_token,
         max_age=expire_days * 86400,
-        httponly=True, samesite='Lax', path='/'
+        httponly=True, samesite='Lax', path='/',
+        secure=_is_secure_request()
     )
     return resp
 
@@ -186,7 +227,8 @@ def tg_login_link():
     resp.set_cookie(
         'tg_session', session_token,
         max_age=expire_days * 86400,
-        httponly=True, samesite='Lax', path='/'
+        httponly=True, samesite='Lax', path='/',
+        secure=_is_secure_request()
     )
     return resp
 
@@ -239,6 +281,9 @@ def tg_web_code():
     if err:
         return err
 
+    if not _code_limiter.is_allowed(_get_client_ip()):
+        return add_cache_headers(jsonify({'success': False, 'error': '请求过于频繁，请稍后再试'}), 'no-cache'), 429
+
     # 生成 web_verify 验证码（tg_user_id=NULL，等待 Bot 端消费）
     code = create_login_code(
         code_type='web_verify',
@@ -289,7 +334,8 @@ def tg_code_status():
         resp.set_cookie(
             'tg_session', result['session_token'],
             max_age=expire_days * 86400,
-            httponly=True, samesite='Lax', path='/'
+            httponly=True, samesite='Lax', path='/',
+            secure=_is_secure_request()
         )
         return resp
 
@@ -321,4 +367,49 @@ def tg_user_tokens():
     return add_cache_headers(jsonify({
         'success': True,
         'data': {'tokens': tokens}
+    }), 'no-cache')
+
+
+@auth_bp.route('/api/auth/tg/sync-tokens', methods=['GET'])
+def tg_sync_tokens():
+    """同步当前 TG 用户的所有 Token 到前端 vault（返回完整 token 字符串）
+
+    安全性：需要有效 TG session，仅返回该用户名下的 Token。
+    """
+    err = _check_tg_auth_enabled()
+    if err:
+        return err
+
+    session_info = _get_tg_session_info()
+    if not session_info:
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '未登录'
+        }), 'no-cache'), 401
+
+    tokens = get_user_tokens(session_info['tg_user_id'])
+    tg_user_id = session_info['tg_user_id']
+    # 返回完整 token 字符串 + tokenInfo，供前端同步到本地 vault
+    result = []
+    for t in tokens:
+        if not t.get('is_active'):
+            continue
+        upload_count = t.get('upload_count', 0)
+        upload_limit = t.get('upload_limit', 0)
+        remaining = max(0, upload_limit - upload_count) if upload_limit > 0 else 0
+        result.append({
+            'token': t['token'],
+            'description': t.get('description', ''),
+            'upload_count': upload_count,
+            'upload_limit': upload_limit,
+            'remaining_uploads': remaining,
+            'expires_at': t.get('expires_at', ''),
+            'created_at': t.get('created_at', ''),
+            'last_used': t.get('last_used') or None,
+            'can_upload': remaining > 0 if upload_limit > 0 else True,
+            'tg_user_id': tg_user_id,
+        })
+
+    return add_cache_headers(jsonify({
+        'success': True,
+        'data': {'tokens': result}
     }), 'no-cache')

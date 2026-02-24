@@ -139,20 +139,24 @@ class TokenService:
         success = 0
         fail = 0
         active_val = 1 if is_active else 0
-        for tid in token_ids:
-            try:
-                with get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "UPDATE auth_tokens SET is_active = ? WHERE rowid = ?",
-                        (active_val, int(tid)),
-                    )
-                    if cursor.rowcount > 0:
-                        success += 1
-                    else:
+        try:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                for tid in token_ids:
+                    try:
+                        cursor.execute(
+                            "UPDATE auth_tokens SET is_active = ? WHERE rowid = ?",
+                            (active_val, int(tid)),
+                        )
+                        if cursor.rowcount > 0:
+                            success += 1
+                        else:
+                            fail += 1
+                    except Exception:
                         fail += 1
-            except Exception:
-                fail += 1
+        except Exception as e:
+            logger.error(f"TokenService 批量更新状态失败: {e}")
+            raise
         status_text = "启用" if is_active else "禁用"
         logger.info(f"TokenService 批量{status_text}: 成功={success}, 失败={fail}")
         return {"success_count": success, "fail_count": fail}
@@ -162,14 +166,42 @@ class TokenService:
         """批量级联删除，返回 {success_count, fail_count}。"""
         success = 0
         fail = 0
-        for tid in token_ids:
-            try:
-                if TokenService.delete_token(tid):
-                    success += 1
-                else:
-                    fail += 1
-            except Exception:
-                fail += 1
+        try:
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                for tid in token_ids:
+                    try:
+                        cursor.execute(
+                            "SELECT token FROM auth_tokens WHERE rowid = ?",
+                            (int(tid),),
+                        )
+                        row = cursor.fetchone()
+                        if not row:
+                            fail += 1
+                            continue
+                        token_str = row[0]
+                        cursor.execute(
+                            "UPDATE file_storage SET auth_token = NULL WHERE auth_token = ?",
+                            (token_str,),
+                        )
+                        cursor.execute(
+                            "UPDATE galleries SET owner_token = NULL WHERE owner_token = ?",
+                            (token_str,),
+                        )
+                        cursor.execute(
+                            "DELETE FROM gallery_token_access WHERE token = ?",
+                            (token_str,),
+                        )
+                        cursor.execute(
+                            "DELETE FROM auth_tokens WHERE rowid = ?",
+                            (int(tid),),
+                        )
+                        success += 1
+                    except Exception:
+                        fail += 1
+        except Exception as e:
+            logger.error(f"TokenService 批量删除失败: {e}")
+            raise
         logger.info(f"TokenService 批量删除: 成功={success}, 失败={fail}")
         return {"success_count": success, "fail_count": fail}
 

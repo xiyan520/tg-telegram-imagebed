@@ -198,6 +198,9 @@ def upload_with_token():
     if not verification['valid']:
         return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
 
+    # 保存首次验证的剩余上传次数，避免上传后二次查询
+    initial_remaining = verification.get('remaining_uploads', 0)
+
     # 检查每日上传限制（按 token 统计）
     daily_limit = get_system_setting_int('daily_upload_limit', 0, minimum=0, maximum=1000000)
     if daily_limit > 0:
@@ -262,9 +265,8 @@ def upload_with_token():
         base_url = get_domain(request)
         permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
-        # 获取剩余上传次数
-        verification_after = verify_auth_token(token)
-        remaining = verification_after.get('remaining_uploads', 0) if verification_after['valid'] else 0
+        # 计算剩余上传次数（基于首次验证结果，无需二次查询）
+        remaining = max(0, initial_remaining - 1)
 
         logger.info(f"游客上传完成: {file.filename} -> {result['encrypted_id']}, 剩余: {remaining}次")
 
@@ -409,7 +411,25 @@ def bind_token_to_tg():
     if not result.get('valid'):
         return add_cache_headers(jsonify({'success': False, 'error': 'Token无效'}), 'no-cache'), 401
 
-    bind_token_to_user(token, session_info['tg_user_id'])
+    # 检查 Token 是否已被其他用户绑定
+    token_data = result['token_data']
+    existing_tg_user_id = token_data.get('tg_user_id')
+    current_tg_user_id = session_info['tg_user_id']
+
+    if existing_tg_user_id and str(existing_tg_user_id) != str(current_tg_user_id):
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '该 Token 已被其他用户绑定'
+        }), 'no-cache'), 409
+
+    # 未绑定时检查当前用户 Token 数量上限
+    if not existing_tg_user_id:
+        max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
+        if get_user_token_count(current_tg_user_id) >= max_tokens:
+            return add_cache_headers(jsonify({
+                'success': False, 'error': f'已达到 Token 上限（{max_tokens}个）'
+            }), 'no-cache'), 403
+
+    bind_token_to_user(token, current_tg_user_id)
     return add_cache_headers(jsonify({'success': True, 'message': '绑定成功'}), 'no-cache')
 
 

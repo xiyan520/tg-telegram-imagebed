@@ -73,7 +73,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/myuploads — 查看个人上传历史\n"
         "/delete <ID> — 删除你上传的图片\n"
         "/login — 获取 Web 端登录链接\n"
-        "/mytokens — 查看我的 Token\n\n"
+        "/mytokens — 查看我的 Token\n"
+        "/settoken — 设置默认上传 Token\n\n"
         "💡 *使用方法*\n"
         "直接发送图片即可获取永久直链\n"
         "发送图片时附带说明文字可自定义文件名"
@@ -238,6 +239,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _handle_confirm_delete(query)
     elif data.startswith("qdel:"):
         await _handle_quick_delete(query)
+    elif data.startswith("stk:"):
+        await _handle_settoken_callback(query)
     else:
         logger.warning(f"未知 callback_data: {data}")
 
@@ -335,7 +338,74 @@ async def _handle_quick_delete(query):
         await query.edit_message_text("❌ 删除失败，请稍后重试")
 
 
+async def _handle_settoken_callback(query):
+    """处理 /settoken 选择回调"""
+    from ..database import set_default_upload_token
+
+    user = query.from_user
+    if not user:
+        return
+
+    try:
+        idx = int(query.data[len('stk:'):])
+    except (ValueError, IndexError):
+        return
+
+    # 从缓存中取出该用户的 token 列表
+    token_list = _settoken_pending.pop(user.id, None)
+    if not token_list or idx < 0 or idx >= len(token_list):
+        await query.edit_message_text("❌ 选择已过期，请重新使用 /settoken")
+        return
+
+    token = token_list[idx]
+    if set_default_upload_token(user.id, token):
+        masked = _mask_token(token)
+        await query.edit_message_text(f"✅ 默认上传 Token 已更新\n🔑 `{masked}`", parse_mode='Markdown')
+    else:
+        await query.edit_message_text("❌ 设置失败，请检查 Token 是否有效")
+
+
 # ===================== TG 认证命令 =====================
+
+# /settoken 待选缓存：{tg_user_id: [token_str, ...]}
+_settoken_pending: dict[int, list[str]] = {}
+
+
+def _mask_token(token: str) -> str:
+    """将 Token 脱敏显示（前8后4）"""
+    if len(token) > 12:
+        return f"{token[:8]}…{token[-4:]}"
+    return token
+
+
+async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """处理 /settoken 命令 — 选择默认上传 Token"""
+    from ..database import get_active_user_tokens
+
+    user = update.effective_user
+    if not user:
+        await update.message.reply_text("❌ 无法获取用户信息")
+        return
+
+    tokens = get_active_user_tokens(user.id)
+    if not tokens:
+        await update.message.reply_text("❌ 你还没有绑定任何 Token\n\n💡 请先通过 Web 端登录并生成 Token")
+        return
+
+    # 始终弹出选择列表
+    _settoken_pending[user.id] = [t['token'] for t in tokens]
+    buttons = []
+    for i, t in enumerate(tokens):
+        masked = _mask_token(t['token'])
+        label = f"{'✅ ' if t['is_default_upload'] else ''}{masked}"
+        if t.get('description'):
+            label += f" ({t['description']})"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"stk:{i}")])
+
+    markup = InlineKeyboardMarkup(buttons)
+    header = f"🔑 选择默认上传 Token（共 {len(tokens)} 个）："
+    await update.message.reply_text(header, reply_markup=markup)
+
 
 async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理 /login 命令 — 生成 Web 端一次性登录链接"""
@@ -382,8 +452,10 @@ async def login_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def mytokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """处理 /mytokens 命令 — 查看绑定的 Token"""
+    """处理 /mytokens 命令 — 查看绑定的 Token（增强版）"""
+    from datetime import datetime
     from ..database import get_system_setting, get_user_tokens
+    from ..utils import get_domain
 
     if str(get_system_setting('tg_auth_enabled') or '0') != '1':
         await update.message.reply_text("❌ TG 认证功能未启用")
@@ -403,10 +475,52 @@ async def mytokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for t in tokens:
         token_str = t['token']
         masked = f"{token_str[:8]}…{token_str[-4:]}" if len(token_str) > 12 else token_str
-        status = "✅" if t['is_active'] else "❌"
+        status = "✅" if t['is_active'] else "🚫"
         usage = f"{t['upload_count']}/{t['upload_limit']}"
         desc = t.get('description') or ''
         desc_str = f" | {desc}" if desc else ''
-        lines.append(f"• `{masked}` {status} {usage}{desc_str}")
 
-    await update.message.reply_text('\n'.join(lines), parse_mode='Markdown')
+        # 过期状态
+        expire_str = ""
+        if t.get('expires_at'):
+            try:
+                exp_dt = datetime.fromisoformat(str(t['expires_at']).replace('Z', '+00:00'))
+                if exp_dt.tzinfo is not None:
+                    exp_dt = exp_dt.astimezone().replace(tzinfo=None)
+                now = datetime.now()
+                if now > exp_dt:
+                    expire_str = " ⏰已过期"
+                else:
+                    delta = exp_dt - now
+                    days_left = delta.days
+                    if days_left > 30:
+                        expire_str = f" | 剩余{days_left}天"
+                    elif days_left > 0:
+                        expire_str = f" | ⚠️剩余{days_left}天"
+                    else:
+                        hours_left = int(delta.total_seconds() / 3600)
+                        expire_str = f" | ⚠️剩余{hours_left}小时"
+            except (ValueError, TypeError):
+                pass
+
+        # 最后使用时间
+        last_used_str = ""
+        if t.get('last_used'):
+            try:
+                lu_dt = datetime.fromisoformat(str(t['last_used']).replace('Z', '+00:00'))
+                if lu_dt.tzinfo is not None:
+                    lu_dt = lu_dt.astimezone().replace(tzinfo=None)
+                last_used_str = f"\n  📅 最后使用: {lu_dt.strftime('%m-%d %H:%M')}"
+            except (ValueError, TypeError):
+                pass
+
+        lines.append(f"• `{masked}` {status} {usage}{desc_str}{expire_str}{last_used_str}")
+
+    # 构建 inline 按钮：跳转 Web 端
+    base_url = get_domain(None)
+    buttons = []
+    if base_url:
+        buttons.append([InlineKeyboardButton("🌐 在 Web 端管理", url=f"{base_url}/album")])
+    markup = InlineKeyboardMarkup(buttons) if buttons else None
+
+    await update.message.reply_text('\n'.join(lines), parse_mode='Markdown', reply_markup=markup)

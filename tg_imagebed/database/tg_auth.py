@@ -218,6 +218,22 @@ def delete_tg_session(session_token: str) -> bool:
 # ===================== Token 绑定管理 =====================
 
 @db_retry()
+def has_bound_tokens(tg_user_id: int) -> bool:
+    """检查 TG 用户是否有绑定的 Token（不限激活状态）"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                'SELECT 1 FROM auth_tokens WHERE tg_user_id = ? LIMIT 1',
+                (tg_user_id,)
+            )
+            return cursor.fetchone() is not None
+    except Exception as e:
+        logger.error(f"has_bound_tokens 失败: {e}")
+        return False
+
+
+@db_retry()
 def get_user_token_count(tg_user_id: int) -> int:
     """获取用户绑定的有效 Token 数量"""
     try:
@@ -242,7 +258,7 @@ def get_user_tokens(tg_user_id: int) -> List[Dict]:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT rowid AS id, token, created_at, expires_at, upload_count, upload_limit,
-                       is_active, description
+                       is_active, description, last_used, tg_user_id
                 FROM auth_tokens
                 WHERE tg_user_id = ?
                 ORDER BY created_at DESC
@@ -282,6 +298,82 @@ def unbind_token_from_user(token: str, tg_user_id: int) -> bool:
             return cursor.rowcount > 0
     except Exception as e:
         logger.error(f"unbind_token_from_user 失败: {e}")
+        return False
+
+
+# ===================== 默认上传 Token 管理 =====================
+
+@db_retry()
+def get_active_user_tokens(tg_user_id: int) -> List[Dict]:
+    """获取用户所有活跃的绑定 Token（用于上传选择列表）"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT token, description, is_default_upload
+                FROM auth_tokens
+                WHERE tg_user_id = ? AND is_active = 1
+                ORDER BY is_default_upload DESC, last_used DESC
+            ''', (tg_user_id,))
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as e:
+        logger.error(f"get_active_user_tokens 失败: {e}")
+        return []
+
+
+@db_retry()
+def get_default_upload_token(tg_user_id: int) -> Optional[str]:
+    """获取用户的默认上传 Token
+
+    优先返回显式标记 is_default_upload=1 的 Token，
+    若无则回退到最近使用的活跃 Token。
+    """
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 优先查找显式标记的默认 Token
+            cursor.execute('''
+                SELECT token FROM auth_tokens
+                WHERE tg_user_id = ? AND is_active = 1 AND is_default_upload = 1
+                LIMIT 1
+            ''', (tg_user_id,))
+            row = cursor.fetchone()
+            if row:
+                return row['token']
+
+            # 回退：最近使用的活跃 Token
+            cursor.execute('''
+                SELECT token FROM auth_tokens
+                WHERE tg_user_id = ? AND is_active = 1
+                ORDER BY last_used DESC NULLS LAST, created_at DESC
+                LIMIT 1
+            ''', (tg_user_id,))
+            row = cursor.fetchone()
+            return row['token'] if row else None
+    except Exception as e:
+        logger.error(f"get_default_upload_token 失败: {e}")
+        return None
+
+
+@db_retry()
+def set_default_upload_token(tg_user_id: int, token: str) -> bool:
+    """设置用户的默认上传 Token（清除旧的默认标记后设置新的）"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            # 清除该用户所有 Token 的默认标记
+            cursor.execute(
+                'UPDATE auth_tokens SET is_default_upload = 0 WHERE tg_user_id = ?',
+                (tg_user_id,)
+            )
+            # 设置指定 Token 为默认
+            cursor.execute(
+                'UPDATE auth_tokens SET is_default_upload = 1 WHERE tg_user_id = ? AND token = ?',
+                (tg_user_id, token)
+            )
+            return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"set_default_upload_token 失败: {e}")
         return False
 
 

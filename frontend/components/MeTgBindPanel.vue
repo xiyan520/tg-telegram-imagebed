@@ -78,23 +78,48 @@
         </div>
 
         <div v-else-if="loginCode && loginStatus === 'pending'" class="space-y-4">
-          <div class="flex flex-col items-center gap-2">
-            <p class="text-sm text-gray-500">请将以下验证码发送给 Bot</p>
-            <div class="text-4xl font-mono font-bold tracking-[0.3em] text-primary select-all py-3">
-              {{ loginCode }}
-            </div>
-          </div>
-          <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-            <div class="flex items-start gap-3">
-              <UIcon name="heroicons:chat-bubble-left-right" class="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-              <div class="text-sm text-blue-700 dark:text-blue-300 space-y-2">
-                <p class="font-medium">操作步骤</p>
-                <ol class="list-decimal list-inside space-y-1">
-                  <li>点击下方按钮打开 Bot</li>
-                  <li>将上方 6 位验证码发送给 Bot</li>
-                  <li>等待自动绑定完成</li>
-                </ol>
+          <div class="flex flex-col items-center gap-3">
+            <p class="text-sm text-stone-500 dark:text-stone-400">请将验证码发送给 Bot</p>
+            <!-- 6 位数字卡片 -->
+            <div class="flex gap-2">
+              <div
+                v-for="(char, idx) in loginCode.split('')"
+                :key="idx"
+                class="w-11 h-14 flex items-center justify-center rounded-lg border-2 border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20 text-2xl font-mono font-bold text-amber-700 dark:text-amber-300"
+              >
+                {{ char }}
               </div>
+            </div>
+            <!-- 一键复制 -->
+            <UButton
+              size="sm" color="gray" variant="soft"
+              icon="heroicons:clipboard-document"
+              @click="copyCode"
+            >
+              复制验证码
+            </UButton>
+          </div>
+          <!-- 操作步骤图标流程 -->
+          <div class="flex items-center justify-center gap-4 py-3">
+            <div class="flex flex-col items-center gap-1">
+              <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <UIcon name="heroicons:clipboard-document" class="w-5 h-5 text-blue-500" />
+              </div>
+              <span class="text-xs text-stone-400">复制</span>
+            </div>
+            <UIcon name="heroicons:arrow-right" class="w-4 h-4 text-stone-300" />
+            <div class="flex flex-col items-center gap-1">
+              <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <UIcon name="heroicons:paper-airplane" class="w-5 h-5 text-blue-500" />
+              </div>
+              <span class="text-xs text-stone-400">发送</span>
+            </div>
+            <UIcon name="heroicons:arrow-right" class="w-4 h-4 text-stone-300" />
+            <div class="flex flex-col items-center gap-1">
+              <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <UIcon name="heroicons:check-circle" class="w-5 h-5 text-blue-500" />
+              </div>
+              <span class="text-xs text-stone-400">完成</span>
             </div>
           </div>
           <UButton
@@ -238,6 +263,13 @@ const boundTokenItems = computed(() =>
 )
 // PLACEHOLDER_METHODS
 
+const copyCode = async () => {
+  try {
+    await navigator.clipboard.writeText(loginCode.value)
+    toast.success('已复制')
+  } catch { toast.error('复制失败') }
+}
+
 const openUnbindModal = () => {
   showUnbindModal.value = true
 }
@@ -272,11 +304,13 @@ const startPolling = () => {
         stopPolling()
         loginStarted.value = false
         toast.success('TG 绑定成功')
+        // 绑定成功后同步该 TG 用户下所有 Token 到本地 vault
+        await tgAuth.syncTokensToVault()
       } else if (res.status === 'expired') {
         stopPolling()
       }
     } catch { /* 静默 */ }
-  }, 2000)
+  }, 3000)
 }
 
 const stopPolling = () => {

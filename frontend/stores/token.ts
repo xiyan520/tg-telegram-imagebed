@@ -256,6 +256,16 @@ export const useTokenStore = defineStore('token', {
         throw new Error('未提供Token')
       }
 
+      // 5 分钟缓存：如果最近验证过且有 tokenInfo，跳过 API 调用
+      const active = this.vault.items.find(i => i.id === this.vault.activeId)
+      if (active?.lastVerifiedAt && active.tokenInfo) {
+        const elapsed = Date.now() - new Date(active.lastVerifiedAt).getTime()
+        if (elapsed < 5 * 60 * 1000) {
+          this.tokenInfo = active.tokenInfo
+          return active.tokenInfo
+        }
+      }
+
       const config = useRuntimeConfig()
 
       try {

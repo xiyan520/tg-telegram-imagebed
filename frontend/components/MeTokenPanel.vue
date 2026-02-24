@@ -29,7 +29,7 @@
       <div
         v-for="item in tokenStore.vaultItems"
         :key="item.id"
-        class="p-4 rounded-xl border transition-all cursor-pointer"
+        class="group p-4 rounded-xl border transition-all cursor-pointer"
         :class="item.id === tokenStore.activeVaultId
           ? 'border-amber-300 dark:border-amber-600 bg-amber-50/50 dark:bg-amber-900/10'
           : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'"
@@ -57,7 +57,10 @@
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-400">
               <span>{{ item.tokenInfo?.upload_count ?? '?' }} / {{ item.tokenInfo?.upload_limit ?? '?' }} 次上传</span>
               <span v-if="item.albumName">· {{ item.albumName }}</span>
-              <span v-if="item.tokenInfo?.expires_at">· 到期 {{ formatDate(item.tokenInfo.expires_at) }}</span>
+              <span v-if="item.tokenInfo?.expires_at" class="inline-flex items-center gap-0.5">
+                · <UIcon name="heroicons:clock" class="w-3 h-3" />
+                {{ formatDate(item.tokenInfo.expires_at) }}
+              </span>
               <template v-if="item.tokenInfo?.tg_user_id && tgAuth.isLoggedIn && tgAuth.user">
                 <span class="inline-flex items-center gap-0.5 text-blue-500">
                   <UIcon name="heroicons:chat-bubble-left-right" class="w-3 h-3" />
@@ -65,20 +68,34 @@
                 </span>
               </template>
             </div>
+            <!-- 配额进度条 -->
+            <div v-if="item.tokenInfo" class="mt-2">
+              <div class="h-1.5 bg-stone-100 dark:bg-neutral-700 rounded-full overflow-hidden">
+                <div
+                  class="h-full rounded-full transition-all duration-500"
+                  :class="getQuotaColor(item)"
+                  :style="{ width: `${getQuotaPercent(item)}%` }"
+                />
+              </div>
+            </div>
           </div>
-          <!-- 操作按钮 -->
+          <!-- 状态标签 + 操作按钮 -->
           <div class="flex items-center gap-1 flex-shrink-0">
             <UBadge v-if="item.id === tokenStore.activeVaultId" size="xs" color="amber" variant="soft">当前</UBadge>
-            <UButton
-              v-if="tgAuth.isLoggedIn && publicSettings.tgBindEnabled && !item.tokenInfo?.tg_user_id"
-              icon="heroicons:link" size="2xs" color="blue" variant="ghost" title="绑定 TG"
-              :loading="bindingTokenId === item.id"
-              @click.stop="bindTokenToTg(item)"
-            />
-            <UButton
-              icon="heroicons:trash" size="2xs" color="red" variant="ghost"
-              @click.stop="removeToken(item.id)"
-            />
+            <UBadge v-if="item.tokenInfo?.tg_user_id" size="xs" color="blue" variant="soft"><UIcon name="heroicons:link" class="w-3 h-3 mr-0.5" />TG</UBadge>
+            <UBadge v-else-if="tgAuth.isLoggedIn && publicSettings.tgBindEnabled" size="xs" color="orange" variant="outline">未绑定</UBadge>
+            <div class="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <UButton
+                v-if="tgAuth.isLoggedIn && publicSettings.tgBindEnabled && !item.tokenInfo?.tg_user_id"
+                icon="heroicons:link" size="2xs" color="blue" variant="ghost" title="绑定 TG"
+                :loading="bindingTokenId === item.id"
+                @click.stop="bindTokenToTg(item)"
+              />
+              <UButton
+                icon="heroicons:trash" size="2xs" color="red" variant="ghost"
+                @click.stop="removeToken(item.id)"
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -135,6 +152,19 @@ const canCreateToken = computed(() => {
 
 const formatDate = (d: string) => {
   try { return new Date(d).toLocaleDateString('zh-CN') } catch { return d }
+}
+
+const getQuotaPercent = (item: any) => {
+  const count = item.tokenInfo?.upload_count ?? 0
+  const limit = item.tokenInfo?.upload_limit ?? 1
+  return Math.min(100, Math.round((count / limit) * 100))
+}
+
+const getQuotaColor = (item: any) => {
+  const pct = getQuotaPercent(item)
+  if (pct > 90) return 'bg-red-500'
+  if (pct > 70) return 'bg-orange-500'
+  return 'bg-gradient-to-r from-amber-400 to-orange-400'
 }
 
 const copyToken = async (token: string) => {

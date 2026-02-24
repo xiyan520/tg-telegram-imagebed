@@ -34,6 +34,8 @@ def admin_tokens_api():
         if request.method == 'GET':
             status = (request.args.get('status') or 'all').strip().lower()
             search = (request.args.get('search') or '').strip() or None
+            tg_user_id = request.args.get('tg_user_id', type=int)
+            tg_bind = (request.args.get('tg_bind') or '').strip().lower() or None
             try:
                 page = int(request.args.get('page', 1))
             except (TypeError, ValueError):
@@ -43,7 +45,10 @@ def admin_tokens_api():
             except (TypeError, ValueError):
                 page_size = 20
 
-            data = admin_list_tokens(status=status, page=page, page_size=page_size, search=search)
+            data = admin_list_tokens(
+                status=status, page=page, page_size=page_size,
+                search=search, tg_user_id=tg_user_id, tg_bind=tg_bind
+            )
             return _admin_json({'success': True, 'data': data})
 
         # POST: 创建新 Token

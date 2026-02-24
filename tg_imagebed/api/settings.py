@@ -57,6 +57,8 @@ def _normalize_cdn_domain(value) -> str:
 
 def _format_settings_for_response(settings: dict) -> dict:
     """格式化设置用于 API 响应（敏感配置只返回是否已设置）"""
+    from ..bot_control import is_bot_token_configured
+
     return {
         # 游客上传策略
         'guest_upload_policy': settings.get('guest_upload_policy', 'open'),
@@ -85,6 +87,7 @@ def _format_settings_for_response(settings: dict) -> dict:
         # 群组上传配置
         'group_upload_admin_only': settings.get('group_upload_admin_only', '0') == '1',
         'group_admin_ids': settings.get('group_admin_ids', ''),
+        'group_upload_tg_bound_only': settings.get('group_upload_tg_bound_only', '0') == '1',
         'group_upload_reply': settings.get('group_upload_reply', '1') == '1',
         'group_upload_delete_delay': _safe_int(settings.get('group_upload_delete_delay'), 0, 0),
         # TG 同步删除
@@ -102,6 +105,7 @@ def _format_settings_for_response(settings: dict) -> dict:
         'allowed_extensions': settings.get('allowed_extensions', 'jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico'),
         # TG 认证
         'tg_auth_enabled': settings.get('tg_auth_enabled', '0') == '1',
+        'bot_token_configured': is_bot_token_configured(),
         'tg_auth_required_for_token': settings.get('tg_auth_required_for_token', '0') == '1',
         'tg_bind_token_enabled': settings.get('tg_bind_token_enabled', '0') == '1',
         'tg_max_tokens_per_user': _safe_int(settings.get('tg_max_tokens_per_user'), 5, 1, 100),
@@ -109,6 +113,10 @@ def _format_settings_for_response(settings: dict) -> dict:
         'tg_session_expire_days': _safe_int(settings.get('tg_session_expire_days'), 30, 1, 365),
         # 非 TG 用户 Token 限制
         'max_guest_tokens_per_ip': _safe_int(settings.get('max_guest_tokens_per_ip'), 3, 1, 100),
+        # 私聊上传配置
+        'bot_private_upload_enabled': settings.get('bot_private_upload_enabled', '1') == '1',
+        'bot_private_upload_mode': settings.get('bot_private_upload_mode', 'open'),
+        'bot_private_admin_ids': settings.get('bot_private_admin_ids', ''),
     }
 
 
@@ -305,6 +313,9 @@ def admin_system_settings():
                         errors.append('管理员 ID 格式无效，应为逗号分隔的数字')
                 settings_to_update['group_admin_ids'] = ids_str
 
+            if 'group_upload_tg_bound_only' in data:
+                settings_to_update['group_upload_tg_bound_only'] = '1' if data['group_upload_tg_bound_only'] else '0'
+
             if 'group_upload_reply' in data:
                 settings_to_update['group_upload_reply'] = '1' if data['group_upload_reply'] else '0'
 
@@ -348,6 +359,13 @@ def admin_system_settings():
                 if tg_bool_key in data:
                     settings_to_update[tg_bool_key] = '1' if data[tg_bool_key] else '0'
 
+            # Bot 未配置时不允许开启 TG 认证
+            if settings_to_update.get('tg_auth_enabled') == '1':
+                from ..bot_control import is_bot_token_configured
+                if not is_bot_token_configured():
+                    errors.append('TG 认证需要先配置 Telegram Bot Token')
+                    settings_to_update.pop('tg_auth_enabled', None)
+
             if 'tg_max_tokens_per_user' in data:
                 val = _safe_int(data['tg_max_tokens_per_user'], 5)
                 if val < 1 or val > 100:
@@ -376,6 +394,26 @@ def admin_system_settings():
                     errors.append('每 IP Token 上限必须在 1-100 之间')
                 else:
                     settings_to_update['max_guest_tokens_per_ip'] = str(val)
+
+            # 私聊上传配置
+            if 'bot_private_upload_enabled' in data:
+                settings_to_update['bot_private_upload_enabled'] = '1' if data['bot_private_upload_enabled'] else '0'
+
+            if 'bot_private_upload_mode' in data:
+                mode = str(data['bot_private_upload_mode']).strip().lower()
+                if mode not in ('open', 'tg_bound', 'admin_only'):
+                    errors.append('无效的私聊上传模式')
+                else:
+                    settings_to_update['bot_private_upload_mode'] = mode
+
+            if 'bot_private_admin_ids' in data:
+                ids_str = str(data['bot_private_admin_ids']).strip()
+                if ids_str:
+                    try:
+                        [int(x.strip()) for x in ids_str.split(',') if x.strip()]
+                    except ValueError:
+                        errors.append('私聊管理员 ID 格式无效')
+                settings_to_update['bot_private_admin_ids'] = ids_str
 
             # 允许的文件后缀
             svg_warning = ''

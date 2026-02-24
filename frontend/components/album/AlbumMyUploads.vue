@@ -2,21 +2,26 @@
   <div class="space-y-4">
     <!-- 顶部导航 -->
     <div class="flex items-center gap-3">
-      <UButton icon="heroicons:arrow-left" color="gray" variant="ghost" @click="$emit('navigate', 'list')" />
-      <div class="flex-1">
-        <h2 class="text-lg font-bold text-gray-900 dark:text-white">我的上传</h2>
-        <p class="text-sm text-gray-500">共 {{ total }} 张图片</p>
+      <button
+        class="w-9 h-9 rounded-xl bg-white dark:bg-neutral-800 border border-stone-200 dark:border-neutral-700 flex items-center justify-center hover:bg-stone-50 dark:hover:bg-neutral-700 transition-colors"
+        @click="$emit('navigate', 'list')"
+      >
+        <UIcon name="heroicons:arrow-left" class="w-4 h-4 text-stone-500" />
+      </button>
+      <div class="flex-1 min-w-0">
+        <h2 class="text-lg font-bold text-stone-900 dark:text-white">我的上传</h2>
+        <p class="text-xs text-stone-400 dark:text-stone-500">共 {{ total }} 张图片</p>
       </div>
     </div>
 
     <!-- 搜索和排序 -->
-    <div class="flex flex-wrap items-center gap-3">
+    <div class="flex flex-wrap items-center gap-2">
       <div class="flex-1 min-w-[200px]">
-        <UInput v-model="searchQuery" placeholder="搜索图片..." size="sm">
-          <template #leading><UIcon name="heroicons:magnifying-glass" class="w-4 h-4" /></template>
+        <UInput v-model="searchQuery" placeholder="搜索图片..." size="sm" :ui="{ rounded: 'rounded-xl' }">
+          <template #leading><UIcon name="heroicons:magnifying-glass" class="w-4 h-4 text-stone-400" /></template>
         </UInput>
       </div>
-      <USelect v-model="sortBy" :options="sortOptions" size="sm" />
+      <USelect v-model="sortBy" :options="sortOptions" size="sm" :ui="{ rounded: 'rounded-xl' }" />
     </div>
 
     <!-- 操作栏 -->
@@ -42,8 +47,9 @@
       @view-image="handleViewImage"
     />
 
+
     <!-- 分页 -->
-    <div v-if="totalPages > 1" class="flex justify-center">
+    <div v-if="totalPages > 1" class="flex justify-center pt-2">
       <UPagination v-model="currentPage" :total="total" :page-count="pageSize" @update:model-value="loadUploads" />
     </div>
 
@@ -51,28 +57,38 @@
     <UModal v-model="showAddToGallery">
       <UCard>
         <template #header>
-          <h3 class="text-lg font-semibold">添加到画集</h3>
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-semibold">添加到画集</h3>
+            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" size="sm" @click="showAddToGallery = false" />
+          </div>
         </template>
-        <div v-if="galleriesLoading" class="flex justify-center py-4">
+        <div v-if="galleriesLoading" class="flex justify-center py-6">
           <div class="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin" />
         </div>
-        <div v-else-if="galleryOptions.length === 0" class="text-center py-4 text-gray-500">
-          暂无画集，请先创建
+        <div v-else-if="galleryOptions.length === 0" class="text-center py-6">
+          <div class="w-12 h-12 mx-auto bg-stone-100 dark:bg-neutral-800 rounded-xl flex items-center justify-center mb-3">
+            <UIcon name="heroicons:rectangle-stack" class="w-6 h-6 text-stone-300 dark:text-neutral-600" />
+          </div>
+          <p class="text-sm text-stone-500">暂无画集，请先创建</p>
         </div>
-        <div v-else class="space-y-2 max-h-60 overflow-y-auto">
+        <div v-else class="space-y-1.5 max-h-60 overflow-y-auto">
           <div
             v-for="g in galleryOptions"
             :key="g.id"
-            class="flex items-center gap-3 p-2 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800"
-            :class="{ 'bg-amber-50 dark:bg-amber-900/20': targetGalleryId === g.id }"
+            class="flex items-center gap-3 p-2.5 rounded-xl cursor-pointer transition-all"
+            :class="targetGalleryId === g.id
+              ? 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700'
+              : 'hover:bg-stone-50 dark:hover:bg-neutral-800 border border-transparent'"
             @click="targetGalleryId = g.id"
           >
-            <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
-              :class="targetGalleryId === g.id ? 'border-amber-500 bg-amber-500' : 'border-gray-300'">
+            <div
+              class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-all"
+              :class="targetGalleryId === g.id ? 'border-amber-500 bg-amber-500' : 'border-stone-300 dark:border-neutral-600'"
+            >
               <UIcon v-if="targetGalleryId === g.id" name="heroicons:check" class="w-3 h-3 text-white" />
             </div>
-            <span class="flex-1 truncate">{{ g.name }}</span>
-            <span class="text-xs text-gray-400">{{ g.image_count }} 张</span>
+            <span class="flex-1 truncate text-sm text-stone-700 dark:text-stone-300">{{ g.name }}</span>
+            <span class="text-xs text-stone-400">{{ g.image_count }} 张</span>
           </div>
         </div>
         <template #footer>

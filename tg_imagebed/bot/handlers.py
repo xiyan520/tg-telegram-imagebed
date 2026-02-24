@@ -66,7 +66,8 @@ async def handle_photo(update: Update, context):
     """处理图片上传（私聊/群组/频道）"""
     from ..services.file_service import process_upload, record_existing_telegram_file
     from ..utils import get_domain, get_mime_type as _get_mime_type
-    from ..database import get_system_setting
+    from ..database import get_system_setting, has_bound_tokens
+    from ..database import get_active_user_tokens, get_default_upload_token
 
     message = update.effective_message
     chat = update.effective_chat
@@ -86,12 +87,39 @@ async def handle_photo(update: Update, context):
             user = update.effective_user
             if not user or not admin_ids or user.id not in admin_ids:
                 return
+        # 中间层：仅 TG 绑定用户（admin_only 未开启时才检查）
+        elif str(get_system_setting('group_upload_tg_bound_only') or '0') == '1':
+            user = update.effective_user
+            if not user or not has_bound_tokens(user.id):
+                return  # 静默拒绝（群组中不宜回复提示）
 
         reply_enabled = str(get_system_setting('group_upload_reply') or '1') == '1'
         try:
             delete_delay = max(0, int(get_system_setting('group_upload_delete_delay') or '0'))
         except (ValueError, TypeError):
             delete_delay = 0
+    else:
+        # 私聊上传权限检查（在文件下载之前执行，避免浪费带宽）
+        if str(get_system_setting('bot_private_upload_enabled') or '1') != '1':
+            await message.reply_text("❌ 私聊上传功能已关闭")
+            return
+
+        mode = str(get_system_setting('bot_private_upload_mode') or 'open').strip().lower()
+        user = update.effective_user
+
+        if mode == 'admin_only':
+            admin_raw = str(get_system_setting('bot_private_admin_ids') or '').strip()
+            admin_ids = _parse_id_list(admin_raw)
+            if not user or not admin_ids or user.id not in admin_ids:
+                await message.reply_text("❌ 仅管理员可通过私聊上传")
+                return
+        elif mode == 'tg_bound':
+            if not user or not has_bound_tokens(user.id):
+                await message.reply_text(
+                    "❌ 仅绑定 Token 的用户可通过私聊上传\n\n"
+                    "💡 请先使用 /login 登录 Web 端并生成 Token"
+                )
+                return
 
     # 获取用户信息
     user = update.effective_user
@@ -99,6 +127,25 @@ async def handle_photo(update: Update, context):
         username = user.username or user.full_name or str(user.id)
     else:
         username = getattr(chat, 'title', '') or 'channel'
+
+    # 解析上传关联 Token
+    upload_auth_token = None
+    if user:
+        active_tokens = get_active_user_tokens(user.id)
+        if len(active_tokens) == 1:
+            upload_auth_token = active_tokens[0]['token']
+        elif len(active_tokens) > 1:
+            default = get_default_upload_token(user.id)
+            if default:
+                upload_auth_token = default
+            else:
+                # 多 Token 无默认：提示用户选择（仅私聊提示，群组静默使用回退）
+                if not is_group:
+                    await message.reply_text(
+                        "⚠️ 你有多个 Token，请先设置默认上传 Token\n\n"
+                        "使用 /settoken 选择默认 Token"
+                    )
+                    return
 
     # 检测批量上传（media_group_id）
     media_group_id = getattr(message, 'media_group_id', None)
@@ -182,6 +229,7 @@ async def handle_photo(update: Update, context):
                 "content_type": content_type,
                 "message_id": message.message_id,
                 "username": username,
+                "auth_token": upload_auth_token,
             })
             batch.updated_at = time.monotonic()
             if batch.first_message_id is None or message.message_id < batch.first_message_id:
@@ -216,6 +264,7 @@ async def handle_photo(update: Update, context):
                 content_type=content_type,
                 username=username,
                 source='telegram_group',
+                auth_token=upload_auth_token,
                 is_group_upload=True,
                 group_message_id=message.message_id,
                 group_chat_id=chat.id,
@@ -227,6 +276,7 @@ async def handle_photo(update: Update, context):
                 content_type=content_type,
                 username=username,
                 source='telegram_bot',
+                auth_token=upload_auth_token,
                 is_group_upload=False,
                 group_message_id=None,
                 upload_scene=None

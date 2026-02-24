@@ -47,6 +47,18 @@
             <p class="mt-1 text-sm text-stone-800 dark:text-stone-200 truncate">{{ tokenDetail.description?.trim() || '--' }}</p>
           </div>
         </div>
+
+        <!-- TG 绑定信息 -->
+        <div v-if="tokenDetail.tg_user_id" class="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/15 border border-blue-200/60 dark:border-blue-800/40">
+          <div class="flex items-center gap-2 mb-1.5">
+            <UIcon name="heroicons:chat-bubble-left-right" class="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+            <span class="text-xs font-medium text-blue-700 dark:text-blue-300">Telegram 绑定</span>
+          </div>
+          <div class="text-sm text-stone-800 dark:text-stone-200">
+            {{ tokenDetail.tg_first_name || '' }}{{ tokenDetail.tg_username ? ` @${tokenDetail.tg_username}` : '' }}
+          </div>
+          <div class="text-xs text-stone-500 dark:text-stone-400 mt-0.5 font-mono">ID: {{ tokenDetail.tg_user_id }}</div>
+        </div>
         <!-- 时间信息 -->
         <div class="grid grid-cols-3 gap-3 text-sm">
           <div>

@@ -266,6 +266,7 @@ def init_database(quiet: bool = False) -> None:
                 ('user_agent', 'TEXT'),
                 ('description', 'TEXT'),
                 ('tg_user_id', 'INTEGER'),
+                ('is_default_upload', 'BOOLEAN DEFAULT 0'),
             ]
 
             for col_name, col_type in auth_new_columns:

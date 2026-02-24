@@ -153,6 +153,7 @@ async def _flush_media_group(
                 content_type=item.get("content_type", "image/jpeg"),
                 username=item.get("username", ""),
                 source="telegram_group",
+                auth_token=item.get("auth_token"),
                 is_group_upload=True,
                 group_message_id=item.get("message_id"),
                 group_chat_id=batch.chat_id,

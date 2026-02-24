@@ -129,6 +129,44 @@
         </div>
       </UCard>
 
+      <!-- TG 用户关联卡片 -->
+      <UCard v-if="tokenDetail.tg_user_id">
+        <div class="flex items-start gap-4">
+          <div class="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
+            <UIcon name="heroicons:chat-bubble-left-right" class="w-6 h-6 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-sm font-semibold text-stone-900 dark:text-white">Telegram 用户</span>
+              <UBadge color="blue" variant="subtle" size="xs">已绑定</UBadge>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
+              <div>
+                <span class="text-[11px] text-stone-400 dark:text-stone-500">用户名</span>
+                <p class="text-stone-800 dark:text-stone-200">{{ tokenDetail.tg_username ? `@${tokenDetail.tg_username}` : '--' }}</p>
+              </div>
+              <div>
+                <span class="text-[11px] text-stone-400 dark:text-stone-500">名称</span>
+                <p class="text-stone-800 dark:text-stone-200">{{ [tokenDetail.tg_first_name, tokenDetail.tg_last_name].filter(Boolean).join(' ') || '--' }}</p>
+              </div>
+              <div>
+                <span class="text-[11px] text-stone-400 dark:text-stone-500">TG User ID</span>
+                <p class="text-stone-800 dark:text-stone-200 font-mono text-xs">{{ tokenDetail.tg_user_id }}</p>
+              </div>
+            </div>
+          </div>
+          <UButton
+            size="xs"
+            color="blue"
+            variant="soft"
+            icon="heroicons:funnel"
+            @click="navigateTo(`/admin/tokens?tg_user_id=${tokenDetail.tg_user_id}`)"
+          >
+            该用户所有Token
+          </UButton>
+        </div>
+      </UCard>
+
       <!-- Tab 切换 -->
       <UCard>
         <template #header>

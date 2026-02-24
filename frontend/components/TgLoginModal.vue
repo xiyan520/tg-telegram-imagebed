@@ -62,23 +62,48 @@
         </div>
 
         <div v-else-if="loginCode && loginStatus === 'pending'" class="space-y-5">
-          <div class="flex flex-col items-center gap-2">
-            <p class="text-sm text-gray-500">请将以下验证码发送给 Bot</p>
-            <div class="text-4xl font-mono font-bold tracking-[0.3em] text-primary select-all py-3">
-              {{ loginCode }}
-            </div>
-          </div>
-          <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl">
-            <div class="flex items-start gap-3">
-              <UIcon name="heroicons:chat-bubble-left-right" class="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-              <div class="text-sm text-blue-700 dark:text-blue-300 space-y-2">
-                <p class="font-medium">操作步骤</p>
-                <ol class="list-decimal list-inside space-y-1">
-                  <li>点击下方按钮打开 Bot</li>
-                  <li>将上方 6 位验证码发送给 Bot</li>
-                  <li>等待自动登录完成</li>
-                </ol>
+          <div class="flex flex-col items-center gap-3">
+            <p class="text-sm text-stone-500 dark:text-stone-400">请将验证码发送给 Bot</p>
+            <!-- 6 位数字卡片 -->
+            <div class="flex gap-2">
+              <div
+                v-for="(char, idx) in loginCode.split('')"
+                :key="idx"
+                class="w-11 h-14 flex items-center justify-center rounded-lg border-2 border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20 text-2xl font-mono font-bold text-amber-700 dark:text-amber-300"
+              >
+                {{ char }}
               </div>
+            </div>
+            <!-- 一键复制 -->
+            <UButton
+              size="sm" color="gray" variant="soft"
+              icon="heroicons:clipboard-document"
+              @click="copyCode"
+            >
+              复制验证码
+            </UButton>
+          </div>
+          <!-- 操作步骤图标流程 -->
+          <div class="flex items-center justify-center gap-4 py-3">
+            <div class="flex flex-col items-center gap-1">
+              <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <UIcon name="heroicons:clipboard-document" class="w-5 h-5 text-blue-500" />
+              </div>
+              <span class="text-xs text-stone-400">复制</span>
+            </div>
+            <UIcon name="heroicons:arrow-right" class="w-4 h-4 text-stone-300" />
+            <div class="flex flex-col items-center gap-1">
+              <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <UIcon name="heroicons:paper-airplane" class="w-5 h-5 text-blue-500" />
+              </div>
+              <span class="text-xs text-stone-400">发送</span>
+            </div>
+            <UIcon name="heroicons:arrow-right" class="w-4 h-4 text-stone-300" />
+            <div class="flex flex-col items-center gap-1">
+              <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                <UIcon name="heroicons:check-circle" class="w-5 h-5 text-blue-500" />
+              </div>
+              <span class="text-xs text-stone-400">完成</span>
             </div>
           </div>
           <UButton
@@ -107,10 +132,26 @@
         </div>
       </template>
 
-      <!-- ========== 成功（短暂过渡） ========== -->
-      <div v-else-if="phase === 'success'" class="flex flex-col items-center py-8 gap-3">
-        <UIcon name="heroicons:check-circle" class="w-12 h-12 text-green-500" />
-        <p class="text-base font-medium text-green-600">登录成功！</p>
+      <!-- ========== 成功（显示 Token + 自动跳转） ========== -->
+      <div v-else-if="phase === 'success'" class="flex flex-col items-center py-6 gap-4">
+        <div class="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+          <UIcon name="heroicons:check-circle" class="w-10 h-10 text-green-500" />
+        </div>
+        <p class="text-base font-medium text-green-600 dark:text-green-400">登录成功！</p>
+        <div v-if="generatedToken" class="w-full space-y-2">
+          <p class="text-xs text-stone-400 text-center">你的 Token（请妥善保管）</p>
+          <div class="flex items-center gap-2 p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+            <code class="flex-1 text-xs font-mono text-stone-600 dark:text-stone-400 truncate select-all">{{ generatedToken }}</code>
+            <UButton
+              size="2xs" color="gray" variant="soft"
+              icon="heroicons:clipboard-document"
+              @click="copyGeneratedToken"
+            />
+          </div>
+        </div>
+        <UButton color="primary" @click="modelValue = false; router.push('/me')">
+          进入控制台
+        </UButton>
       </div>
 
       <!-- ========== 错误（非登录阶段） ========== -->
@@ -283,6 +324,9 @@ const revealedTokenId = ref<string | null>(null)
 // 是否可以返回选择页
 const canGoBackToChoose = ref(false)
 
+// Token 生成成功后显示
+const generatedToken = ref('')
+
 // ========== 弹窗打开时的入口逻辑 ==========
 const handleOpen = async () => {
   errorMsg.value = ''
@@ -347,12 +391,18 @@ const backToChoose = () => {
 const autoGenerateToken = async () => {
   phase.value = 'generating'
   try {
-    await tokenStore.generateToken()
+    const result = await tokenStore.generateToken()
     if (tgAuth.isLoggedIn) tgAuth.checkSession()
-    toast.success('Token 已生成')
+    generatedToken.value = result.token
+    phase.value = 'success'
     emit('login-success')
-    modelValue.value = false
-    router.push('/me')
+    // 3 秒后自动跳转
+    setTimeout(() => {
+      if (modelValue.value) {
+        modelValue.value = false
+        router.push('/me')
+      }
+    }, 3000)
   } catch (e: any) {
     errorMsg.value = e.message || '生成 Token 失败'
     phase.value = 'error'
@@ -387,7 +437,9 @@ const startPolling = () => {
       if (res.status === 'ok') {
         stopPolling()
         toast.success('登录成功')
-        // TG 登录成功后：已有 Token 直接跳转，否则自动生成
+        // TG 登录成功后：同步该用户下所有 Token 到本地 vault
+        await tgAuth.syncTokensToVault()
+        // 已有 Token 直接跳转，否则自动生成
         if (tokenStore.hasToken) {
           modelValue.value = false
           router.push('/me')
@@ -400,7 +452,7 @@ const startPolling = () => {
     } catch {
       // 轮询失败静默忽略
     }
-  }, 2000)
+  }, 3000)
 }
 
 const stopPolling = () => {
@@ -505,6 +557,20 @@ const bindTokenToTg = async (item: any) => {
 const handleLogout = async () => {
   await guestLogout()
   modelValue.value = false
+}
+
+const copyCode = async () => {
+  try {
+    await navigator.clipboard.writeText(loginCode.value)
+    toast.success('已复制')
+  } catch { toast.error('复制失败') }
+}
+
+const copyGeneratedToken = async () => {
+  try {
+    await navigator.clipboard.writeText(generatedToken.value)
+    toast.success('Token 已复制')
+  } catch { toast.error('复制失败') }
 }
 
 // ========== 弹窗生命周期 ==========

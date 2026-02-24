@@ -3,25 +3,48 @@
     <!-- 顶部导航 + 画集信息 -->
     <div class="flex flex-col gap-3">
       <div class="flex items-center gap-3">
-        <UButton icon="heroicons:arrow-left" color="gray" variant="ghost" @click="$emit('navigate', 'list')" />
+        <button
+          class="w-9 h-9 rounded-xl bg-white dark:bg-neutral-800 border border-stone-200 dark:border-neutral-700 flex items-center justify-center hover:bg-stone-50 dark:hover:bg-neutral-700 transition-colors"
+          @click="$emit('navigate', 'list')"
+        >
+          <UIcon name="heroicons:arrow-left" class="w-4 h-4 text-stone-500" />
+        </button>
         <div class="flex-1 min-w-0">
           <div class="group/name relative flex items-center gap-1">
             <input
               v-model="editName"
               type="text"
-              class="text-lg font-bold bg-transparent border-none outline-none text-gray-900 dark:text-white w-full hover:underline hover:decoration-amber-400 hover:decoration-2 hover:underline-offset-4 focus:ring-2 focus:ring-amber-500/50 focus:rounded-md focus:px-2 focus:-mx-2 transition-all"
+              class="text-lg font-bold bg-transparent border-none outline-none text-stone-900 dark:text-white w-full hover:underline hover:decoration-amber-400 hover:decoration-2 hover:underline-offset-4 focus:ring-2 focus:ring-amber-500/50 focus:rounded-md focus:px-2 focus:-mx-2 transition-all"
               placeholder="画集名称"
               @blur="saveName"
               @keyup.enter="($event.target as HTMLInputElement)?.blur()"
             />
-            <UIcon name="heroicons:pencil" class="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover/name:opacity-100 transition-opacity flex-shrink-0" />
+            <UIcon name="heroicons:pencil" class="w-3.5 h-3.5 text-stone-400 opacity-0 group-hover/name:opacity-100 transition-opacity flex-shrink-0" />
           </div>
-          <p class="text-sm text-gray-500">{{ gallery?.description || '' }} · {{ gallery?.image_count || 0 }} 张图片</p>
+          <p class="text-xs text-stone-400 dark:text-stone-500">{{ gallery?.description || '' }} · {{ gallery?.image_count || 0 }} 张图片</p>
         </div>
         <div class="flex items-center gap-1">
-          <UButton icon="heroicons:share" color="gray" variant="ghost" size="sm" title="分享" @click="showShare = true" />
-          <UButton icon="heroicons:pencil-square" color="gray" variant="ghost" size="sm" title="编辑" @click="showEdit = true" />
-          <UButton icon="heroicons:trash" color="red" variant="ghost" size="sm" title="删除" @click="showDelete = true" />
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-all"
+            title="分享"
+            @click="showShare = true"
+          >
+            <UIcon name="heroicons:share" class="w-4 h-4" />
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all"
+            title="编辑"
+            @click="showEdit = true"
+          >
+            <UIcon name="heroicons:pencil-square" class="w-4 h-4" />
+          </button>
+          <button
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
+            title="删除"
+            @click="showDelete = true"
+          >
+            <UIcon name="heroicons:trash" class="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>
