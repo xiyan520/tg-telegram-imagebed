@@ -485,6 +485,68 @@
               </template>
             </UFormGroup>
           </div>
+
+          <!-- Bot 回复配置分隔线 -->
+          <div class="border-t border-stone-200 dark:border-neutral-700 pt-4">
+            <p class="text-sm font-medium text-stone-700 dark:text-stone-300 mb-3">上传成功回复配置</p>
+          </div>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">显示文件大小</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                上传成功回复中显示文件大小（如 155.0 KB）
+              </p>
+            </div>
+            <UToggle v-model="settings.bot_reply_show_size" size="lg" />
+          </div>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">显示文件名</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                上传成功回复中显示原始文件名
+              </p>
+            </div>
+            <UToggle v-model="settings.bot_reply_show_filename" size="lg" />
+          </div>
+
+          <div class="pl-4 border-l-2 border-blue-500 space-y-4">
+            <UFormGroup label="链接复制格式">
+              <div class="flex flex-wrap gap-3 mt-1">
+                <label v-for="fmt in linkFormatOptions" :key="fmt.value" class="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    :checked="isLinkFormatEnabled(fmt.value)"
+                    class="rounded border-stone-300 text-amber-500 focus:ring-amber-500"
+                    @change="toggleLinkFormat(fmt.value)"
+                  />
+                  <span class="text-sm text-stone-700 dark:text-stone-300">{{ fmt.label }}</span>
+                </label>
+              </div>
+              <template #hint>
+                <span class="text-xs text-stone-500">勾选的格式会在上传成功消息中显示为 inline 按钮，方便用户复制</span>
+              </template>
+            </UFormGroup>
+
+            <UFormGroup label="自定义回复模板">
+              <UTextarea
+                v-model="settings.bot_reply_template"
+                placeholder="留空使用默认模板。支持变量：{url} {size} {filename} {id}"
+                :rows="3"
+                :maxlength="500"
+              />
+              <template #hint>
+                <span class="text-xs text-stone-500">
+                  可用变量：<code class="px-1 py-0.5 bg-stone-200 dark:bg-neutral-700 rounded text-xs">{url}</code>
+                  <code class="px-1 py-0.5 bg-stone-200 dark:bg-neutral-700 rounded text-xs">{size}</code>
+                  <code class="px-1 py-0.5 bg-stone-200 dark:bg-neutral-700 rounded text-xs">{filename}</code>
+                  <code class="px-1 py-0.5 bg-stone-200 dark:bg-neutral-700 rounded text-xs">{id}</code>
+                  · 最多 500 字符
+                </span>
+              </template>
+            </UFormGroup>
+          </div>
         </div>
       </UCard>
 
@@ -727,6 +789,11 @@ const settings = ref({
   bot_user_delete_enabled: true,
   bot_myuploads_enabled: true,
   bot_myuploads_page_size: 8,
+  // Bot 回复配置
+  bot_reply_link_formats: 'url',
+  bot_reply_template: '',
+  bot_reply_show_size: true,
+  bot_reply_show_filename: false,
   // 网络代理
   proxy_url: '',
   proxy_url_set: false,
@@ -764,6 +831,33 @@ const policyOptions = ref({
     { value: 'simplified', label: '简化' },
   ],
 })
+
+// 链接格式选项
+const linkFormatOptions = [
+  { value: 'url', label: 'URL 直链' },
+  { value: 'markdown', label: 'Markdown' },
+  { value: 'html', label: 'HTML' },
+  { value: 'bbcode', label: 'BBCode' },
+]
+
+const isLinkFormatEnabled = (fmt: string) => {
+  const formats = (settings.value.bot_reply_link_formats || 'url').split(',').map((s: string) => s.trim())
+  return formats.includes(fmt)
+}
+
+const toggleLinkFormat = (fmt: string) => {
+  const formats = (settings.value.bot_reply_link_formats || 'url').split(',').map((s: string) => s.trim()).filter(Boolean)
+  const idx = formats.indexOf(fmt)
+  if (idx >= 0) {
+    // 至少保留一个格式
+    if (formats.length > 1) {
+      formats.splice(idx, 1)
+    }
+  } else {
+    formats.push(fmt)
+  }
+  settings.value.bot_reply_link_formats = formats.join(',')
+}
 
 // 域名模式计算属性
 const hasDomain = computed(() => !!settings.value.cloudflare_cdn_domain?.trim())

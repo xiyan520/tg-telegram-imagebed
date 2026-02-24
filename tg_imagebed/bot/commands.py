@@ -13,6 +13,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from ..config import logger
+from ..utils import format_size
 
 
 # ===================== 工具函数 =====================
@@ -45,20 +46,47 @@ def _sanitize_filename(caption: str, original_ext: str) -> str:
 
 
 def build_upload_success_keyboard(
-    permanent_url: str, encrypted_id: str
+    permanent_url: str, encrypted_id: str,
+    link_formats: str = 'url', active_fmt: str = 'url',
 ) -> InlineKeyboardMarkup:
     """构建上传成功后的 inline keyboard（私聊场景）
 
     Args:
         permanent_url: 图片永久直链
         encrypted_id: 加密文件ID（用于删除回调）
+        link_formats: 启用的链接格式（逗号分隔：url,markdown,html,bbcode）
+        active_fmt: 当前选中的格式（按钮显示 ✅ 前缀）
     """
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🔗 打开链接", url=permanent_url),
-            InlineKeyboardButton("🗑 删除", callback_data=f"qdel:{encrypted_id}"),
-        ]
+    rows = []
+
+    # 第一行：格式切换按钮（根据启用的格式动态生成）
+    fmt_set = {f.strip().lower() for f in link_formats.split(',') if f.strip()}
+    fmt_buttons = []
+    all_fmts = [
+        ('url', 'URL'),
+        ('markdown', 'Markdown'),
+        ('html', 'HTML'),
+        ('bbcode', 'BBCode'),
+    ]
+    for fmt_key, label in all_fmts:
+        if fmt_key in fmt_set:
+            prefix = "✅ " if fmt_key == active_fmt else "📋 "
+            fmt_buttons.append(
+                InlineKeyboardButton(
+                    f"{prefix}{label}",
+                    callback_data=f"lfmt:{fmt_key}:{encrypted_id}",
+                )
+            )
+    if fmt_buttons:
+        rows.append(fmt_buttons)
+
+    # 第二行：打开链接 + 删除
+    rows.append([
+        InlineKeyboardButton("🔗 打开链接", url=permanent_url),
+        InlineKeyboardButton("🗑 删除", callback_data=f"qdel:{encrypted_id}"),
     ])
+
+    return InlineKeyboardMarkup(rows)
 
 
 # ===================== 命令处理器 =====================
@@ -151,9 +179,9 @@ async def _show_myuploads(message_or_query, username: str, page: int = 1, edit: 
     lines = [f"📋 *你的上传记录* （共 {total} 张，第 {page}/{total_pages} 页）\n"]
     for f in files:
         name = f.get('original_filename') or f['encrypted_id'][:12]
-        size_kb = (f.get('file_size') or 0) / 1024
+        size_str = format_size(f.get('file_size') or 0)
         eid = f['encrypted_id']
-        lines.append(f"• `{eid[:12]}` | {name} | {size_kb:.0f}KB")
+        lines.append(f"• `{eid[:12]}` | {name} | {size_str}")
 
     text = '\n'.join(lines)
 
@@ -208,12 +236,12 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 弹出确认按钮
     name = file_info.get('original_filename') or encrypted_id[:12]
-    size_kb = (file_info.get('file_size') or 0) / 1024
+    size_str = format_size(file_info.get('file_size') or 0)
     text = (
         f"⚠️ *确认删除？*\n\n"
         f"📄 *文件:* {name}\n"
         f"🆔 *ID:* `{encrypted_id[:16]}`\n"
-        f"📊 *大小:* {size_kb:.0f} KB\n\n"
+        f"📊 *大小:* {size_str}\n\n"
         f"此操作不可撤销！"
     )
     markup = InlineKeyboardMarkup([[
@@ -239,6 +267,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _handle_confirm_delete(query)
     elif data.startswith("qdel:"):
         await _handle_quick_delete(query)
+    elif data.startswith("lfmt:"):
+        await _handle_link_format_callback(query)
     elif data.startswith("stk:"):
         await _handle_settoken_callback(query)
     else:
@@ -336,6 +366,74 @@ async def _handle_quick_delete(query):
         await query.edit_message_text("✅ 文件已删除")
     else:
         await query.edit_message_text("❌ 删除失败，请稍后重试")
+
+
+async def _handle_link_format_callback(query):
+    """处理链接格式按钮点击（lfmt:<format>:<encrypted_id>）
+
+    点击后将消息中的代码块内容替换为对应格式，方便用户长按复制。
+    使用 HTML parse_mode 避免 Markdown 特殊字符解析问题。
+    """
+    from html import escape as html_escape
+    from ..database import get_file_info, get_system_setting
+    from ..utils import get_domain, format_size
+
+    try:
+        parts = query.data.split(":", 2)
+        if len(parts) != 3:
+            logger.warning(f"lfmt 回调数据格式错误: {query.data}")
+            return
+
+        fmt, encrypted_id = parts[1], parts[2]
+
+        file_info = get_file_info(encrypted_id)
+        if not file_info:
+            logger.warning(f"lfmt 回调: 文件不存在 encrypted_id={encrypted_id}")
+            return
+
+        base_url = get_domain(None)
+        url = f"{base_url}/image/{encrypted_id}"
+
+        # 各格式的代码块内容
+        format_map = {
+            'url':      url,
+            'markdown': f"![image]({url})",
+            'html':     f'<img src="{url}" />',
+            'bbcode':   f"[img]{url}[/img]",
+        }
+        code_content = format_map.get(fmt)
+        if code_content is None:
+            logger.warning(f"lfmt 回调: 未知格式 fmt={fmt}")
+            return
+
+        # 重建完整消息（使用 HTML parse_mode）
+        show_size = str(get_system_setting('bot_reply_show_size') or '1') == '1'
+        show_filename = str(get_system_setting('bot_reply_show_filename') or '0') == '1'
+        link_formats = str(get_system_setting('bot_reply_link_formats') or 'url')
+
+        lines = [
+            "✅ <b>上传成功！</b>\n",
+            f"🔗 <b>永久直链:</b>\n<code>{html_escape(code_content)}</code>\n",
+        ]
+        if show_filename:
+            fname = html_escape(file_info.get('original_filename') or encrypted_id[:12])
+            lines.append(f"📄 <b>文件名:</b> {fname}")
+        if show_size:
+            lines.append(f"📊 <b>文件大小:</b> {format_size(file_info.get('file_size') or 0)}")
+        lines.append("💡 链接永久有效")
+        text = '\n'.join(lines)
+
+        # 重建 keyboard（当前格式按钮高亮，其余可切换）
+        keyboard = build_upload_success_keyboard(url, encrypted_id, link_formats, active_fmt=fmt)
+
+        await query.edit_message_text(
+            text,
+            parse_mode='HTML',
+            reply_markup=keyboard,
+        )
+
+    except Exception as e:
+        logger.warning(f"处理链接格式回调异常: {type(e).__name__}: {e}")
 
 
 async def _handle_settoken_callback(query):

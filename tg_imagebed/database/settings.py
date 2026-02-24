@@ -139,6 +139,11 @@ DEFAULT_SYSTEM_SETTINGS = {
     'bot_private_upload_enabled': '1',       # 私聊上传总开关
     'bot_private_upload_mode': 'open',       # open / tg_bound / admin_only
     'bot_private_admin_ids': '',             # 私聊管理员 ID（mode=admin_only 时生效）
+    # Bot 回复配置
+    'bot_reply_link_formats': 'url',        # 启用的链接格式（逗号分隔：url,markdown,html,bbcode）
+    'bot_reply_template': '',               # 自定义回复模板（支持 {url} {size} {filename} {id} 变量）
+    'bot_reply_show_size': '1',             # 默认模板中是否显示文件大小
+    'bot_reply_show_filename': '0',         # 默认模板中是否显示文件名
     # SEO 配置
     'seo_site_name': '',                    # 网站名称（留空使用默认"图床 Pro"）
     'seo_site_description': '',             # 网站描述（留空使用默认值）

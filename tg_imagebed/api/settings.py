@@ -98,6 +98,11 @@ def _format_settings_for_response(settings: dict) -> dict:
         'bot_user_delete_enabled': settings.get('bot_user_delete_enabled', '1') == '1',
         'bot_myuploads_enabled': settings.get('bot_myuploads_enabled', '1') == '1',
         'bot_myuploads_page_size': _safe_int(settings.get('bot_myuploads_page_size'), 8, 1, 50),
+        # Bot 回复配置
+        'bot_reply_link_formats': settings.get('bot_reply_link_formats', 'url'),
+        'bot_reply_template': settings.get('bot_reply_template', ''),
+        'bot_reply_show_size': settings.get('bot_reply_show_size', '1') == '1',
+        'bot_reply_show_filename': settings.get('bot_reply_show_filename', '0') == '1',
         # 网络代理
         'proxy_url_set': bool(settings.get('proxy_url', '')),
         'proxy_env_set': bool(PROXY_URL),
@@ -352,6 +357,30 @@ def admin_system_settings():
                     errors.append('上传历史每页数量必须在 1-50 之间')
                 else:
                     settings_to_update['bot_myuploads_page_size'] = str(ps)
+
+            # Bot 回复配置
+            if 'bot_reply_link_formats' in data:
+                raw_formats = str(data.get('bot_reply_link_formats') or 'url').strip()
+                valid_formats = {'url', 'markdown', 'html', 'bbcode'}
+                fmt_list = [f.strip().lower() for f in raw_formats.split(',') if f.strip()]
+                invalid_fmts = [f for f in fmt_list if f not in valid_formats]
+                if invalid_fmts:
+                    errors.append(f'无效的链接格式: {", ".join(invalid_fmts)}')
+                elif not fmt_list:
+                    errors.append('至少需要启用一种链接格式')
+                else:
+                    settings_to_update['bot_reply_link_formats'] = ','.join(fmt_list)
+
+            if 'bot_reply_template' in data:
+                tpl = str(data.get('bot_reply_template') or '').strip()
+                if len(tpl) > 500:
+                    errors.append('自定义回复模板不能超过 500 个字符')
+                else:
+                    settings_to_update['bot_reply_template'] = tpl
+
+            for reply_bool_key in ('bot_reply_show_size', 'bot_reply_show_filename'):
+                if reply_bool_key in data:
+                    settings_to_update[reply_bool_key] = '1' if data[reply_bool_key] else '0'
 
             # 网络代理
             if 'proxy_url' in data:

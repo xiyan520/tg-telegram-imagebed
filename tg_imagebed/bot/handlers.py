@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from telegram import Update
 
 from ..config import logger
+from ..utils import format_size
 from .media_batch import _MediaBatch, _media_group_batches, _flush_media_group, _MAX_BATCH_ITEMS
 from .state import _inc_bot_stats
 
@@ -289,30 +290,55 @@ async def handle_photo(update: Update, context):
             _inc_bot_stats(success=1)
             base_url = get_domain(None)
             permanent_url = f"{base_url}/image/{result['encrypted_id']}"
-            text = (
-                f"✅ *上传成功！*\n\n"
-                f"🔗 *永久直链:*\n`{permanent_url}`\n\n"
-                f"📊 *文件大小:* {result['file_size']} bytes\n"
-                f"💡 链接永久有效"
-            )
 
-            # 私聊场景添加 inline 按钮（打开链接 + 删除）
+            # 读取回复配置
+            reply_template = str(get_system_setting('bot_reply_template') or '').strip()
+            show_size = str(get_system_setting('bot_reply_show_size') or '1') == '1'
+            show_filename = str(get_system_setting('bot_reply_show_filename') or '0') == '1'
+            link_formats = str(get_system_setting('bot_reply_link_formats') or 'url')
+
+            if reply_template:
+                # 自定义模板（用户自行控制格式，不做 parse_mode 处理）
+                text = reply_template.format(
+                    url=permanent_url,
+                    size=format_size(result['file_size']),
+                    filename=result.get('original_filename') or filename,
+                    id=result['encrypted_id'],
+                )
+                parse_mode = None
+            else:
+                # 默认模板（使用 HTML 格式，与 callback 编辑保持一致）
+                from html import escape as html_escape
+                lines = [
+                    "✅ <b>上传成功！</b>\n",
+                    f"🔗 <b>永久直链:</b>\n<code>{html_escape(permanent_url)}</code>\n",
+                ]
+                if show_filename:
+                    fname = html_escape(result.get('original_filename') or filename)
+                    lines.append(f"📄 <b>文件名:</b> {fname}")
+                if show_size:
+                    lines.append(f"📊 <b>文件大小:</b> {format_size(result['file_size'])}")
+                lines.append("💡 链接永久有效")
+                text = '\n'.join(lines)
+                parse_mode = 'HTML'
+
+            # 私聊场景添加 inline 按钮（格式按钮 + 打开链接 + 删除）
             reply_markup = None
             if not is_group and str(get_system_setting('bot_inline_buttons_enabled') or '1') == '1':
                 from .commands import build_upload_success_keyboard
                 reply_markup = build_upload_success_keyboard(
-                    permanent_url, result['encrypted_id']
+                    permanent_url, result['encrypted_id'], link_formats
                 )
 
             reply_msg_id = None
             if status_msg:
                 await status_msg.edit_text(
-                    text, parse_mode='Markdown', reply_markup=reply_markup
+                    text, parse_mode=parse_mode, reply_markup=reply_markup
                 )
                 reply_msg_id = status_msg.message_id
             else:
                 sent = await message.reply_text(
-                    text, parse_mode='Markdown', reply_markup=reply_markup
+                    text, parse_mode=parse_mode, reply_markup=reply_markup
                 )
                 reply_msg_id = sent.message_id
 

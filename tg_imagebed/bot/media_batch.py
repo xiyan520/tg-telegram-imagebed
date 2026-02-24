@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..config import logger
+from ..utils import format_size
 
 # 单个 media_group 最大图片数
 _MAX_BATCH_ITEMS = 20
@@ -58,14 +59,6 @@ def _format_batch_summary(
     failure_count: int,
 ) -> str:
     """格式化批量上传汇总消息（自动截断以避免超过4096字符）"""
-    def _human_size(size_bytes: int) -> str:
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        else:
-            return f"{size_bytes / 1024 / 1024:.2f} MB"
-
     lines = [f"✅ *批量上传完成* (成功: {success_count} / 总数: {total_count})"]
 
     if urls:
@@ -81,7 +74,7 @@ def _format_batch_summary(
             lines.append(f"... 及其他 {len(urls) - 8} 张")
 
     lines.append("")
-    lines.append(f"📦 *总大小:* {_human_size(total_size_bytes)}")
+    lines.append(f"📦 *总大小:* {format_size(total_size_bytes)}")
     if failure_count:
         lines.append(f"❌ *失败:* {failure_count} 张")
     lines.append("💡 链接永久有效")

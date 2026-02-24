@@ -195,6 +195,7 @@ def run_telegram_bot():
                     try:
                         await telegram_app.updater.start_polling(
                             drop_pending_updates=True,
+                            allowed_updates=Update.ALL_TYPES,
                             error_callback=polling_error_callback
                         )
                         conflict_retry = 0
