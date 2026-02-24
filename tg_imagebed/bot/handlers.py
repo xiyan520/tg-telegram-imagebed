@@ -66,7 +66,7 @@ def _parse_id_list(raw: str) -> set:
 async def handle_photo(update: Update, context):
     """处理图片上传（私聊/群组/频道）"""
     from ..services.file_service import process_upload, record_existing_telegram_file
-    from ..utils import get_domain, get_mime_type as _get_mime_type
+    from ..utils import get_domain, get_image_domain, get_mime_type as _get_mime_type
     from ..database import get_system_setting, has_bound_tokens
     from ..database import get_active_user_tokens, get_default_upload_token
 
@@ -288,7 +288,7 @@ async def handle_photo(update: Update, context):
 
         if result:
             _inc_bot_stats(success=1)
-            base_url = get_domain(None)
+            base_url = get_image_domain(None, scene='guest')
             permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
             # 读取回复配置

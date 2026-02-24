@@ -258,6 +258,7 @@ def format_size(size_bytes: int) -> str:
 # ===================== 域名获取 =====================
 _DOMAIN_SETTINGS_CACHE = {"ts": 0.0, "domain": "", "cdn_enabled": False}
 _DOMAINS_CACHE = {"ts": 0.0, "domains": []}
+_DOMAIN_POLICY_CACHE = {"ts": 0.0, "policy": {}}
 
 
 def clear_domain_cache() -> None:
@@ -271,9 +272,11 @@ def clear_domain_cache() -> None:
 
 
 def clear_domains_cache() -> None:
-    """清除图片域名列表缓存"""
+    """清除图片域名列表缓存和策略缓存"""
     _DOMAINS_CACHE["ts"] = 0.0
     _DOMAINS_CACHE["domains"] = []
+    _DOMAIN_POLICY_CACHE["ts"] = 0.0
+    _DOMAIN_POLICY_CACHE["policy"] = {}
 
 
 def _get_effective_domain_settings():
@@ -366,11 +369,36 @@ def get_domain(request) -> str:
     return f"http://{LOCAL_IP}:{PORT}"
 
 
-def get_image_domain(request=None) -> str:
+def _get_domain_upload_policy() -> dict:
+    """获取域名上传策略（带缓存）"""
+    import time as _time
+    import json as _json
+
+    now = _time.time()
+    age = now - _DOMAIN_POLICY_CACHE["ts"]
+    if 0.0 <= age < 5.0:
+        return _DOMAIN_POLICY_CACHE["policy"]
+
+    policy = {}
+    try:
+        from .database import get_system_setting
+        raw = get_system_setting('domain_upload_policy_json') or ''
+        if raw:
+            policy = _json.loads(raw)
+    except Exception:
+        policy = {}
+
+    _DOMAIN_POLICY_CACHE["ts"] = now
+    _DOMAIN_POLICY_CACHE["policy"] = policy
+    return policy
+
+
+def get_image_domain(request=None, scene: str = '') -> str:
     """
     获取图片专用域名 URL
 
-    优先从 custom_domains 表获取活跃图片域名（随机选择），
+    优先根据 scene 查询域名策略，匹配活跃图片域名后返回；
+    无匹配时从活跃图片域名中随机选择，
     如果没有图片域名，降级到 get_domain(request)。
     """
     import time as _time
@@ -392,6 +420,20 @@ def get_image_domain(request=None) -> str:
         # 没有图片域名，降级到原有逻辑
         return get_domain(request)
 
+    # 场景路由：查策略 → 匹配活跃域名
+    if scene:
+        policy = _get_domain_upload_policy()
+        target_domain = policy.get(scene, '')
+        if target_domain:
+            active_domain_set = {d['domain'] for d in domains}
+            if target_domain in active_domain_set:
+                # 找到匹配的域名记录，获取 scheme
+                for d in domains:
+                    if d['domain'] == target_domain:
+                        scheme = 'https' if d.get('use_https', 1) else 'http'
+                        return f"{scheme}://{target_domain}"
+
+    # 降级：随机选择
     chosen = _random.choice(domains)
     scheme = 'https' if chosen.get('use_https', 1) else 'http'
     return f"{scheme}://{chosen['domain']}"

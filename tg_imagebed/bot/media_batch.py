@@ -89,7 +89,7 @@ async def _flush_media_group(
     """延迟处理批量图片并发送汇总消息"""
     import asyncio
     from ..services.file_service import record_existing_telegram_file
-    from ..utils import get_domain
+    from ..utils import get_image_domain
     from .state import _inc_bot_stats
 
     try:
@@ -120,7 +120,7 @@ async def _flush_media_group(
 
     _media_group_batches.pop(batch_key, None)
 
-    base_url = get_domain(None)
+    base_url = get_image_domain(None, scene='group')
     urls: List[str] = []
     total_size_bytes = 0
     total_count = len(batch.items)

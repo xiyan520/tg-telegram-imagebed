@@ -3,6 +3,7 @@
 """
 域名管理 API - 管理员域名 CRUD + 公开域名列表
 """
+import json
 from urllib.parse import urlsplit
 from flask import request, jsonify, make_response
 
@@ -74,13 +75,6 @@ def admin_domains_api():
         if domain_type not in ('default', 'image'):
             response = jsonify({'success': False, 'error': '无效的域名类型，仅支持 default 和 image'})
             return _set_admin_cors_headers(response), 400
-
-        # 默认域名只能有一个
-        if domain_type == 'default':
-            existing_defaults = get_all_domains()
-            if any(d.get('domain_type') == 'default' for d in existing_defaults):
-                response = jsonify({'success': False, 'error': '默认域名已存在，请先删除现有默认域名'})
-                return _set_admin_cors_headers(response), 400
 
         use_https = 1 if data.get('use_https', True) else 0
         remark = str(data.get('remark', '')).strip()[:200]
@@ -204,6 +198,69 @@ def admin_domain_set_default(domain_id):
 
     except Exception as e:
         logger.error(f"设置默认域名失败 (id={domain_id}): {e}")
+        response = jsonify({'success': False, 'error': '操作失败'})
+        return _set_admin_cors_headers(response), 500
+
+
+@admin_bp.route('/api/admin/domains/policy', methods=['GET', 'PUT', 'OPTIONS'])
+@admin_module.login_required
+def admin_domains_policy():
+    """域名场景路由策略 — 配置不同上传场景使用的图片域名"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'GET, PUT, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache')
+
+    try:
+        from ..database import get_system_setting, update_system_setting
+
+        if request.method == 'GET':
+            raw = get_system_setting('domain_upload_policy_json') or ''
+            policy = {}
+            if raw:
+                try:
+                    policy = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            response = jsonify({'success': True, 'data': policy})
+            return _set_admin_cors_headers(add_cache_headers(response, 'no-cache'))
+
+        # PUT: 保存策略
+        data = request.get_json()
+        if not isinstance(data, dict):
+            response = jsonify({'success': False, 'error': '无效的请求数据'})
+            return _set_admin_cors_headers(response), 400
+
+        # 获取活跃图片域名列表用于校验
+        active_domains = get_active_image_domains()
+        active_domain_set = {d['domain'] for d in active_domains}
+
+        valid_scenes = ('guest', 'token', 'group', 'admin_default')
+        cleaned = {}
+        for scene in valid_scenes:
+            val = str(data.get(scene, '')).strip()
+            if val and val not in active_domain_set:
+                response = jsonify({
+                    'success': False,
+                    'error': f'场景 {scene} 指定的域名 {val} 不在活跃图片域名列表中'
+                })
+                return _set_admin_cors_headers(response), 400
+            cleaned[scene] = val
+
+        update_system_setting('domain_upload_policy_json', json.dumps(cleaned))
+
+        # 清除域名策略缓存
+        from ..utils import clear_domains_cache
+        clear_domains_cache()
+
+        response = jsonify({'success': True, 'message': '域名场景路由策略已保存', 'data': cleaned})
+        return _set_admin_cors_headers(add_cache_headers(response, 'no-cache'))
+
+    except Exception as e:
+        logger.error(f"域名策略操作失败: {e}")
         response = jsonify({'success': False, 'error': '操作失败'})
         return _set_admin_cors_headers(response), 500
 

@@ -264,7 +264,7 @@ def upload_with_token():
         update_token_usage(token)
 
         # 生成 URL
-        base_url = get_image_domain(request)
+        base_url = get_image_domain(request, scene='token')
         permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
         # 计算剩余上传次数（基于首次验证结果，无需二次查询）

@@ -72,7 +72,8 @@ def update_announcement(enabled: bool, content: str) -> int:
 # 敏感配置列表（日志中不打印值）
 SENSITIVE_SETTINGS = {
     'storage_config_json', 'storage_upload_policy_json',
-    'cloudflare_api_token', 'telegram_bot_token', 'proxy_url'
+    'cloudflare_api_token', 'telegram_bot_token', 'proxy_url',
+    'domain_upload_policy_json',
 }
 
 # 默认系统设置
@@ -157,6 +158,8 @@ DEFAULT_SYSTEM_SETTINGS = {
     'seo_footer_text': '',                  # 自定义页脚文字（留空用默认格式）
     # 图片域名限制
     'image_domain_restriction_enabled': '0',  # 图片域名限制开关
+    # 域名场景路由策略
+    'domain_upload_policy_json': '',           # 上传场景→图片域名映射（JSON）
 }
 
 def init_system_settings() -> None:

@@ -124,7 +124,7 @@ def upload_file():
             return add_cache_headers(jsonify({'error': 'Failed to upload to Telegram'}), 'no-cache'), 500
 
         # 生成 URL
-        base_url = get_image_domain(request)
+        base_url = get_image_domain(request, scene='guest')
         permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
         logger.info(f"Web上传完成: {file.filename} -> {result['encrypted_id']}")

@@ -52,6 +52,9 @@ Thumbs.db
 # Claude Code
 .claude/
 
+# 任务文件
+tasks/
+
 # 临时文件
 tmp/
 temp/

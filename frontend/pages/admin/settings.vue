@@ -52,16 +52,22 @@
             <!-- 默认域名 -->
             <div>
               <p class="text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">默认域名（管理后台 / API）</p>
-              <div v-if="defaultDomain" class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-medium text-stone-900 dark:text-white">{{ defaultDomain.domain }}</span>
-                  <UBadge color="amber" variant="solid" size="xs">默认</UBadge>
-                  <UBadge :color="defaultDomain.use_https ? 'green' : 'gray'" variant="subtle" size="xs">
-                    {{ defaultDomain.use_https ? 'HTTPS' : 'HTTP' }}
-                  </UBadge>
-                  <span v-if="defaultDomain.remark" class="text-xs text-stone-400 dark:text-stone-500">{{ defaultDomain.remark }}</span>
+              <div v-if="defaultDomains.length > 0" class="space-y-2">
+                <div
+                  v-for="d in defaultDomains"
+                  :key="d.id"
+                  class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700"
+                >
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}</span>
+                    <UBadge color="amber" variant="solid" size="xs">默认</UBadge>
+                    <UBadge :color="d.use_https ? 'green' : 'gray'" variant="subtle" size="xs">
+                      {{ d.use_https ? 'HTTPS' : 'HTTP' }}
+                    </UBadge>
+                    <span v-if="d.remark" class="text-xs text-stone-400 dark:text-stone-500">{{ d.remark }}</span>
+                  </div>
+                  <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" @click="confirmDeleteDomain(d)" />
                 </div>
-                <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" @click="confirmDeleteDomain(defaultDomain)" />
               </div>
               <div v-else class="p-3 bg-stone-50 dark:bg-neutral-800 rounded-xl text-sm text-stone-500 dark:text-stone-400">
                 未设置默认域名，将使用当前访问域名
@@ -130,6 +136,64 @@
               <UToggle v-model="settings.image_domain_restriction_enabled" size="lg" />
             </div>
           </template>
+        </div>
+      </UCard>
+
+      <!-- 域名场景路由 -->
+      <UCard v-if="activeImageDomains.length >= 2">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-violet-500 to-violet-600 rounded-lg flex items-center justify-center">
+                <UIcon name="heroicons:arrows-right-left" class="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">域名场景路由</h3>
+                <p class="text-xs text-stone-500 dark:text-stone-400">为不同上传场景指定图片域名，留空则随机选择</p>
+              </div>
+            </div>
+            <UButton color="primary" size="sm" :loading="policySaving" @click="saveDomainPolicy">
+              <template #leading>
+                <UIcon name="heroicons:check" />
+              </template>
+              保存
+            </UButton>
+          </div>
+        </template>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <UFormGroup label="游客上传（Web 匿名）">
+            <USelect
+              v-model="domainPolicy.guest"
+              :options="domainPolicyOptions"
+              option-attribute="label"
+              value-attribute="value"
+            />
+          </UFormGroup>
+          <UFormGroup label="Token 上传">
+            <USelect
+              v-model="domainPolicy.token"
+              :options="domainPolicyOptions"
+              option-attribute="label"
+              value-attribute="value"
+            />
+          </UFormGroup>
+          <UFormGroup label="群组/频道上传">
+            <USelect
+              v-model="domainPolicy.group"
+              :options="domainPolicyOptions"
+              option-attribute="label"
+              value-attribute="value"
+            />
+          </UFormGroup>
+          <UFormGroup label="管理员默认">
+            <USelect
+              v-model="domainPolicy.admin_default"
+              :options="domainPolicyOptions"
+              option-attribute="label"
+              value-attribute="value"
+            />
+          </UFormGroup>
         </div>
       </UCard>
 
@@ -1154,8 +1218,8 @@ const domainTypeOptions = [
   { value: 'image', label: '图片域名（图片访问专用）' },
 ]
 
-// 计算属性：默认域名
-const defaultDomain = computed(() => domains.value.find(d => d.domain_type === 'default'))
+// 计算属性：默认域名列表
+const defaultDomains = computed(() => domains.value.filter(d => d.domain_type === 'default'))
 
 // 计算属性：图片域名列表
 const imageDomains = computed(() => domains.value.filter(d => d.domain_type === 'image'))
@@ -1241,8 +1305,68 @@ const handleDeleteDomain = async () => {
   }
 }
 
+// ---- 域名场景路由 ----
+const domainPolicy = ref({
+  guest: '',
+  token: '',
+  group: '',
+  admin_default: '',
+})
+const policySaving = ref(false)
+
+// 活跃图片域名（用于场景路由选项）
+const activeImageDomains = computed(() => imageDomains.value.filter(d => d.is_active))
+
+// 场景路由下拉选项
+const domainPolicyOptions = computed(() => {
+  const opts = [{ value: '', label: '随机选择' }]
+  for (const d of activeImageDomains.value) {
+    opts.push({ value: d.domain, label: d.domain })
+  }
+  return opts
+})
+
+// 加载域名策略
+const loadDomainPolicy = async () => {
+  try {
+    const res = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/domains/policy`, {
+      credentials: 'include'
+    })
+    if (res.success && res.data) {
+      domainPolicy.value = {
+        guest: res.data.guest || '',
+        token: res.data.token || '',
+        group: res.data.group || '',
+        admin_default: res.data.admin_default || '',
+      }
+    }
+  } catch (e: any) {
+    console.error('加载域名策略失败:', e)
+  }
+}
+
+// 保存域名策略
+const saveDomainPolicy = async () => {
+  policySaving.value = true
+  try {
+    const res = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/domains/policy`, {
+      method: 'PUT',
+      credentials: 'include',
+      body: domainPolicy.value
+    })
+    if (res.success) {
+      notification.success('保存成功', '域名场景路由策略已更新')
+    }
+  } catch (e: any) {
+    notification.error('保存失败', e.data?.error || e.message || '无法保存域名策略')
+  } finally {
+    policySaving.value = false
+  }
+}
+
 onMounted(() => {
   loadSettings()
   loadDomains()
+  loadDomainPolicy()
 })
 </script>
