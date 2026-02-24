@@ -38,8 +38,8 @@
           <p class="text-stone-600 dark:text-stone-400 mb-2">
             {{ formatHint }}
           </p>
-          <p class="paste-hint text-sm text-stone-500 dark:text-stone-400">
-            💡 你也可以直接 <kbd class="px-2 py-1 bg-stone-200 dark:bg-stone-700 rounded text-xs">Ctrl+V</kbd> 粘贴剪贴板中的图片
+          <p class="text-sm text-stone-500 dark:text-stone-400 mb-2">
+            💡 支持拖拽文件夹上传，也可以 <kbd class="px-2 py-1 bg-stone-200 dark:bg-stone-700 rounded text-xs">Ctrl+V</kbd> 粘贴图片
           </p>
         </div>
         <!-- 上传进度 -->
@@ -79,6 +79,7 @@ const isDragging = ref(false)
 const uploading = ref(false)
 const uploadProgress = ref({ label: '上传中...', percent: 0 })
 const fileInput = ref<HTMLInputElement>()
+
 
 // 动态允许的文件后缀
 const allowedExtensions = ref('jpg,jpeg,png,gif,webp,bmp,avif,tiff,tif,ico')
@@ -148,11 +149,62 @@ const handleFileSelect = (event: Event) => {
   }
 }
 
-const handleDrop = (event: DragEvent) => {
+const handleDrop = async (event: DragEvent) => {
   isDragging.value = false
-  if (event.dataTransfer?.files) {
+  if (!event.dataTransfer) return
+
+  const items = event.dataTransfer.items
+  // 检测是否包含文件夹（通过 webkitGetAsEntry）
+  if (items && items.length > 0 && typeof items[0].webkitGetAsEntry === 'function') {
+    const allFiles: File[] = []
+    const entries: FileSystemEntry[] = []
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry()
+      if (entry) entries.push(entry)
+    }
+    // 递归收集所有文件
+    for (const entry of entries) {
+      const files = await readEntryFiles(entry)
+      allFiles.push(...files)
+    }
+    if (allFiles.length > 0) {
+      handleFiles(allFiles)
+    }
+  } else if (event.dataTransfer.files) {
     handleFiles(Array.from(event.dataTransfer.files))
   }
+}
+
+/** 递归读取 FileSystemEntry 中的所有文件 */
+const readEntryFiles = (entry: FileSystemEntry): Promise<File[]> => {
+  return new Promise((resolve) => {
+    if (entry.isFile) {
+      ;(entry as FileSystemFileEntry).file(
+        (file) => resolve([file]),
+        () => resolve([])
+      )
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader()
+      const allFiles: File[] = []
+      // readEntries 可能分批返回，需要循环读取直到返回空数组
+      const readBatch = () => {
+        reader.readEntries(async (entries) => {
+          if (entries.length === 0) {
+            resolve(allFiles)
+            return
+          }
+          for (const child of entries) {
+            const files = await readEntryFiles(child)
+            allFiles.push(...files)
+          }
+          readBatch()
+        }, () => resolve(allFiles))
+      }
+      readBatch()
+    } else {
+      resolve([])
+    }
+  })
 }
 
 const handleFiles = async (files: File[]) => {
