@@ -288,6 +288,56 @@
       </template>
     </UCard>
   </UModal>
+
+  <!-- Token 删除确认弹窗 -->
+  <UModal v-model="tgDeleteModalOpen">
+    <UCard>
+      <template #header>
+        <h3 class="text-lg font-semibold text-red-600">确认删除 Token</h3>
+      </template>
+
+      <div class="space-y-3">
+        <p class="text-sm text-stone-700 dark:text-stone-300">
+          删除后该 Token 将无法恢复。
+        </p>
+        <div v-if="tgDeletingItem" class="text-xs text-stone-500 dark:text-stone-400">
+          Token：<code class="font-mono">{{ maskToken(tgDeletingItem.token) }}</code>
+          <span v-if="tgDeletingItem.albumName"> · {{ tgDeletingItem.albumName }}</span>
+        </div>
+        <div v-if="tgDeletingItem?.tokenInfo" class="text-xs text-stone-500 dark:text-stone-400">
+          已上传 {{ tgDeletingItem.tokenInfo.upload_count ?? 0 }} 张图片
+        </div>
+
+        <!-- 同时删除图片选项 -->
+        <div v-if="tgDeletingItem?.tokenInfo?.upload_count" class="p-3 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/30 rounded-lg">
+          <label class="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              v-model="tgDeleteWithImages"
+              type="checkbox"
+              class="mt-0.5 rounded border-red-400 dark:border-red-600 text-red-600 focus:ring-red-500"
+            />
+            <div>
+              <span class="text-sm font-medium text-red-700 dark:text-red-300">
+                同时永久删除关联的所有图片
+              </span>
+              <p class="text-xs text-red-500 dark:text-red-400 mt-0.5">
+                将从数据库和存储中永久删除 {{ tgDeletingItem.tokenInfo.upload_count }} 张图片，此操作不可恢复
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="gray" variant="ghost" @click="tgDeleteModalOpen = false">取消</UButton>
+          <UButton color="red" :loading="tgDeletingLoading" @click="confirmRemoveTokenTg">
+            {{ tgDeleteWithImages ? '删除Token及图片' : '删除Token' }}
+          </UButton>
+        </div>
+      </template>
+    </UCard>
+  </UModal>
 </template>
 
 <script setup lang="ts">
@@ -320,6 +370,12 @@ const addTokenInput = ref('')
 const verifying = ref(false)
 const bindingTokenId = ref<string | null>(null)
 const revealedTokenId = ref<string | null>(null)
+
+// 删除弹窗状态
+const tgDeleteModalOpen = ref(false)
+const tgDeletingItem = ref<any>(null)
+const tgDeleteWithImages = ref(false)
+const tgDeletingLoading = ref(false)
 
 // 是否可以返回选择页
 const canGoBackToChoose = ref(false)
@@ -479,14 +535,29 @@ const selectToken = async (id: string) => {
   }
 }
 
-const removeToken = async (id: string) => {
-  if (!window.confirm('删除后该 Token 关联的上传记录将解除绑定，且无法恢复。确定删除？')) return
+const removeToken = (id: string) => {
+  const item = tokenStore.vaultItems.find(i => i.id === id)
+  if (!item) return
+  tgDeletingItem.value = item
+  tgDeleteWithImages.value = false
+  tgDeleteModalOpen.value = true
+}
+
+const confirmRemoveTokenTg = async () => {
+  if (!tgDeletingItem.value) return
+  tgDeletingLoading.value = true
   try {
-    await tokenStore.deleteTokenFromServer(id)
-    toast.success('Token 已删除')
+    await tokenStore.deleteTokenFromServer(tgDeletingItem.value.id, { deleteImages: tgDeleteWithImages.value })
+    const msg = tgDeleteWithImages.value ? 'Token 及图片已删除' : 'Token 已删除'
+    toast.success(msg)
+    tgDeleteModalOpen.value = false
+    tgDeletingItem.value = null
+    tgDeleteWithImages.value = false
     if (tgAuth.isLoggedIn) tgAuth.checkSession()
   } catch (e: any) {
     toast.error(e.message || '删除失败')
+  } finally {
+    tgDeletingLoading.value = false
   }
   if (!tokenStore.hasToken && tokenStore.vaultItems.length === 0) {
     modelValue.value = false

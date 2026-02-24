@@ -135,6 +135,21 @@ def process_upload(
     mime_type = get_mime_type(filename)
 
     # 保存文件信息
+    # 从存储后端返回的 meta 中提取 TG 消息信息（Web 上传到 Telegram 频道时回填）
+    meta = put_result.storage_meta or {}
+    effective_message_id = group_message_id or meta.get('message_id')
+    effective_chat_id = None
+    if effective_message_id and not is_group_upload:
+        # Web 上传到 Telegram 后端时，从后端实例获取 chat_id
+        try:
+            if hasattr(backend, '_chat_id'):
+                effective_chat_id = backend._chat_id
+        except Exception:
+            pass
+    elif is_group_upload:
+        # 群组上传由调用方通过 record_existing_telegram_file 传入 group_chat_id
+        pass
+
     file_data = {
         'file_id': put_result.file_id,
         'file_path': put_result.file_path,
@@ -147,7 +162,8 @@ def process_upload(
         'mime_type': mime_type,
         'file_hash': file_hash,
         'is_group_upload': is_group_upload,
-        'group_message_id': group_message_id,
+        'group_message_id': effective_message_id,
+        'group_chat_id': effective_chat_id,
         'auth_token': auth_token,
         'storage_backend': put_result.storage_backend,
         'storage_key': put_result.storage_key,

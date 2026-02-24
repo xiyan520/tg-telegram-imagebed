@@ -4,6 +4,7 @@
 认证路由模块 - Token 认证 API
 """
 import time
+import requests as http_requests
 from datetime import datetime
 from flask import request, jsonify
 
@@ -19,6 +20,7 @@ from ..database import (
     get_system_setting, verify_tg_session, get_user_token_count, bind_token_to_user, unbind_token_from_user,
     count_tokens_by_ip,
 )
+from ..database.connection import get_connection
 from ..services.file_service import process_upload
 from .upload import validate_image_magic, is_extension_allowed
 
@@ -343,13 +345,15 @@ def token_profile_api():
     if not token:
         return add_cache_headers(jsonify({'success': False, 'error': '未提供Token'}), 'no-cache'), 401
 
-    # DELETE: 用户侧删除 Token（级联删除）
+    # DELETE: 用户侧删除 Token（级联删除，可选同时删除图片）
     if request.method == 'DELETE':
-        from ..database.tokens import delete_token_by_string
-        deleted = delete_token_by_string(token)
+        from ..services.token_service import TokenService
+        delete_images = request.args.get('delete_images', '').lower() in ('true', '1')
+        deleted = TokenService.delete_token_by_string(token, delete_images=delete_images)
         if not deleted:
             return add_cache_headers(jsonify({'success': False, 'error': 'Token 不存在'}), 'no-cache'), 404
-        return add_cache_headers(jsonify({'success': True, 'message': 'Token 已删除'}), 'no-cache')
+        msg = 'Token 及关联图片已删除' if delete_images else 'Token 已删除'
+        return add_cache_headers(jsonify({'success': True, 'message': msg}), 'no-cache')
 
     verification = verify_auth_token_access(token)
     if not verification['valid']:
@@ -457,3 +461,181 @@ def unbind_token_from_tg():
 
     unbind_token_from_user(token, session_info['tg_user_id'])
     return add_cache_headers(jsonify({'success': True, 'message': '解绑成功'}), 'no-cache')
+
+
+def _delete_file_record(encrypted_id: str, token: str, *, delete_storage: bool = True) -> dict:
+    """
+    删除单个图片记录，可选同时删除存储后端文件。
+    - delete_storage=True: 删除存储文件 + TG消息 + 数据库记录（完全删除）
+    - delete_storage=False: 仅删除数据库记录（保留存储文件）
+    返回 { 'deleted': bool, 'tg_deleted': bool, 'error': str|None }
+    """
+    result = {'deleted': False, 'tg_deleted': False, 'error': None}
+
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 查询图片，确认属于该 Token
+            cursor.execute(
+                "SELECT encrypted_id, file_size, storage_backend, storage_key, "
+                "group_chat_id, group_message_id, storage_meta "
+                "FROM file_storage WHERE encrypted_id = ? AND auth_token = ?",
+                (encrypted_id, token),
+            )
+            row = cursor.fetchone()
+            if not row:
+                result['error'] = '图片不存在或不属于当前Token'
+                return result
+
+            file_row = dict(row)
+
+            if delete_storage:
+                storage_backend = (file_row.get('storage_backend') or 'telegram').strip()
+                storage_key = file_row.get('storage_key') or ''
+
+                # 1. 删除存储后端文件
+                if storage_key:
+                    try:
+                        from ..storage.router import get_storage_router
+                        router = get_storage_router()
+                        backend = router.get_backend(storage_backend)
+                        backend.delete(storage_key=storage_key)
+                    except Exception as e:
+                        logger.debug(f"用户删除-存储文件删除失败: {encrypted_id}, {e}")
+
+                # 2. TG 消息同步删除
+                tg_sync_enabled = str(get_system_setting('tg_sync_delete_enabled') or '1') == '1'
+                if tg_sync_enabled:
+                    chat_id = file_row.get('group_chat_id')
+                    message_id = file_row.get('group_message_id')
+
+                    # 兼容历史数据：从 storage_meta 中提取 message_id，从后端配置获取 chat_id
+                    if not message_id or not chat_id:
+                        try:
+                            import json as _json
+                            meta_raw = file_row.get('storage_meta') or '{}'
+                            meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+                            if not message_id:
+                                message_id = meta.get('message_id')
+                            if not chat_id and storage_backend:
+                                from ..storage.router import get_storage_router as _get_router
+                                be = _get_router().get_backend(storage_backend)
+                                if hasattr(be, '_chat_id'):
+                                    chat_id = be._chat_id
+                        except Exception:
+                            pass
+
+                    if chat_id and message_id:
+                        try:
+                            from ..bot_control import get_effective_bot_token
+                            bot_token, _ = get_effective_bot_token()
+                            if bot_token:
+                                resp = http_requests.post(
+                                    f"https://api.telegram.org/bot{bot_token}/deleteMessage",
+                                    data={'chat_id': chat_id, 'message_id': message_id},
+                                    timeout=5,
+                                )
+                                if resp.ok and resp.json().get('ok'):
+                                    result['tg_deleted'] = True
+                        except Exception:
+                            pass
+
+            # 3. 删除数据库记录
+            cursor.execute(
+                "DELETE FROM file_storage WHERE encrypted_id = ? AND auth_token = ?",
+                (encrypted_id, token),
+            )
+            if cursor.rowcount > 0:
+                result['deleted'] = True
+                # 递减 token 的 upload_count（不低于 0）
+                cursor.execute(
+                    "UPDATE auth_tokens SET upload_count = MAX(0, upload_count - 1) WHERE token = ?",
+                    (token,),
+                )
+
+    except Exception as e:
+        logger.error(f"用户删除图片失败: {encrypted_id}, {e}")
+        result['error'] = '删除失败'
+
+    return result
+
+
+@auth_bp.route('/api/auth/images/<encrypted_id>', methods=['DELETE'])
+def user_delete_image(encrypted_id):
+    """用户侧删除单张图片（仅能删除自己Token关联的图片）"""
+    token = _extract_bearer_token()
+    if not token:
+        return add_cache_headers(jsonify({'success': False, 'error': '未提供Token'}), 'no-cache'), 401
+
+    verification = verify_auth_token_access(token)
+    if not verification['valid']:
+        return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
+
+    # 是否同时删除存储文件（默认 true，仅删记录时传 false）
+    delete_storage = request.args.get('delete_storage', 'true').lower() not in ('false', '0')
+    result = _delete_file_record(encrypted_id, token, delete_storage=delete_storage)
+    if result['error']:
+        return add_cache_headers(jsonify({'success': False, 'error': result['error']}), 'no-cache'), 404
+
+    return add_cache_headers(jsonify({
+        'success': True,
+        'data': {
+            'deleted': 1 if result['deleted'] else 0,
+            'tg_deleted': 1 if result['tg_deleted'] else 0,
+        }
+    }), 'no-cache')
+
+
+@auth_bp.route('/api/auth/images/batch-delete', methods=['POST'])
+def user_batch_delete_images():
+    """用户侧批量删除图片"""
+    token = _extract_bearer_token()
+    if not token:
+        return add_cache_headers(jsonify({'success': False, 'error': '未提供Token'}), 'no-cache'), 401
+
+    verification = verify_auth_token_access(token)
+    if not verification['valid']:
+        return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
+
+    data = request.get_json(silent=True) or {}
+    ids = data.get('ids', [])
+
+    if not isinstance(ids, list) or not ids:
+        return add_cache_headers(jsonify({'success': False, 'error': '未提供要删除的图片ID'}), 'no-cache'), 400
+
+    # 去重 + 清洗
+    ids = list(dict.fromkeys(str(x).strip() for x in ids if x is not None and str(x).strip()))
+    if not ids:
+        return add_cache_headers(jsonify({'success': False, 'error': '未提供要删除的图片ID'}), 'no-cache'), 400
+
+    # 限制单次批量删除数量
+    if len(ids) > 100:
+        return add_cache_headers(jsonify({'success': False, 'error': '单次最多删除100张图片'}), 'no-cache'), 400
+
+    # 是否同时删除存储文件（默认 true）
+    delete_storage = bool(data.get('delete_storage', True))
+
+    deleted = 0
+    failed = 0
+    tg_deleted = 0
+
+    for eid in ids:
+        result = _delete_file_record(eid, token, delete_storage=delete_storage)
+        if result['deleted']:
+            deleted += 1
+            if result['tg_deleted']:
+                tg_deleted += 1
+        else:
+            failed += 1
+
+    logger.info(f"用户批量删除图片: token={token[:20]}..., 删除={deleted}, 失败={failed}, TG同步={tg_deleted}")
+
+    return add_cache_headers(jsonify({
+        'success': True,
+        'data': {
+            'deleted': deleted,
+            'failed': failed,
+            'tg_deleted': tg_deleted,
+        }
+    }), 'no-cache')

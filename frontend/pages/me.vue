@@ -93,7 +93,6 @@
         <AlbumGalleryList
           v-if="galleryView === 'list'"
           :key="'gallery-list-' + refreshKey"
-          :upload-count="tokenStore.uploadCount"
           @navigate="handleGalleryNavigate"
         />
         <AlbumGalleryDetail

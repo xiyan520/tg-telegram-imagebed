@@ -206,6 +206,32 @@
         </div>
       </UCard>
 
+      <!-- 删除设置 -->
+      <UCard>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-lg flex items-center justify-center">
+                <UIcon name="heroicons:trash" class="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">删除设置</h3>
+                <p class="text-xs text-stone-500 dark:text-stone-400">配置图片删除时的关联操作</p>
+              </div>
+            </div>
+            <UButton color="primary" variant="outline" :loading="savingSyncDelete" @click="saveSyncDelete">保存</UButton>
+          </div>
+        </template>
+
+        <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+          <div>
+            <p class="text-sm font-medium text-stone-700 dark:text-stone-300">同步删除 TG 消息</p>
+            <p class="text-xs text-stone-500 dark:text-stone-400">后台删除图片时同步删除 Telegram 中对应的消息</p>
+          </div>
+          <UToggle v-model="syncDeleteEnabled" />
+        </div>
+      </UCard>
+
       <!-- 管理员上传测试 -->
       <UCard>
         <template #header>
@@ -373,13 +399,6 @@
                   <UInput v-model.number="groupUpload.delete_delay" type="number" min="0" placeholder="0 表示不自动删除" />
                 </div>
 
-                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-                  <div>
-                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">同步删除 TG 消息</p>
-                    <p class="text-xs text-stone-500 dark:text-stone-400">后台删除图片时同步删除 Telegram 群组中的消息</p>
-                  </div>
-                  <UToggle v-model="groupUpload.sync_delete" />
-                </div>
               </div>
             </div>
 
@@ -523,6 +542,7 @@ const uploading = ref(false)
 const savingBackend = ref(false)
 const deleting = ref(false)
 const savingGroupUpload = ref(false)
+const savingSyncDelete = ref(false)
 
 // 环境变量覆盖标志
 const envOverride = ref(false)
@@ -554,9 +574,11 @@ const groupUpload = ref({
   admin_ids: '',
   tg_bound_only: false,
   reply: true,
-  delete_delay: 0,
-  sync_delete: true
+  delete_delay: 0
 })
+
+// 同步删除 TG 消息（独立设置）
+const syncDeleteEnabled = ref(true)
 
 // 私聊上传配置
 const privateUpload = ref({
@@ -707,14 +729,15 @@ const loadAll = async () => {
         admin_ids: d.group_admin_ids ?? '',
         tg_bound_only: d.group_upload_tg_bound_only ?? false,
         reply: d.group_upload_reply ?? true,
-        delete_delay: d.group_upload_delete_delay ?? 0,
-        sync_delete: d.tg_sync_delete_enabled ?? true
+        delete_delay: d.group_upload_delete_delay ?? 0
       }
       privateUpload.value = {
         enabled: d.bot_private_upload_enabled ?? true,
         mode: d.bot_private_upload_mode ?? 'open',
         admin_ids: d.bot_private_admin_ids ?? ''
       }
+      // 独立加载同步删除设置
+      syncDeleteEnabled.value = d.tg_sync_delete_enabled ?? true
     }
   } catch (e: any) {
     console.error('加载存储配置失败:', e)
@@ -775,7 +798,6 @@ const saveGroupUpload = async (silent = false) => {
       group_upload_tg_bound_only: groupUpload.value.tg_bound_only,
       group_upload_reply: groupUpload.value.reply,
       group_upload_delete_delay: groupUpload.value.delete_delay,
-      tg_sync_delete_enabled: groupUpload.value.sync_delete,
       bot_private_upload_enabled: privateUpload.value.enabled,
       bot_private_upload_mode: privateUpload.value.mode,
       bot_private_admin_ids: privateUpload.value.admin_ids,
@@ -794,6 +816,25 @@ const saveGroupUpload = async (silent = false) => {
     throw e
   } finally {
     savingGroupUpload.value = false
+  }
+}
+
+// 保存同步删除设置
+const saveSyncDelete = async () => {
+  savingSyncDelete.value = true
+  try {
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
+      method: 'PUT',
+      body: { tg_sync_delete_enabled: syncDeleteEnabled.value },
+      credentials: 'include'
+    })
+    if (!resp?.success) throw new Error(resp?.error || '保存失败')
+    notification.success('已保存', '删除设置已更新')
+  } catch (e: any) {
+    console.error('保存同步删除设置失败:', e)
+    notification.error('保存失败', e?.data?.error || e?.message || '无法保存删除设置')
+  } finally {
+    savingSyncDelete.value = false
   }
 }
 

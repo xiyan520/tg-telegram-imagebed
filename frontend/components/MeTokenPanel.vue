@@ -102,6 +102,20 @@
       </div>
     </template>
 
+    <!-- 删除设置：用户自主选择是否同时删除存储文件 -->
+    <div v-if="publicSettings.tgSyncDeleteEnabled" class="mt-4 p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2 min-w-0">
+          <UIcon name="heroicons:trash" class="w-4 h-4 text-stone-500 flex-shrink-0" />
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-stone-700 dark:text-stone-300">删除时清除存储文件</p>
+            <p class="text-xs text-stone-400 dark:text-stone-500">关闭后仅删除数据库记录，保留存储库中的文件</p>
+          </div>
+        </div>
+        <UToggle v-model="deleteStorageEnabled" @update:model-value="saveDeleteStoragePref" />
+      </div>
+    </div>
+
     <!-- 添加已有 Token（可创建时显示） -->
     <template v-if="canCreateToken" #footer>
       <div class="space-y-2">
@@ -118,6 +132,59 @@
       </div>
     </template>
   </UCard>
+
+  <!-- 删除确认弹窗 -->
+  <UModal v-model="deleteModalOpen">
+    <UCard>
+      <template #header>
+        <h3 class="text-lg font-semibold text-red-600">确认删除 Token</h3>
+      </template>
+
+      <div class="space-y-3">
+        <p class="text-sm text-stone-700 dark:text-stone-300">
+          删除后该 Token 将无法恢复。
+        </p>
+        <div v-if="deletingItem" class="text-xs text-stone-500 dark:text-stone-400">
+          Token：<code class="font-mono">{{ maskToken(deletingItem.token) }}</code>
+          <span v-if="deletingItem.albumName"> · {{ deletingItem.albumName }}</span>
+        </div>
+        <div v-if="deletingItem?.tokenInfo" class="text-xs text-stone-500 dark:text-stone-400">
+          已上传 {{ deletingItem.tokenInfo.upload_count ?? 0 }} 张图片
+        </div>
+
+        <!-- 同时删除图片选项 -->
+        <div v-if="deletingItem?.tokenInfo?.upload_count" class="p-3 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/30 rounded-lg">
+          <label class="flex items-start gap-2 cursor-pointer select-none">
+            <input
+              v-model="deleteWithImages"
+              type="checkbox"
+              class="mt-0.5 rounded border-red-400 dark:border-red-600 text-red-600 focus:ring-red-500"
+            />
+            <div>
+              <span class="text-sm font-medium text-red-700 dark:text-red-300">
+                {{ publicSettings.tgSyncDeleteEnabled ? '同时永久删除关联的所有图片' : '同时删除关联的所有图片记录' }}
+              </span>
+              <p class="text-xs text-red-500 dark:text-red-400 mt-0.5">
+                {{ publicSettings.tgSyncDeleteEnabled
+                  ? `将从数据库和存储中永久删除 ${deletingItem.tokenInfo.upload_count} 张图片，此操作不可恢复`
+                  : `仅删除数据库中的 ${deletingItem.tokenInfo.upload_count} 张图片记录，存储文件将保留`
+                }}
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton color="gray" variant="ghost" @click="deleteModalOpen = false">取消</UButton>
+          <UButton color="red" :loading="deletingLoading" @click="confirmRemoveToken">
+            {{ deleteWithImages ? (publicSettings.tgSyncDeleteEnabled ? '删除Token及图片' : '删除Token及记录') : '删除Token' }}
+          </UButton>
+        </div>
+      </template>
+    </UCard>
+  </UModal>
 </template>
 
 <!-- PLACEHOLDER_SCRIPT -->
@@ -135,6 +202,23 @@ const addTokenInput = ref('')
 const verifying = ref(false)
 const bindingTokenId = ref<string | null>(null)
 const revealedTokenId = ref<string | null>(null)
+
+// 删除弹窗状态
+const deleteModalOpen = ref(false)
+const deletingItem = ref<any>(null)
+const deleteWithImages = ref(false)
+const deletingLoading = ref(false)
+
+// 删除时是否同时清除存储文件（用户偏好，localStorage 持久化）
+const deleteStorageEnabled = ref(true)
+if (import.meta.client) {
+  deleteStorageEnabled.value = localStorage.getItem('user_delete_storage') !== 'false'
+}
+const saveDeleteStoragePref = (val: boolean) => {
+  if (import.meta.client) {
+    localStorage.setItem('user_delete_storage', String(val))
+  }
+}
 
 // P2-b: 检测未绑定的 Token
 const hasUnboundTokens = computed(() =>
@@ -189,13 +273,27 @@ const handleGenerate = async () => {
   finally { generating.value = false }
 }
 
-const removeToken = async (id: string) => {
-  if (!window.confirm('删除后该 Token 关联的上传记录将解除绑定，且无法恢复。确定删除？')) return
+const removeToken = (id: string) => {
+  const item = tokenStore.vaultItems.find(i => i.id === id)
+  if (!item) return
+  deletingItem.value = item
+  deleteWithImages.value = false
+  deleteModalOpen.value = true
+}
+
+const confirmRemoveToken = async () => {
+  if (!deletingItem.value) return
+  deletingLoading.value = true
   try {
-    await tokenStore.deleteTokenFromServer(id)
-    toast.success('Token 已删除')
+    await tokenStore.deleteTokenFromServer(deletingItem.value.id, { deleteImages: deleteWithImages.value })
+    const msg = deleteWithImages.value ? 'Token 及图片已删除' : 'Token 已删除'
+    toast.success(msg)
+    deleteModalOpen.value = false
+    deletingItem.value = null
+    deleteWithImages.value = false
     if (tgAuth.isLoggedIn) tgAuth.checkSession()
   } catch (e: any) { toast.error(e.message || '删除失败') }
+  finally { deletingLoading.value = false }
 }
 
 const verifyAndAdd = async () => {

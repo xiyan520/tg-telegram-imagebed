@@ -310,6 +310,7 @@ def get_public_settings() -> Dict[str, Any]:
         'tg_auth_enabled': settings.get('tg_auth_enabled', '0') == '1',
         'tg_auth_required_for_token': settings.get('tg_auth_required_for_token', '0') == '1',
         'tg_bind_token_enabled': settings.get('tg_bind_token_enabled', '0') == '1',
+        'tg_sync_delete_enabled': settings.get('tg_sync_delete_enabled', '1') == '1',
     }
 
 def is_guest_upload_allowed() -> bool:

@@ -1,24 +1,5 @@
 <template>
   <div class="space-y-4">
-    <!-- "我的上传"快捷入口 -->
-    <div
-      class="relative group rounded-2xl overflow-hidden border border-amber-200/60 dark:border-amber-800/40 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/20 dark:to-orange-950/20 p-4 cursor-pointer hover:shadow-md hover:shadow-amber-500/10 transition-all duration-300"
-      @click="$emit('navigate', 'uploads')"
-    >
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm shadow-amber-500/25 group-hover:scale-105 transition-transform duration-300">
-          <UIcon name="heroicons:cloud-arrow-up" class="w-6 h-6 text-white" />
-        </div>
-        <div class="flex-1 min-w-0">
-          <h3 class="font-semibold text-stone-800 dark:text-white">我的上传</h3>
-          <p class="text-sm text-stone-500 dark:text-stone-400">
-            共 <span class="font-semibold text-amber-600 dark:text-amber-400">{{ uploadCount }}</span> 张图片
-          </p>
-        </div>
-        <UIcon name="heroicons:chevron-right" class="w-5 h-5 text-stone-300 dark:text-stone-600 group-hover:text-amber-500 group-hover:translate-x-0.5 transition-all" />
-      </div>
-    </div>
-
     <!-- 标题栏 -->
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-bold text-stone-900 dark:text-white">
@@ -91,7 +72,6 @@
 <script setup lang="ts">
 import type { Gallery } from '~/composables/useGalleryApi'
 
-defineProps<{ uploadCount: number }>()
 defineEmits<{
   (e: 'navigate', view: string, galleryId?: number): void
 }>()

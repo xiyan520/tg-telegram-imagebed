@@ -386,12 +386,13 @@ export const useTokenStore = defineStore('token', {
     },
 
     // 从服务器删除所有 vault 中的 Token（退出登录时使用）
-    async deleteAllTokensFromServer() {
+    async deleteAllTokensFromServer(opts?: { deleteImages?: boolean }) {
       const config = useRuntimeConfig()
       const items = [...this.vault.items]
+      const qs = opts?.deleteImages ? '?delete_images=true' : ''
       for (const item of items) {
         try {
-          await $fetch(`${config.public.apiBase}/api/auth/token`, {
+          await $fetch(`${config.public.apiBase}/api/auth/token${qs}`, {
             method: 'DELETE',
             headers: { Authorization: `Bearer ${item.token}` }
           })
@@ -406,13 +407,14 @@ export const useTokenStore = defineStore('token', {
       this.syncActiveFromVault()
     },
 
-    // 从服务器删除 Token（级联删除）
-    async deleteTokenFromServer(vaultId: string) {
+    // 从服务器删除 Token（级联删除，可选同时删除图片）
+    async deleteTokenFromServer(vaultId: string, opts?: { deleteImages?: boolean }) {
       const item = this.vault.items.find(i => i.id === vaultId)
       if (!item) return
 
       const config = useRuntimeConfig()
-      await $fetch(`${config.public.apiBase}/api/auth/token`, {
+      const qs = opts?.deleteImages ? '?delete_images=true' : ''
+      await $fetch(`${config.public.apiBase}/api/auth/token${qs}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${item.token}` }
       })

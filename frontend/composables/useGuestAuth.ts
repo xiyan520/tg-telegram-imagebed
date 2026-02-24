@@ -13,6 +13,7 @@ export const useGuestAuth = () => {
     tgAuthEnabled: false,
     tgAuthRequired: false,
     tgBindEnabled: false,
+    tgSyncDeleteEnabled: false,
     loaded: false,
   }))
 
@@ -31,6 +32,7 @@ export const useGuestAuth = () => {
         publicSettings.value.tgAuthEnabled = !!res.data.tg_auth_enabled
         publicSettings.value.tgAuthRequired = !!res.data.tg_auth_required_for_token
         publicSettings.value.tgBindEnabled = !!res.data.tg_bind_token_enabled
+        publicSettings.value.tgSyncDeleteEnabled = !!res.data.tg_sync_delete_enabled
         publicSettings.value.loaded = true
       }
     } catch { /* 忽略 */ }

@@ -29,9 +29,11 @@
       :selected-count="selectedIds.length"
       :total-count="filteredImages.length"
       :select-all="selectAll"
+      :show-remove="selectedIds.length > 0"
       :show-add-to-gallery="true"
       :loading="loading"
       @toggle-select-all="toggleSelectAll"
+      @remove="openDeleteConfirm"
       @copy-links="copySelectedLinks"
       @add-to-gallery="showAddToGallery = true"
       @refresh="loadUploads"
@@ -47,11 +49,49 @@
       @view-image="handleViewImage"
     />
 
-
     <!-- 分页 -->
     <div v-if="totalPages > 1" class="flex justify-center pt-2">
       <UPagination v-model="currentPage" :total="total" :page-count="pageSize" @update:model-value="loadUploads" />
     </div>
+
+    <!-- 删除确认弹窗 -->
+    <UModal v-model="showDeleteConfirm">
+      <UCard>
+        <template #header>
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+              <UIcon name="heroicons:exclamation-triangle" class="w-5 h-5 text-red-500" />
+            </div>
+            <h3 class="text-lg font-semibold text-red-600 dark:text-red-400">确认删除</h3>
+          </div>
+        </template>
+        <div class="space-y-3">
+          <p class="text-sm text-stone-700 dark:text-stone-300">
+            即将删除 <span class="font-bold text-red-600 dark:text-red-400">{{ selectedIds.length }}</span> 张图片。
+          </p>
+          <div class="p-3 rounded-xl border" :class="deleteStoragePref
+            ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+            : 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800'">
+            <p class="text-xs" :class="deleteStoragePref ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'">
+              <template v-if="deleteStoragePref">
+                图片将从数据库和存储中永久删除，此操作不可恢复。
+              </template>
+              <template v-else>
+                仅删除数据库记录，存储库中的文件将保留。
+              </template>
+            </p>
+          </div>
+        </div>
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <UButton color="gray" variant="ghost" @click="showDeleteConfirm = false">取消</UButton>
+            <UButton color="red" :loading="deleting" @click="confirmDelete">
+              确认删除 ({{ selectedIds.length }})
+            </UButton>
+          </div>
+        </template>
+      </UCard>
+    </UModal>
 
     <!-- 添加到画集弹窗 -->
     <UModal v-model="showAddToGallery">
@@ -198,6 +238,59 @@ const loadUploads = async () => {
     toast.error('加载失败', e.message)
   } finally {
     loading.value = false
+  }
+}
+
+// 删除图片
+const showDeleteConfirm = ref(false)
+const deleting = ref(false)
+const deleteStoragePref = ref(true)
+
+const openDeleteConfirm = () => {
+  deleteStoragePref.value = getUserDeleteStoragePref()
+  showDeleteConfirm.value = true
+}
+
+// 读取用户偏好：是否同时删除存储文件
+const getUserDeleteStoragePref = () => {
+  if (import.meta.client) {
+    return localStorage.getItem('user_delete_storage') !== 'false'
+  }
+  return true
+}
+
+const confirmDelete = async () => {
+  if (selectedIds.value.length === 0) return
+  deleting.value = true
+  try {
+    const token = store.token
+    if (!token) {
+      toast.error('未登录', '请先登录Token')
+      return
+    }
+    const deleteStorage = getUserDeleteStoragePref()
+    const resp = await $fetch<{ success: boolean; data?: { deleted: number; failed: number; tg_deleted: number }; error?: string }>(`${baseURL}/api/auth/images/batch-delete`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: { ids: selectedIds.value, delete_storage: deleteStorage },
+    })
+    if (resp.success && resp.data) {
+      const { deleted, failed } = resp.data
+      if (deleted > 0) {
+        toast.success(`已删除 ${deleted} 张图片${failed > 0 ? `，${failed} 张删除失败` : ''}`)
+      } else {
+        toast.warning('未能删除任何图片')
+      }
+    } else {
+      toast.error('删除失败', resp.error || '未知错误')
+    }
+    showDeleteConfirm.value = false
+    selectedIds.value = []
+    await loadUploads()
+  } catch (e: any) {
+    toast.error('删除失败', e.message || e.data?.error || '请稍后重试')
+  } finally {
+    deleting.value = false
   }
 }
 

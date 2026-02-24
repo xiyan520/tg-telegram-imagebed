@@ -676,12 +676,16 @@ def admin_delete_token(*, token_id: int) -> bool:
         raise
 
 
-def delete_token_by_string(token: str) -> bool:
+def delete_token_by_string(token: str, *, delete_images: bool = False) -> bool:
     """
     按 token 字符串级联删除（用户侧删除）。
 
     级联：file_storage.auth_token 置空 → galleries.owner_token 置空
           → gallery_token_access 清理 → auth_tokens 删除
+
+    Args:
+        token: Token 字符串
+        delete_images: 是否同时删除关联图片（存储后端 + 数据库记录）
     """
     token = (token or '').strip()
     if not token:
@@ -693,11 +697,19 @@ def delete_token_by_string(token: str) -> bool:
             cursor.execute("SELECT 1 FROM auth_tokens WHERE token = ?", (token,))
             if not cursor.fetchone():
                 return False
+
+            # 可选：删除关联图片
+            if delete_images:
+                from ..services.token_service import TokenService
+                TokenService._delete_images_for_token_str(token, cursor)
+            else:
+                # 仅置空 auth_token
+                cursor.execute(
+                    "UPDATE file_storage SET auth_token = NULL WHERE auth_token = ?",
+                    (token,),
+                )
+
             # 级联清理
-            cursor.execute(
-                "UPDATE file_storage SET auth_token = NULL WHERE auth_token = ?",
-                (token,),
-            )
             cursor.execute(
                 "UPDATE galleries SET owner_token = NULL WHERE owner_token = ?",
                 (token,),
@@ -707,7 +719,8 @@ def delete_token_by_string(token: str) -> bool:
                 (token,),
             )
             cursor.execute("DELETE FROM auth_tokens WHERE token = ?", (token,))
-        logger.info(f"用户侧级联删除 Token: {token[:20]}...")
+        action = "级联删除（含图片）" if delete_images else "级联删除"
+        logger.info(f"用户侧{action} Token: {token[:20]}...")
         return True
     except Exception as e:
         logger.error(f"用户侧删除 Token 失败: {e}")

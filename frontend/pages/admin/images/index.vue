@@ -372,9 +372,30 @@
           <h3 class="text-lg font-semibold text-red-600">确认删除</h3>
         </template>
 
-        <p class="text-stone-700 dark:text-stone-300">
-          {{ deleteMessage }}
-        </p>
+        <div class="space-y-3">
+          <p class="text-stone-700 dark:text-stone-300">
+            {{ tgSyncDeleteEnabled ? deleteMessage : `${deleteMessage.replace('此操作不可恢复。', '')}仅删除数据库中的图片记录。` }}
+          </p>
+
+          <!-- 同时删除存储文件选项 -->
+          <div v-if="tgSyncDeleteEnabled" class="p-3 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/30 rounded-lg mt-3">
+            <label class="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                v-model="deleteWithStorage"
+                type="checkbox"
+                class="mt-0.5 rounded border-red-400 dark:border-red-600 text-red-600 focus:ring-red-500"
+              />
+              <div>
+                <span class="text-sm font-medium text-red-700 dark:text-red-300">
+                  同时删除存储库中的文件
+                </span>
+                <p class="text-xs text-red-500 dark:text-red-400 mt-0.5">
+                  将从存储后端永久删除文件并同步删除 TG 消息，此操作不可恢复
+                </p>
+              </div>
+            </label>
+          </div>
+        </div>
 
         <template #footer>
           <div class="flex justify-end gap-2">
@@ -382,7 +403,7 @@
               取消
             </UButton>
             <UButton color="red" :loading="deleting" @click="confirmDelete">
-              确认删除
+              {{ tgSyncDeleteEnabled && deleteWithStorage ? '删除记录及文件' : '仅删除记录' }}
             </UButton>
           </div>
         </template>
@@ -399,6 +420,22 @@ definePageMeta({
 
 const notification = useNotification()
 const { getImages, deleteImages, clearCache } = useImageApi()
+const runtimeConfig = useRuntimeConfig()
+
+// tg_sync_delete_enabled 系统设置
+const tgSyncDeleteEnabled = ref(false)
+const deleteWithStorage = ref(true)
+
+const loadSyncDeleteSetting = async () => {
+  try {
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
+      credentials: 'include'
+    })
+    if (resp?.success) {
+      tgSyncDeleteEnabled.value = resp.data?.tg_sync_delete_enabled === true || String(resp.data?.tg_sync_delete_enabled) === '1'
+    }
+  } catch { /* 静默失败 */ }
+}
 
 // 视图模式（持久化到 localStorage）
 const viewMode = ref<'grid' | 'list' | 'masonry'>('grid')
@@ -518,12 +555,14 @@ const copyImageUrl = async (url: string) => {
 const deleteImage = (id: string) => {
   selectedImages.value = [id]
   deleteMessage.value = '确定要删除这张图片吗？此操作不可恢复。'
+  deleteWithStorage.value = true
   deleteModalOpen.value = true
 }
 
 // 删除选中图片
 const handleDeleteSelected = () => {
   deleteMessage.value = `确定要删除选中的 ${selectedImages.value.length} 张图片吗？此操作不可恢复。`
+  deleteWithStorage.value = true
   deleteModalOpen.value = true
 }
 
@@ -531,7 +570,7 @@ const handleDeleteSelected = () => {
 const confirmDelete = async () => {
   deleting.value = true
   try {
-    await deleteImages(selectedImages.value)
+    await deleteImages(selectedImages.value, { deleteStorage: tgSyncDeleteEnabled.value && deleteWithStorage.value })
     notification.success('删除成功', `已删除 ${selectedImages.value.length} 张图片`)
     selectedImages.value = []
     selectAll.value = false
@@ -590,5 +629,6 @@ const handleImageError = (event: Event, image: any) => {
 // 页面加载
 onMounted(() => {
   loadImages()
+  loadSyncDeleteSetting()
 })
 </script>

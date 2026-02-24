@@ -90,11 +90,15 @@ export const useImageApi = () => {
   }
 
   // 删除图片
-  const deleteImages = async (ids: string[]) => {
+  const deleteImages = async (ids: string[], opts?: { deleteStorage?: boolean }) => {
     try {
+      const body: Record<string, any> = { ids }
+      if (opts?.deleteStorage !== undefined) {
+        body.delete_storage = opts.deleteStorage
+      }
       const response = await $fetch<ApiResponse<AdminDeleteData>>('/api/admin/delete', {
         method: 'POST',
-        body: { ids },
+        body,
         credentials: 'include'
       })
       return response

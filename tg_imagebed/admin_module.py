@@ -944,9 +944,11 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
     @app.route('/api/admin/delete', methods=['POST'])
     @login_required
     def admin_delete_images():
-        """删除图片，同时同步删除TG群组消息"""
+        """删除图片，支持同步删除存储后端文件和TG群组消息"""
         data = request.get_json(silent=True) or {}
         ids = data.get('ids', [])
+        # 是否删除存储后端文件，默认为 True（向后兼容）
+        delete_storage = data.get('delete_storage', True)
 
         if not isinstance(ids, list) or not ids:
             return jsonify({'success': False, 'message': '没有选择要删除的图片'}), 400
@@ -959,6 +961,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         deleted_count = 0
         deleted_size = 0
         tg_deleted_count = 0
+        storage_deleted_count = 0
 
         def _chunked(seq, size=900):
             for i in range(0, len(seq), size):
@@ -973,14 +976,15 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                     placeholders = ','.join('?' * len(chunk))
                     try:
                         cursor.execute(f'''
-                            SELECT encrypted_id, file_size, group_chat_id, group_message_id
+                            SELECT encrypted_id, file_size, group_chat_id, group_message_id,
+                                   storage_backend, storage_meta, storage_key
                             FROM file_storage
                             WHERE encrypted_id IN ({placeholders})
                         ''', chunk)
                     except sqlite3.OperationalError as e:
                         if 'no such column' in str(e).lower():
                             cursor.execute(f'''
-                                SELECT encrypted_id, file_size, NULL, NULL
+                                SELECT encrypted_id, file_size, NULL, NULL, NULL, NULL, NULL
                                 FROM file_storage
                                 WHERE encrypted_id IN ({placeholders})
                             ''', chunk)
@@ -1000,15 +1004,62 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                 except Exception:
                     pass
 
+                # 当 delete_storage=True 且 tg_sync_delete_enabled=True 时，删除存储后端文件和TG消息
+                if delete_storage and tg_sync_delete_enabled:
+                    # 删除存储后端文件（静默忽略失败）
+                    try:
+                        from .storage.router import get_storage_router
+                        router = get_storage_router()
+                        for row in files_to_delete:
+                            encrypted_id = row[0]
+                            storage_backend_name = row[4] if len(row) > 4 else None
+                            storage_key = row[6] if len(row) > 6 else None
+                            if storage_key and storage_backend_name:
+                                try:
+                                    backend = router.get_backend(storage_backend_name.strip())
+                                    backend.delete(storage_key=storage_key)
+                                    storage_deleted_count += 1
+                                except Exception as e:
+                                    logger.debug(f"删除存储文件失败: {encrypted_id}, {e}")
+                    except Exception as e:
+                        logger.debug(f"存储后端删除跳过: {e}")
+
                 # 同步删除TG群组消息（静默忽略失败）
-                if tg_sync_delete_enabled:
+                if delete_storage and tg_sync_delete_enabled:
                     try:
                         from .bot_control import get_effective_bot_token
                         bot_token, _ = get_effective_bot_token()
                         if bot_token:
+                            # 获取存储路由器（用于 fallback 获取 chat_id）
+                            try:
+                                from .storage.router import get_storage_router
+                                _router = get_storage_router()
+                            except Exception:
+                                _router = None
+
                             seen = set()
                             for row in files_to_delete:
                                 chat_id, message_id = row[2], row[3]
+                                storage_backend_name = row[4] if len(row) > 4 else None
+                                storage_meta_raw = row[5] if len(row) > 5 else None
+
+                                # 兼容历史数据：从 storage_meta 中提取 message_id，从后端配置获取 chat_id
+                                if message_id is None or chat_id is None:
+                                    try:
+                                        import json as _json
+                                        meta = _json.loads(storage_meta_raw) if isinstance(storage_meta_raw, str) and storage_meta_raw else {}
+                                        if message_id is None:
+                                            message_id = meta.get('message_id')
+                                        if chat_id is None and storage_backend_name and _router:
+                                            try:
+                                                be = _router.get_backend(storage_backend_name.strip())
+                                                if hasattr(be, '_chat_id'):
+                                                    chat_id = be._chat_id
+                                            except Exception:
+                                                pass
+                                    except Exception:
+                                        pass
+
                                 if chat_id is None or message_id is None:
                                     continue
                                 key = (chat_id, message_id)
@@ -1042,13 +1093,14 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                     ''', chunk)
                     deleted_count += cursor.rowcount
 
-            logger.info(f"管理员删除了 {deleted_count} 张图片，TG消息同步删除 {tg_deleted_count} 条")
+            logger.info(f"管理员删除了 {deleted_count} 张图片，TG消息同步删除 {tg_deleted_count} 条，存储文件删除 {storage_deleted_count} 个")
 
             return jsonify({
                 'success': True,
                 'data': {
                     'deleted': deleted_count,
                     'tg_deleted': tg_deleted_count,
+                    'storage_deleted': storage_deleted_count,
                     'message': f'成功删除 {deleted_count} 张图片'
                 }
             })

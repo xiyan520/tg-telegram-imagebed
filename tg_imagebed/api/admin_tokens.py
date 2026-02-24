@@ -104,10 +104,13 @@ def admin_token_detail_api(token_id: int):
             return _admin_json({'success': True, 'data': detail})
 
         if request.method == 'DELETE':
-            deleted = TokenService.delete_token(token_id)
+            # 支持 ?delete_images=true 查询参数
+            delete_images = request.args.get('delete_images', '').lower() in ('true', '1')
+            deleted = TokenService.delete_token(token_id, delete_images=delete_images)
             if not deleted:
                 return _admin_json({'success': False, 'error': 'Token 不存在'}, 404)
-            return _admin_json({'success': True, 'message': 'Token 已删除'})
+            msg = 'Token 及关联图片已删除' if delete_images else 'Token 已删除'
+            return _admin_json({'success': True, 'message': msg})
 
         # PATCH: 更新 Token 属性
         payload = request.get_json(silent=True) or {}
@@ -246,7 +249,8 @@ def admin_tokens_batch_api():
         elif action == 'disable':
             result = TokenService.batch_update_status(int_ids, is_active=False)
         elif action == 'delete':
-            result = TokenService.batch_delete(int_ids)
+            delete_images = bool(payload.get('delete_images', False))
+            result = TokenService.batch_delete(int_ids, delete_images=delete_images)
         elif action == 'impact':
             result = TokenService.batch_get_impact(int_ids)
         else:

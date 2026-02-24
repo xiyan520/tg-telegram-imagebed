@@ -31,20 +31,12 @@
         v-if="currentView === 'list'"
         ref="galleryListRef"
         :key="'gallery-list-' + refreshKey"
-        :upload-count="store.uploadCount"
         @navigate="handleNavigate"
       />
       <AlbumGalleryDetail
         v-else-if="currentView === 'detail' && activeGalleryId"
         :key="'gallery-detail-' + activeGalleryId + '-' + refreshKey"
         :gallery-id="activeGalleryId"
-        @navigate="handleNavigate"
-        @view-image="openLightbox"
-      />
-      <AlbumMyUploads
-        v-else-if="currentView === 'uploads'"
-        ref="myUploadsRef"
-        :key="'my-uploads-' + refreshKey"
         @navigate="handleNavigate"
         @view-image="openLightbox"
       />
@@ -65,12 +57,11 @@ import type { GalleryImage } from '~/composables/useGalleryApi'
 const store = useTokenStore()
 
 // 视图状态
-const currentView = ref<'list' | 'detail' | 'uploads'>('list')
+const currentView = ref<'list' | 'detail'>('list')
 const activeGalleryId = ref<number | null>(null)
 
 // 子组件引用
 const galleryListRef = ref<{ refresh: () => Promise<void> } | null>(null)
-const myUploadsRef = ref<{ refresh: () => Promise<void> } | null>(null)
 
 // 灯箱状态
 const lightboxOpen = ref(false)
@@ -84,8 +75,6 @@ const handleNavigate = (view: string, galleryId?: number) => {
   if (view === 'detail' && galleryId) {
     activeGalleryId.value = galleryId
     currentView.value = 'detail'
-  } else if (view === 'uploads') {
-    currentView.value = 'uploads'
   } else {
     currentView.value = 'list'
     activeGalleryId.value = null

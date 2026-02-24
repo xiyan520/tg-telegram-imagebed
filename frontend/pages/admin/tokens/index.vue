@@ -338,6 +338,27 @@
             <div class="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
             正在查询影响范围...
           </div>
+          <!-- 同时删除图片选项 -->
+          <div v-if="deleteImpact && deleteImpact.upload_count > 0" class="p-3 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/30 rounded-lg">
+            <label class="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                v-model="deleteWithImages"
+                type="checkbox"
+                class="mt-0.5 rounded border-red-400 dark:border-red-600 text-red-600 focus:ring-red-500"
+              />
+              <div>
+                <span class="text-sm font-medium text-red-700 dark:text-red-300">
+                  {{ tgSyncDeleteEnabled ? '同时永久删除该Token关联的所有图片' : '同时删除该Token关联的所有图片记录' }}
+                </span>
+                <p class="text-xs text-red-500 dark:text-red-400 mt-0.5">
+                  {{ tgSyncDeleteEnabled
+                    ? `将从数据库和存储后端中永久删除 ${deleteImpact.upload_count} 张图片，此操作不可恢复`
+                    : `仅删除数据库中的 ${deleteImpact.upload_count} 张图片记录，存储文件将保留`
+                  }}
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
 
         <template #footer>
@@ -346,7 +367,7 @@
               取消
             </UButton>
             <UButton color="red" :loading="deleting" :disabled="deleting" @click="confirmDelete">
-              删除
+              {{ deleteWithImages ? (tgSyncDeleteEnabled ? '删除Token及图片' : '删除Token及记录') : '删除' }}
             </UButton>
           </div>
         </template>
@@ -377,6 +398,27 @@
             <div class="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
             正在查询影响范围...
           </div>
+          <!-- 批量删除：同时删除图片选项 -->
+          <div v-if="batchModalAction === 'delete' && batchImpact && batchImpact.upload_count > 0" class="p-3 border border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/30 rounded-lg">
+            <label class="flex items-start gap-2 cursor-pointer select-none">
+              <input
+                v-model="batchDeleteWithImages"
+                type="checkbox"
+                class="mt-0.5 rounded border-red-400 dark:border-red-600 text-red-600 focus:ring-red-500"
+              />
+              <div>
+                <span class="text-sm font-medium text-red-700 dark:text-red-300">
+                  {{ tgSyncDeleteEnabled ? '同时永久删除这些Token关联的所有图片' : '同时删除这些Token关联的所有图片记录' }}
+                </span>
+                <p class="text-xs text-red-500 dark:text-red-400 mt-0.5">
+                  {{ tgSyncDeleteEnabled
+                    ? `将从数据库和存储后端中永久删除 ${batchImpact.upload_count} 张图片，此操作不可恢复`
+                    : `仅删除数据库中的 ${batchImpact.upload_count} 张图片记录，存储文件将保留`
+                  }}
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
 
         <template #footer>
@@ -388,7 +430,7 @@
               :disabled="batchProcessing"
               @click="confirmBatch"
             >
-              确认
+              {{ batchModalAction === 'delete' && batchDeleteWithImages ? (tgSyncDeleteEnabled ? '删除Token及图片' : '删除Token及记录') : '确认' }}
             </UButton>
           </div>
         </template>
@@ -501,6 +543,7 @@ const createForm = ref({
 // 系统设置默认值
 const tokenDefaults = ref({ upload_limit: 100, expires_days: 365 })
 const tokenDefaultsLoaded = ref(false)
+const tgSyncDeleteEnabled = ref(false)
 
 const loadTokenDefaults = async () => {
   if (tokenDefaultsLoaded.value) return
@@ -514,6 +557,7 @@ const loadTokenDefaults = async () => {
         upload_limit: Number(d.guest_token_max_upload_limit) || 1000,
         expires_days: Number(d.guest_token_max_expires_days) || 365,
       }
+      tgSyncDeleteEnabled.value = d.tg_sync_delete_enabled === true || String(d.tg_sync_delete_enabled) === '1'
       tokenDefaultsLoaded.value = true
     }
   } catch { /* 静默失败，使用硬编码默认值 */ }
@@ -525,6 +569,7 @@ const deleting = ref(false)
 const deletingToken = ref<AdminTokenItem | null>(null)
 const deleteImpact = ref<ImpactData | null>(null)
 const loadingImpact = ref(false)
+const deleteWithImages = ref(false)
 
 // 批量操作
 const batchModalOpen = ref(false)
@@ -532,6 +577,7 @@ const batchModalAction = ref<'enable' | 'disable' | 'delete'>('enable')
 const batchProcessing = ref(false)
 const batchImpact = ref<ImpactData | null>(null)
 const loadingBatchImpact = ref(false)
+const batchDeleteWithImages = ref(false)
 
 const batchModalTitle = computed(() => {
   const map = { enable: '批量启用', disable: '批量禁用', delete: '批量删除' }
@@ -749,6 +795,7 @@ const updateStatus = async (t: AdminTokenItem, next: boolean) => {
 const askDelete = async (t: AdminTokenItem) => {
   deletingToken.value = t
   deleteImpact.value = null
+  deleteWithImages.value = false
   deleteModalOpen.value = true
 
   // 异步加载影响范围
@@ -768,7 +815,8 @@ const confirmDelete = async () => {
   if (!deletingToken.value) return
   deleting.value = true
   try {
-    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens/${deletingToken.value.id}`, {
+    const qs = deleteWithImages.value ? '?delete_images=true' : ''
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens/${deletingToken.value.id}${qs}`, {
       method: 'DELETE',
       credentials: 'include',
     })
@@ -777,10 +825,12 @@ const confirmDelete = async () => {
       throw new Error(resp?.error || '删除失败')
     }
 
-    notification.success('删除成功', 'Token 已删除')
+    const msg = deleteWithImages.value ? 'Token 及关联图片已删除' : 'Token 已删除'
+    notification.success('删除成功', msg)
     deleteModalOpen.value = false
     deletingToken.value = null
     deleteImpact.value = null
+    deleteWithImages.value = false
     await loadTokens()
   } catch (error: any) {
     console.error('删除Token失败:', error)
@@ -794,6 +844,7 @@ const batchAction = async (action: 'enable' | 'disable' | 'delete') => {
   if (selectedIds.value.length === 0) return
   batchModalAction.value = action
   batchImpact.value = null
+  batchDeleteWithImages.value = false
   batchModalOpen.value = true
 
   // 批量删除时异步加载影响范围
@@ -816,10 +867,15 @@ const batchAction = async (action: 'enable' | 'disable' | 'delete') => {
 const confirmBatch = async () => {
   batchProcessing.value = true
   try {
+    const body: Record<string, any> = { action: batchModalAction.value, ids: selectedIds.value }
+    // 批量删除时传递 delete_images 参数
+    if (batchModalAction.value === 'delete' && batchDeleteWithImages.value) {
+      body.delete_images = true
+    }
     const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens/batch`, {
       method: 'POST',
       credentials: 'include',
-      body: { action: batchModalAction.value, ids: selectedIds.value }
+      body,
     })
 
     if (!resp?.success) {
@@ -828,8 +884,13 @@ const confirmBatch = async () => {
 
     const d = resp.data
     const actionText = batchModalTitle.value
-    notification.success(`${actionText}完成`, `成功 ${d.success_count} 个，失败 ${d.fail_count} 个`)
+    let detail = `成功 ${d.success_count} 个，失败 ${d.fail_count} 个`
+    if (d.images_deleted != null) {
+      detail += `，删除图片 ${d.images_deleted} 张`
+    }
+    notification.success(`${actionText}完成`, detail)
     batchModalOpen.value = false
+    batchDeleteWithImages.value = false
     selectedIds.value = []
     await loadTokens()
   } catch (error: any) {
@@ -842,6 +903,7 @@ const confirmBatch = async () => {
 
 onMounted(() => {
   loadTokens()
+  loadTokenDefaults()
 })
 </script>
 
