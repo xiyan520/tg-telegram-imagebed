@@ -23,7 +23,7 @@
     </div>
 
     <template v-else>
-      <!-- 域名配置 -->
+      <!-- 域名管理 -->
       <UCard>
         <template #header>
           <div class="flex items-center justify-between">
@@ -32,40 +32,169 @@
                 <UIcon name="heroicons:globe-alt" class="w-5 h-5 text-white" />
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">域名配置</h3>
-                <p class="text-xs text-stone-500 dark:text-stone-400">配置图床访问域名</p>
+                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">域名管理</h3>
+                <p class="text-xs text-stone-500 dark:text-stone-400">管理默认域名和图片域名</p>
               </div>
             </div>
-            <!-- 当前模式标签 -->
-            <div
-              class="px-3 py-1.5 rounded-full text-xs font-medium"
-              :class="currentModeClass"
-            >
-              {{ currentModeLabel }}
-            </div>
+            <UButton icon="heroicons:plus" color="primary" size="sm" @click="openAddDomainModal">
+              添加域名
+            </UButton>
           </div>
         </template>
 
-        <div class="space-y-4">
-          <UFormGroup label="图床域名">
-            <UInput v-model="settings.cloudflare_cdn_domain" placeholder="例如: img.example.com" />
-            <template #hint>
-              <span class="text-xs text-stone-500">用于生成图片链接的域名，留空则使用当前访问域名</span>
-            </template>
-          </UFormGroup>
+        <div class="space-y-6">
+          <!-- 加载状态 -->
+          <div v-if="domainsLoading && domains.length === 0" class="flex justify-center py-6">
+            <div class="w-8 h-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
 
-          <!-- 模式说明 -->
-          <div class="p-4 rounded-xl" :class="currentModeBackground">
-            <div class="flex items-start gap-3">
-              <UIcon :name="currentModeIcon" class="w-5 h-5 flex-shrink-0 mt-0.5" :class="currentModeIconColor" />
-              <div>
-                <p class="font-medium" :class="currentModeTitleColor">{{ currentModeTitle }}</p>
-                <p class="text-sm mt-1" :class="currentModeDescColor">{{ currentModeDescription }}</p>
+          <template v-else>
+            <!-- 默认域名 -->
+            <div>
+              <p class="text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">默认域名（管理后台 / API）</p>
+              <div v-if="defaultDomain" class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium text-stone-900 dark:text-white">{{ defaultDomain.domain }}</span>
+                  <UBadge color="amber" variant="solid" size="xs">默认</UBadge>
+                  <UBadge :color="defaultDomain.use_https ? 'green' : 'gray'" variant="subtle" size="xs">
+                    {{ defaultDomain.use_https ? 'HTTPS' : 'HTTP' }}
+                  </UBadge>
+                  <span v-if="defaultDomain.remark" class="text-xs text-stone-400 dark:text-stone-500">{{ defaultDomain.remark }}</span>
+                </div>
+                <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" @click="confirmDeleteDomain(defaultDomain)" />
+              </div>
+              <div v-else class="p-3 bg-stone-50 dark:bg-neutral-800 rounded-xl text-sm text-stone-500 dark:text-stone-400">
+                未设置默认域名，将使用当前访问域名
               </div>
             </div>
-          </div>
+
+            <!-- 图片域名列表 -->
+            <div>
+              <p class="text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">图片域名（图片访问专用）</p>
+              <div v-if="imageDomains.length > 0" class="space-y-2">
+                <div
+                  v-for="d in imageDomains"
+                  :key="d.id"
+                  class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700"
+                >
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}</span>
+                    <UBadge :color="d.is_active ? 'green' : 'gray'" variant="subtle" size="xs">
+                      {{ d.is_active ? '活跃' : '停用' }}
+                    </UBadge>
+                    <UBadge :color="d.use_https ? 'green' : 'gray'" variant="subtle" size="xs">
+                      {{ d.use_https ? 'HTTPS' : 'HTTP' }}
+                    </UBadge>
+                    <span v-if="d.remark" class="text-xs text-stone-400 dark:text-stone-500">{{ d.remark }}</span>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <UButton
+                      :icon="d.is_active ? 'heroicons:pause' : 'heroicons:play'"
+                      :color="d.is_active ? 'gray' : 'green'"
+                      variant="ghost"
+                      size="xs"
+                      :title="d.is_active ? '停用' : '启用'"
+                      @click="toggleDomainActive(d)"
+                    />
+                    <UButton
+                      icon="heroicons:star"
+                      color="amber"
+                      variant="ghost"
+                      size="xs"
+                      title="设为默认"
+                      @click="handleSetDefault(d)"
+                    />
+                    <UButton
+                      icon="heroicons:trash"
+                      color="red"
+                      variant="ghost"
+                      size="xs"
+                      @click="confirmDeleteDomain(d)"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div v-else class="p-3 bg-stone-50 dark:bg-neutral-800 rounded-xl text-sm text-stone-500 dark:text-stone-400">
+                暂无图片域名，上传后将使用默认域名或当前访问域名生成链接
+              </div>
+            </div>
+
+            <!-- 图片域名限制开关 -->
+            <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+              <div>
+                <p class="font-medium text-stone-900 dark:text-white">图片域名限制</p>
+                <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  开启后，图片只能通过图片域名访问，其他域名返回 403
+                </p>
+              </div>
+              <UToggle v-model="settings.image_domain_restriction_enabled" size="lg" />
+            </div>
+          </template>
         </div>
       </UCard>
+
+      <!-- 添加域名弹窗 -->
+      <UModal v-model="showDomainModal">
+        <UCard>
+          <template #header>
+            <div class="flex items-center justify-between">
+              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">添加域名</h3>
+              <UButton icon="heroicons:x-mark" color="gray" variant="ghost" size="xs" @click="showDomainModal = false" />
+            </div>
+          </template>
+
+          <div class="space-y-4">
+            <UFormGroup label="域名">
+              <UInput v-model="domainForm.domain" placeholder="例如: img.example.com" />
+            </UFormGroup>
+
+            <UFormGroup label="类型">
+              <USelect
+                v-model="domainForm.domain_type"
+                :options="domainTypeOptions"
+                option-attribute="label"
+                value-attribute="value"
+              />
+            </UFormGroup>
+
+            <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+              <div>
+                <p class="text-sm font-medium text-stone-700 dark:text-stone-300">使用 HTTPS</p>
+              </div>
+              <UToggle v-model="domainForm.use_https" />
+            </div>
+
+            <UFormGroup label="备注">
+              <UInput v-model="domainForm.remark" placeholder="可选备注" />
+            </UFormGroup>
+          </div>
+
+          <template #footer>
+            <div class="flex justify-end gap-2">
+              <UButton color="gray" variant="outline" @click="showDomainModal = false">取消</UButton>
+              <UButton color="primary" :loading="domainSaving" @click="handleAddDomain">添加</UButton>
+            </div>
+          </template>
+        </UCard>
+      </UModal>
+
+      <!-- 删除域名确认弹窗 -->
+      <UModal v-model="showDeleteDomainModal">
+        <UCard>
+          <template #header>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">确认删除</h3>
+          </template>
+          <p class="text-stone-700 dark:text-stone-300">
+            确定要删除域名 <strong>{{ deletingDomain?.domain }}</strong> 吗？
+          </p>
+          <template #footer>
+            <div class="flex justify-end gap-2">
+              <UButton color="gray" variant="outline" @click="showDeleteDomainModal = false">取消</UButton>
+              <UButton color="red" :loading="domainDeleting" @click="handleDeleteDomain">删除</UButton>
+            </div>
+          </template>
+        </UCard>
+      </UModal>
 
       <!-- CDN 配置 -->
       <UCard>
@@ -751,6 +880,7 @@ definePageMeta({
 
 const runtimeConfig = useRuntimeConfig()
 const notification = useNotification()
+const domainsApi = useDomainsApi()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -810,6 +940,8 @@ const settings = ref({
   tg_session_expire_days: 30,
   // 非 TG 用户 Token 限制
   max_guest_tokens_per_ip: 3,
+  // 图片域名限制
+  image_domain_restriction_enabled: false,
 })
 
 const originalSettings = ref<typeof settings.value | null>(null)
@@ -859,93 +991,11 @@ const toggleLinkFormat = (fmt: string) => {
   settings.value.bot_reply_link_formats = formats.join(',')
 }
 
-// 域名模式计算属性
-const hasDomain = computed(() => !!settings.value.cloudflare_cdn_domain?.trim())
-
+// 域名模式计算属性（CDN 配置卡片仍需使用）
 const proxyPlaceholder = computed(() => {
   if (settings.value.proxy_url_set) return '已设置（留空清除，回退到环境变量）'
   if (settings.value.proxy_env_set) return '环境变量已配置（此处可覆盖）'
   return 'http://host:port'
-})
-const cdnEnabled = computed(() => settings.value.cdn_enabled)
-
-// 当前模式: cdn | direct | default
-const currentMode = computed(() => {
-  if (hasDomain.value && cdnEnabled.value) return 'cdn'
-  if (hasDomain.value && !cdnEnabled.value) return 'direct'
-  return 'default'
-})
-
-const currentModeLabel = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'CDN 加速'
-    case 'direct': return '自定义域名'
-    default: return '默认模式'
-  }
-})
-
-const currentModeClass = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-    case 'direct': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-    default: return 'bg-stone-100 text-stone-600 dark:bg-neutral-700 dark:text-stone-400'
-  }
-})
-
-const currentModeBackground = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'bg-green-50 dark:bg-green-900/20'
-    case 'direct': return 'bg-blue-50 dark:bg-blue-900/20'
-    default: return 'bg-stone-50 dark:bg-neutral-800'
-  }
-})
-
-const currentModeIcon = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'heroicons:bolt'
-    case 'direct': return 'heroicons:globe-alt'
-    default: return 'heroicons:server'
-  }
-})
-
-const currentModeIconColor = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'text-green-500'
-    case 'direct': return 'text-blue-500'
-    default: return 'text-stone-400'
-  }
-})
-
-const currentModeTitleColor = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'text-green-800 dark:text-green-200'
-    case 'direct': return 'text-blue-800 dark:text-blue-200'
-    default: return 'text-stone-700 dark:text-stone-300'
-  }
-})
-
-const currentModeDescColor = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'text-green-600 dark:text-green-300'
-    case 'direct': return 'text-blue-600 dark:text-blue-300'
-    default: return 'text-stone-500 dark:text-stone-400'
-  }
-})
-
-const currentModeTitle = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return 'CDN 加速模式'
-    case 'direct': return '自定义域名模式'
-    default: return '默认模式'
-  }
-})
-
-const currentModeDescription = computed(() => {
-  switch (currentMode.value) {
-    case 'cdn': return '图片将通过 Cloudflare CDN 加速访问，降低源站压力并提升全球访问速度'
-    case 'direct': return '图片链接使用自定义域名，直接访问源站，无 CDN 缓存加速'
-    default: return '使用当前访问域名生成图片链接，适合本地开发或单域名部署场景'
-  }
 })
 
 const loadSettings = async () => {
@@ -1081,7 +1131,118 @@ watch(() => settings.value.bot_token_configured, (configured) => {
   }
 })
 
+// ---- 域名管理 ----
+import type { DomainItem } from '~/composables/useDomainsApi'
+
+const domains = ref<DomainItem[]>([])
+const domainsLoading = ref(false)
+const domainSaving = ref(false)
+const domainDeleting = ref(false)
+const showDomainModal = ref(false)
+const showDeleteDomainModal = ref(false)
+const deletingDomain = ref<DomainItem | null>(null)
+
+const domainForm = ref({
+  domain: '',
+  domain_type: 'image',
+  use_https: true,
+  remark: ''
+})
+
+const domainTypeOptions = [
+  { value: 'default', label: '默认域名（管理后台/API）' },
+  { value: 'image', label: '图片域名（图片访问专用）' },
+]
+
+// 计算属性：默认域名
+const defaultDomain = computed(() => domains.value.find(d => d.domain_type === 'default'))
+
+// 计算属性：图片域名列表
+const imageDomains = computed(() => domains.value.filter(d => d.domain_type === 'image'))
+
+// 加载域名列表
+const loadDomains = async () => {
+  domainsLoading.value = true
+  try {
+    domains.value = await domainsApi.getDomains()
+  } catch (e: any) {
+    console.error('加载域名列表失败:', e)
+  } finally {
+    domainsLoading.value = false
+  }
+}
+
+// 打开添加域名弹窗
+const openAddDomainModal = () => {
+  domainForm.value = { domain: '', domain_type: 'image', use_https: true, remark: '' }
+  showDomainModal.value = true
+}
+
+// 添加域名
+const handleAddDomain = async () => {
+  if (!domainForm.value.domain.trim()) {
+    notification.error('错误', '请输入域名')
+    return
+  }
+  domainSaving.value = true
+  try {
+    await domainsApi.addDomain(domainForm.value)
+    notification.success('添加成功', `域名 ${domainForm.value.domain} 已添加`)
+    showDomainModal.value = false
+    await loadDomains()
+  } catch (e: any) {
+    notification.error('添加失败', e.message || '无法添加域名')
+  } finally {
+    domainSaving.value = false
+  }
+}
+
+// 切换域名启用/停用
+const toggleDomainActive = async (d: DomainItem) => {
+  try {
+    await domainsApi.updateDomain(d.id, { is_active: !d.is_active })
+    notification.success('已更新', `域名 ${d.domain} 已${d.is_active ? '停用' : '启用'}`)
+    await loadDomains()
+  } catch (e: any) {
+    notification.error('操作失败', e.message || '无法更新域名状态')
+  }
+}
+
+// 设为默认域名
+const handleSetDefault = async (d: DomainItem) => {
+  try {
+    await domainsApi.setDefaultDomain(d.id)
+    notification.success('已设置', `${d.domain} 已设为默认域名`)
+    await loadDomains()
+  } catch (e: any) {
+    notification.error('操作失败', e.message || '无法设置默认域名')
+  }
+}
+
+// 确认删除域名
+const confirmDeleteDomain = (d: DomainItem) => {
+  deletingDomain.value = d
+  showDeleteDomainModal.value = true
+}
+
+// 删除域名
+const handleDeleteDomain = async () => {
+  if (!deletingDomain.value) return
+  domainDeleting.value = true
+  try {
+    await domainsApi.deleteDomain(deletingDomain.value.id)
+    notification.success('已删除', `域名 ${deletingDomain.value.domain} 已删除`)
+    showDeleteDomainModal.value = false
+    await loadDomains()
+  } catch (e: any) {
+    notification.error('删除失败', e.message || '无法删除域名')
+  } finally {
+    domainDeleting.value = false
+  }
+}
+
 onMounted(() => {
   loadSettings()
+  loadDomains()
 })
 </script>

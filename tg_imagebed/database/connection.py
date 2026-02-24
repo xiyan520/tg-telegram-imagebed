@@ -457,6 +457,39 @@ def init_database(quiet: bool = False) -> None:
                     logger.info(f"添加 {col_name} 列到 galleries")
                     cursor.execute(f'ALTER TABLE galleries ADD COLUMN {col_name} {col_type}')
 
+            # ===================== 自定义域名表 =====================
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS custom_domains (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    domain TEXT NOT NULL,
+                    domain_type TEXT NOT NULL DEFAULT 'image',
+                    use_https INTEGER DEFAULT 1,
+                    is_active INTEGER DEFAULT 1,
+                    is_default INTEGER DEFAULT 0,
+                    sort_order INTEGER DEFAULT 0,
+                    remark TEXT DEFAULT '',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # 迁移：将旧 cloudflare_cdn_domain 迁移到 custom_domains 表
+            try:
+                cursor.execute("SELECT COUNT(*) FROM custom_domains")
+                domain_count = cursor.fetchone()[0]
+                if domain_count == 0:
+                    cursor.execute("SELECT value FROM admin_config WHERE key = 'cloudflare_cdn_domain'")
+                    cdn_row = cursor.fetchone()
+                    if cdn_row and cdn_row[0] and str(cdn_row[0]).strip():
+                        old_domain = str(cdn_row[0]).strip()
+                        cursor.execute('''
+                            INSERT INTO custom_domains (domain, domain_type, use_https, is_active, is_default, remark)
+                            VALUES (?, 'image', 1, 1, 1, '从 CDN 配置自动迁移')
+                        ''', (old_domain,))
+                        logger.info(f"已将旧 CDN 域名迁移到 custom_domains: {old_domain}")
+            except Exception as e:
+                logger.debug(f"域名迁移检查失败（可忽略）: {e}")
+
             # 创建索引
             indexes = [
                 ('idx_file_storage_created', 'file_storage(created_at)'),
@@ -485,6 +518,11 @@ def init_database(quiet: bool = False) -> None:
                 ('idx_tg_sessions_expires', 'tg_sessions(expires_at)'),
                 ('idx_tg_sessions_user', 'tg_sessions(tg_user_id)'),
                 ('idx_auth_tokens_tg_user', 'auth_tokens(tg_user_id)'),
+                # 自定义域名相关索引
+                ('idx_custom_domains_type', 'custom_domains(domain_type)'),
+                ('idx_custom_domains_active', 'custom_domains(is_active)'),
+                ('idx_custom_domains_default', 'custom_domains(is_default)'),
+                ('idx_custom_domains_sort', 'custom_domains(sort_order)'),
             ]
 
             for idx_name, idx_def in indexes:

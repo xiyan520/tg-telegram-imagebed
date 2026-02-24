@@ -8,7 +8,7 @@ from flask import request, jsonify
 
 from . import upload_bp
 from ..config import logger
-from ..utils import add_cache_headers, format_size, get_domain
+from ..utils import add_cache_headers, format_size, get_image_domain
 from ..services.file_service import process_upload
 from ..database import is_guest_upload_allowed, get_system_setting_int, get_upload_count_today
 
@@ -124,7 +124,7 @@ def upload_file():
             return add_cache_headers(jsonify({'error': 'Failed to upload to Telegram'}), 'no-cache'), 500
 
         # 生成 URL
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
         logger.info(f"Web上传完成: {file.filename} -> {result['encrypted_id']}")

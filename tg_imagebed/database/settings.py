@@ -155,6 +155,8 @@ DEFAULT_SYSTEM_SETTINGS = {
     'seo_og_description': '',               # OG 描述（留空 fallback 到 description）
     'seo_og_image': '',                     # OG 图片 URL
     'seo_footer_text': '',                  # 自定义页脚文字（留空用默认格式）
+    # 图片域名限制
+    'image_domain_restriction_enabled': '0',  # 图片域名限制开关
 }
 
 def init_system_settings() -> None:

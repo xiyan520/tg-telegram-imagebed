@@ -20,7 +20,7 @@ from ..database import (
     get_system_setting, get_system_setting_int
 )
 from ..utils import (
-    add_cache_headers, format_size, get_domain, get_static_file_version, LOCAL_IP
+    add_cache_headers, format_size, get_domain, get_image_domain, get_static_file_version, LOCAL_IP
 )
 from ..services.cdn_service import cloudflare_cdn, get_monitor_queue_size
 from ..storage.router import get_storage_router
@@ -59,6 +59,18 @@ def serve_image(encrypted_id):
         response.headers['Access-Control-Allow-Headers'] = 'Range, Content-Type, Cache-Control'
         response.headers['Access-Control-Max-Age'] = '86400'
         return response
+
+    # 图片域名限制检查
+    if str(get_system_setting('image_domain_restriction_enabled') or '0') == '1':
+        from ..database import is_allowed_image_domain
+        host = request.headers.get('Host', '').split(':')[0]
+        if not is_allowed_image_domain(host):
+            response = Response(
+                '此域名不允许访问图片，请使用图片专用域名',
+                status=403, mimetype='text/plain; charset=utf-8'
+            )
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            return response
 
     # 获取文件信息
     file_info = get_file_info(encrypted_id)
@@ -250,7 +262,7 @@ def get_recent_api():
 
     try:
         recent_files = get_recent_uploads(limit, page)
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         cdn_domain, _, cdn_mode = _get_domain_mode()
 
         for file in recent_files:

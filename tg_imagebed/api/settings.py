@@ -10,7 +10,7 @@ from flask import request, jsonify, make_response
 
 from . import admin_bp, images_bp
 from ..config import logger, PROXY_URL
-from ..utils import add_cache_headers, clear_domain_cache
+from ..utils import add_cache_headers, clear_domain_cache, clear_domains_cache
 from ..database import (
     get_public_settings, get_all_system_settings, update_system_settings,
     disable_guest_tokens, disable_all_tokens
@@ -133,6 +133,8 @@ def _format_settings_for_response(settings: dict) -> dict:
         'seo_og_description': settings.get('seo_og_description', ''),
         'seo_og_image': settings.get('seo_og_image', ''),
         'seo_footer_text': settings.get('seo_footer_text', ''),
+        # 图片域名限制
+        'image_domain_restriction_enabled': settings.get('image_domain_restriction_enabled', '0') == '1',
     }
 
 
@@ -508,6 +510,10 @@ def admin_system_settings():
                     errors.append('页脚文字不能超过 200 个字符')
                 else:
                     settings_to_update['seo_footer_text'] = val
+
+            # 图片域名限制
+            if 'image_domain_restriction_enabled' in data:
+                settings_to_update['image_domain_restriction_enabled'] = '1' if data['image_domain_restriction_enabled'] else '0'
 
             # 允许的文件后缀
             svg_warning = ''

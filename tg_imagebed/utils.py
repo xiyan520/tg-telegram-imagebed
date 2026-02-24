@@ -257,6 +257,7 @@ def format_size(size_bytes: int) -> str:
 
 # ===================== 域名获取 =====================
 _DOMAIN_SETTINGS_CACHE = {"ts": 0.0, "domain": "", "cdn_enabled": False}
+_DOMAINS_CACHE = {"ts": 0.0, "domains": []}
 
 
 def clear_domain_cache() -> None:
@@ -264,6 +265,15 @@ def clear_domain_cache() -> None:
     _DOMAIN_SETTINGS_CACHE["ts"] = 0.0
     _DOMAIN_SETTINGS_CACHE["domain"] = ""
     _DOMAIN_SETTINGS_CACHE["cdn_enabled"] = False
+    # 同时清除图片域名缓存
+    _DOMAINS_CACHE["ts"] = 0.0
+    _DOMAINS_CACHE["domains"] = []
+
+
+def clear_domains_cache() -> None:
+    """清除图片域名列表缓存"""
+    _DOMAINS_CACHE["ts"] = 0.0
+    _DOMAINS_CACHE["domains"] = []
 
 
 def _get_effective_domain_settings():
@@ -356,6 +366,37 @@ def get_domain(request) -> str:
     return f"http://{LOCAL_IP}:{PORT}"
 
 
+def get_image_domain(request=None) -> str:
+    """
+    获取图片专用域名 URL
+
+    优先从 custom_domains 表获取活跃图片域名（随机选择），
+    如果没有图片域名，降级到 get_domain(request)。
+    """
+    import time as _time
+    import random as _random
+
+    now = _time.time()
+    age = now - _DOMAINS_CACHE["ts"]
+    if age < 0 or age >= 1.0:
+        # 刷新缓存
+        try:
+            from .database import get_active_image_domains
+            _DOMAINS_CACHE["domains"] = get_active_image_domains()
+        except Exception:
+            _DOMAINS_CACHE["domains"] = []
+        _DOMAINS_CACHE["ts"] = now
+
+    domains = _DOMAINS_CACHE["domains"]
+    if not domains:
+        # 没有图片域名，降级到原有逻辑
+        return get_domain(request)
+
+    chosen = _random.choice(domains)
+    scheme = 'https' if chosen.get('use_https', 1) else 'http'
+    return f"{scheme}://{chosen['domain']}"
+
+
 # ===================== 静态文件版本管理 =====================
 def get_static_file_version(filename: str) -> str:
     """
@@ -385,7 +426,9 @@ __all__ = [
     'format_size',
     # 域名
     'get_domain',
+    'get_image_domain',
     'clear_domain_cache',
+    'clear_domains_cache',
     # 静态文件版本
     'get_static_file_version',
 ]

@@ -11,7 +11,7 @@ from flask import request, jsonify
 from . import auth_bp
 from .auth_helpers import extract_bearer_token
 from ..config import logger
-from ..utils import add_cache_headers, format_size, get_domain
+from ..utils import add_cache_headers, format_size, get_domain, get_image_domain
 from ..database import (
     verify_auth_token, verify_auth_token_access, get_token_info, update_token_usage,
     update_token_description, is_token_generation_allowed, is_token_upload_allowed,
@@ -264,7 +264,7 @@ def upload_with_token():
         update_token_usage(token)
 
         # 生成 URL
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
         # 计算剩余上传次数（基于首次验证结果，无需二次查询）
@@ -308,7 +308,7 @@ def get_token_uploads_api():
 
         uploads = get_token_uploads(token, limit, page)
 
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         for upload in uploads:
             upload['image_url'] = f"{base_url}/image/{upload['encrypted_id']}"
             if upload.get('created_at'):
