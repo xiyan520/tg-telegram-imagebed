@@ -365,6 +365,27 @@ def get_domain(request) -> str:
     if has_domain:
         return f"https://{configured_domain}"
 
+    # 尝试从 custom_domains 表获取默认域名
+    try:
+        from .database import get_default_domain
+        default = get_default_domain()
+        if default and default.get('domain'):
+            scheme = 'https' if default.get('use_https', 1) else 'http'
+            return f"{scheme}://{default['domain']}"
+    except Exception:
+        pass
+
+    # 尝试从活跃图片域名中获取（任意一个即可）
+    try:
+        from .database import get_active_image_domains
+        img_domains = get_active_image_domains()
+        if img_domains:
+            d = img_domains[0]
+            scheme = 'https' if d.get('use_https', 1) else 'http'
+            return f"{scheme}://{d['domain']}"
+    except Exception:
+        pass
+
     # 回退到本地地址（仅用于开发环境）
     return f"http://{LOCAL_IP}:{PORT}"
 
