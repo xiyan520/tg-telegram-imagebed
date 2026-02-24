@@ -8,7 +8,7 @@ from flask import request, jsonify, Response
 from . import admin_bp
 from .admin_helpers import _get_cdn_domain, _admin_json, _admin_options
 from ..config import logger
-from ..utils import add_cache_headers, get_domain
+from ..utils import add_cache_headers, get_domain, get_image_domain
 from ..database import (
     get_system_setting, get_system_setting_int,
     admin_list_tokens, admin_create_token,
@@ -159,7 +159,7 @@ def admin_token_uploads_api(token_id: int):
         data = admin_get_token_uploads(token_id, page=page, page_size=page_size)
 
         # 为每张图片附加 image_url
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         cdn_domain = _get_cdn_domain()
         cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
         for item in data['items']:
@@ -189,9 +189,10 @@ def admin_token_galleries_api(token_id: int):
 
         # 为画集附加 cover_url 和 share_url
         base_url = get_domain(request)
+        img_base_url = get_image_domain(request)
         for item in data['items']:
             if item.get('cover_image'):
-                item['cover_url'] = f"{base_url}/image/{item['cover_image']}"
+                item['cover_url'] = f"{img_base_url}/image/{item['cover_image']}"
             if item.get('share_enabled') and item.get('share_token'):
                 item['share_url'] = f"{base_url}/g/{item['share_token']}"
 

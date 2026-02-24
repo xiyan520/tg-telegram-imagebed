@@ -5,7 +5,6 @@
 """
 import os
 import re
-from urllib.parse import urlsplit
 from flask import request, jsonify, make_response
 
 from . import admin_bp, images_bp
@@ -15,6 +14,7 @@ from ..database import (
     get_public_settings, get_all_system_settings, update_system_settings,
     disable_guest_tokens, disable_all_tokens
 )
+from ..database.domains import _normalize_domain
 
 from .. import admin_module
 
@@ -39,20 +39,6 @@ def _safe_int(value, default=0, minimum=None, maximum=None):
         return result
     except (TypeError, ValueError):
         return default
-
-
-def _normalize_cdn_domain(value) -> str:
-    """标准化 CDN 域名（提取主机名，去除协议和路径）"""
-    raw = str(value or '').strip()
-    if not raw:
-        return ''
-    if '://' in raw:
-        parsed = urlsplit(raw)
-        raw = (parsed.netloc or '').strip()
-    raw = raw.split('/')[0].split('?')[0].split('#')[0].strip()
-    if '@' in raw:
-        return ''
-    return raw
 
 
 def _format_settings_for_response(settings: dict) -> dict:
@@ -266,7 +252,7 @@ def admin_system_settings():
                 settings_to_update['cdn_enabled'] = '1' if data['cdn_enabled'] else '0'
 
             if 'cloudflare_cdn_domain' in data:
-                domain = _normalize_cdn_domain(data['cloudflare_cdn_domain'])
+                domain = _normalize_domain(data['cloudflare_cdn_domain'])
                 settings_to_update['cloudflare_cdn_domain'] = domain
                 logger.info(f"准备保存域名配置: 原始值={data['cloudflare_cdn_domain']}, 标准化后={domain}")
 

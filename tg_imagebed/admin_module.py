@@ -75,12 +75,13 @@ def verify_gallery_auth_token(token: str) -> tuple[bool, str]:
 
 # 从 utils.py 导入 get_domain 和 format_size
 try:
-    from .utils import get_domain, format_size
+    from .utils import get_domain, get_image_domain, format_size
 except ImportError:
     # 兼容独立运行场景
     def get_domain(req):
         """简化版 get_domain 函数"""
         return req.host_url.rstrip('/')
+    get_image_domain = get_domain
 
 # 从 config.py 导入配置
 try:
@@ -961,8 +962,8 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             # 计算总页数
             total_pages = (total_count + limit - 1) // limit
 
-            # 构建图片 URL（使用 get_domain 处理反向代理/CDN 场景）
-            base_url = get_domain(request).rstrip('/')
+            # 构建图片 URL（使用 get_image_domain 处理图片域名场景）
+            base_url = get_image_domain(request).rstrip('/')
 
             # 从 system_settings 读取 CDN 域名配置（与 settings.py 保持一致）
             cdn_domain = ''

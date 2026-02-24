@@ -8,7 +8,7 @@ from flask import request, jsonify, session
 from . import auth_bp
 from .auth_helpers import extract_bearer_token, verify_request_token
 from ..config import logger, SECRET_KEY
-from ..utils import add_cache_headers, get_domain
+from ..utils import add_cache_headers, get_domain, get_image_domain
 from ..database import (
     verify_auth_token, verify_auth_token_access,
     create_gallery, get_gallery, list_galleries, update_gallery, delete_gallery,
@@ -57,7 +57,7 @@ def galleries_list_create():
         limit = request.args.get('limit', 50, type=int)
         limit = max(1, min(100, limit))
         result = list_galleries(token, page, limit)
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         for item in result['items']:
             if item.get('cover_image'):
                 item['cover_url'] = f"{base_url}/image/{item['cover_image']}"
@@ -131,7 +131,7 @@ def gallery_images(gallery_id: int):
         limit = request.args.get('limit', 50, type=int)
         limit = max(1, min(100, limit))
         result = get_gallery_images(gallery_id, token, page, limit)
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         for item in result['items']:
             item['image_url'] = f"{base_url}/image/{item['encrypted_id']}"
         return _json_response({'success': True, 'data': result})
@@ -168,7 +168,7 @@ def gallery_cover(gallery_id: int):
         gallery = set_gallery_cover(gallery_id, token, encrypted_id)
         if not gallery:
             return _json_response({'success': False, 'error': '画集不存在、无权限或图片不在画集中'}, 404)
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         if gallery.get('cover_image'):
             gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
         return _json_response({'success': True, 'data': {'gallery': gallery}})
@@ -326,7 +326,7 @@ def shared_gallery_api(share_token: str):
     limit = max(1, min(100, limit))
 
     images_result = get_gallery_images(gallery['id'], None, page, limit)
-    base_url = get_domain(request)
+    base_url = get_image_domain(request)
     for item in images_result['items']:
         item['image_url'] = f"{base_url}/image/{item['encrypted_id']}"
 
@@ -444,12 +444,13 @@ def shared_all_galleries_api(share_token: str):
         return _json_response({'success': False, 'error': '分享链接无效或已过期'}, 404)
 
     base_url = get_domain(request)
+    img_base_url = get_image_domain(request)
     for item in result['items']:
         # 标记需要验证的画集
         item['is_locked'] = item.get('access_mode') in ('password', 'token')
         # 封面图（优先手动设置，否则为第一张图）
         if item.get('cover_image'):
-            item['cover_url'] = f"{base_url}/image/{item['cover_image']}"
+            item['cover_url'] = f"{img_base_url}/image/{item['cover_image']}"
         # 单独分享链接（如有）
         if item.get('share_token'):
             item['share_url'] = f"{base_url}/g/{item['share_token']}"
@@ -533,7 +534,7 @@ def shared_all_gallery_detail_api(share_all_token: str, gallery_id: int):
     if not images_result:
         return _json_response({'success': False, 'error': '分享链接无效或画集不可见'}, 404)
 
-    base_url = get_domain(request)
+    base_url = get_image_domain(request)
     for item in images_result['items']:
         item['image_url'] = f"{base_url}/image/{item['encrypted_id']}"
 

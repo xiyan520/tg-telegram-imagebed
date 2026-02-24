@@ -27,9 +27,9 @@ from ..storage.router import get_storage_router
 
 
 def _get_domain_mode():
-    """获取域名模式配置"""
-    domain = str(get_system_setting('cloudflare_cdn_domain') or '').strip()
-    cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
+    """获取域名模式配置（复用 utils 中的缓存逻辑）"""
+    from ..utils import _get_effective_domain_settings
+    domain, cdn_enabled = _get_effective_domain_settings()
     cdn_mode = bool(domain) and cdn_enabled
     return domain, cdn_enabled, cdn_mode
 

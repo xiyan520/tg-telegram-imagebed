@@ -4,7 +4,6 @@
 域名管理 API - 管理员域名 CRUD + 公开域名列表
 """
 import json
-from urllib.parse import urlsplit
 from flask import request, jsonify, make_response
 
 from . import admin_bp, images_bp
@@ -15,6 +14,7 @@ from ..database import (
     add_domain, update_domain, delete_domain, set_default_domain,
     get_active_gallery_domains, update_system_setting,
 )
+from ..database.domains import _normalize_domain
 from .. import admin_module
 
 
@@ -25,20 +25,6 @@ def _set_admin_cors_headers(response):
         response.headers['Access-Control-Allow-Origin'] = origin
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
-
-
-def _normalize_cdn_domain(value) -> str:
-    """标准化域名（提取主机名，去除协议和路径）"""
-    raw = str(value or '').strip()
-    if not raw:
-        return ''
-    if '://' in raw:
-        parsed = urlsplit(raw)
-        raw = (parsed.netloc or '').strip()
-    raw = raw.split('/')[0].split('?')[0].split('#')[0].strip()
-    if '@' in raw:
-        return ''
-    return raw
 
 
 # ===================== 管理员域名 API =====================
@@ -67,7 +53,7 @@ def admin_domains_api():
             return _set_admin_cors_headers(response), 400
 
         raw_domain = data.get('domain', '')
-        domain = _normalize_cdn_domain(raw_domain)
+        domain = _normalize_domain(raw_domain)
         if not domain:
             response = jsonify({'success': False, 'error': '无效的域名'})
             return _set_admin_cors_headers(response), 400
@@ -140,7 +126,7 @@ def admin_domain_detail(domain_id):
 
         kwargs = {}
         if 'domain' in data:
-            domain = _normalize_cdn_domain(data['domain'])
+            domain = _normalize_domain(data['domain'])
             if not domain:
                 response = jsonify({'success': False, 'error': '无效的域名'})
                 return _set_admin_cors_headers(response), 400

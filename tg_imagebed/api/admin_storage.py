@@ -11,7 +11,7 @@ from flask import request, jsonify, Response, session
 from . import admin_bp
 from .admin_helpers import _admin_json, _admin_options
 from ..config import logger
-from ..utils import add_cache_headers, format_size, get_domain
+from ..utils import add_cache_headers, format_size, get_image_domain
 from ..database import get_system_setting, update_system_setting
 from ..services.file_service import process_upload
 from ..storage.router import get_storage_router, reload_storage_router, _load_storage_config
@@ -229,7 +229,7 @@ def admin_upload():
     if not result:
         return _admin_json({'success': False, 'error': '上传失败'}, 500)
 
-    base_url = get_domain(request)
+    base_url = get_image_domain(request, scene='admin')
     url = f"{base_url}/image/{result['encrypted_id']}"
 
     return _admin_json({

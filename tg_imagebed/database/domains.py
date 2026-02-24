@@ -152,6 +152,9 @@ def update_domain(domain_id: int, **kwargs) -> bool:
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
+            # 防御性检查：确保动态列名均为合法标识符（不依赖 assert，-O 模式下仍生效）
+            if not all(k.isidentifier() for k in updates):
+                raise ValueError(f"非法字段名: {list(updates.keys())}")
             set_clause = ', '.join(f'{k} = ?' for k in updates)
             values = list(updates.values()) + [domain_id]
             cursor.execute(
@@ -182,10 +185,15 @@ def delete_domain(domain_id: int) -> bool:
 
 @db_retry()
 def set_default_domain(domain_id: int) -> bool:
-    """设为默认域名（先清除旧默认）"""
+    """设为默认域名（先验证目标存在，再清除旧默认并设置新默认）"""
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
+            # 先验证目标域名存在，避免清除旧默认后无新默认的状态
+            cursor.execute('SELECT id FROM custom_domains WHERE id = ?', (domain_id,))
+            if not cursor.fetchone():
+                logger.warning(f"设置默认域名失败: id={domain_id} 不存在")
+                return False
             # 清除所有默认标记
             cursor.execute('UPDATE custom_domains SET is_default = 0 WHERE is_default = 1')
             # 设置新默认
@@ -193,10 +201,8 @@ def set_default_domain(domain_id: int) -> bool:
                 'UPDATE custom_domains SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
                 (domain_id,)
             )
-            success = cursor.rowcount > 0
-            if success:
-                logger.info(f"设置默认域名: id={domain_id}")
-            return success
+            logger.info(f"设置默认域名: id={domain_id}")
+            return True
     except Exception as e:
         logger.error(f"设置默认域名失败 (id={domain_id}): {e}")
         return False
@@ -219,15 +225,17 @@ def get_random_image_domain() -> Optional[str]:
 
 @db_retry()
 def is_allowed_image_domain(host: str) -> bool:
-    """检查 host 是否为允许的图片域名"""
+    """检查 host 是否为允许的图片域名（同时允许默认域名访问图片）"""
     if not host:
         return False
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
+            # 同时允许 image 类型和 default 类型的活跃域名访问图片
+            # 避免开启图片域名限制后，通过主站域名访问的图片全部 403
             cursor.execute('''
                 SELECT COUNT(*) FROM custom_domains
-                WHERE domain = ? AND domain_type = 'image' AND is_active = 1
+                WHERE domain = ? AND domain_type IN ('image', 'default') AND is_active = 1
             ''', (host,))
             row = cursor.fetchone()
             return row[0] > 0 if row else False

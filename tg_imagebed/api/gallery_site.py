@@ -648,7 +648,7 @@ def gallery_admin_detail(gallery_id):
 
         # 构建分享链接
         if gallery.get('share_enabled') and gallery.get('share_token'):
-            gallery['share_url'] = f"{get_domain(request)}/g/{gallery['share_token']}"
+            gallery['share_url'] = f"{_get_main_site_url(request)}/g/{gallery['share_token']}"
         else:
             gallery['share_url'] = None
 
@@ -721,7 +721,7 @@ def gallery_admin_share(gallery_id):
 
         # 构建分享链接
         if result.get('share_enabled') and result.get('share_token'):
-            result['share_url'] = f"{get_domain(request)}/g/{result['share_token']}"
+            result['share_url'] = f"{_get_main_site_url(request)}/g/{result['share_token']}"
         else:
             result['share_url'] = None
 
@@ -773,7 +773,7 @@ def gallery_admin_access(gallery_id):
             result['cover_url'] = None
 
         if result.get('share_enabled') and result.get('share_token'):
-            result['share_url'] = f"{get_domain(request)}/g/{result['share_token']}"
+            result['share_url'] = f"{_get_main_site_url(request)}/g/{result['share_token']}"
         else:
             result['share_url'] = None
 

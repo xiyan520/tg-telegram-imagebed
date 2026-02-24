@@ -19,6 +19,7 @@ import socket
 import base64
 import hashlib
 import atexit
+import threading
 from pathlib import Path
 from typing import Optional
 from flask import Response
@@ -201,9 +202,8 @@ def add_cache_headers(response: Response, cache_type: str = 'public', max_age: O
 
     # 从 DB 读取 edge/browser TTL
     try:
-        from .database import get_system_setting_int as _gsi
-        edge_ttl = _gsi('cloudflare_edge_ttl', 86400, minimum=0)
-        browser_ttl = _gsi('cloudflare_browser_ttl', 3600, minimum=0)
+        edge_ttl = get_system_setting_int('cloudflare_edge_ttl', 86400, minimum=0)
+        browser_ttl = get_system_setting_int('cloudflare_browser_ttl', 3600, minimum=0)
     except Exception:
         edge_ttl = 86400
         browser_ttl = 3600
@@ -256,39 +256,47 @@ def format_size(size_bytes: int) -> str:
 
 
 # ===================== 域名获取 =====================
+_domain_cache_lock = threading.Lock()
 _DOMAIN_SETTINGS_CACHE = {"ts": 0.0, "domain": "", "cdn_enabled": False}
 _DOMAINS_CACHE = {"ts": 0.0, "domains": []}
 _DOMAIN_POLICY_CACHE = {"ts": 0.0, "policy": {}}
 
 
+def clear_all_domain_caches() -> None:
+    """统一清除所有域名相关缓存，使设置立即生效"""
+    with _domain_cache_lock:
+        _DOMAIN_SETTINGS_CACHE["ts"] = 0.0
+        _DOMAIN_SETTINGS_CACHE["domain"] = ""
+        _DOMAIN_SETTINGS_CACHE["cdn_enabled"] = False
+        _DOMAINS_CACHE["ts"] = 0.0
+        _DOMAINS_CACHE["domains"] = []
+        _DOMAIN_POLICY_CACHE["ts"] = 0.0
+        _DOMAIN_POLICY_CACHE["policy"] = {}
+
+
+# 保留旧函数名作为别名，兼容已有调用
 def clear_domain_cache() -> None:
-    """清除域名设置缓存，使设置立即生效"""
-    _DOMAIN_SETTINGS_CACHE["ts"] = 0.0
-    _DOMAIN_SETTINGS_CACHE["domain"] = ""
-    _DOMAIN_SETTINGS_CACHE["cdn_enabled"] = False
-    # 同时清除图片域名缓存
-    _DOMAINS_CACHE["ts"] = 0.0
-    _DOMAINS_CACHE["domains"] = []
+    """清除域名设置缓存（已统一为 clear_all_domain_caches）"""
+    clear_all_domain_caches()
 
 
 def clear_domains_cache() -> None:
-    """清除图片域名列表缓存和策略缓存"""
-    _DOMAINS_CACHE["ts"] = 0.0
-    _DOMAINS_CACHE["domains"] = []
-    _DOMAIN_POLICY_CACHE["ts"] = 0.0
-    _DOMAIN_POLICY_CACHE["policy"] = {}
+    """清除图片域名列表缓存和策略缓存（已统一为 clear_all_domain_caches）"""
+    clear_all_domain_caches()
 
 
 def _get_effective_domain_settings():
     """
-    从数据库读取域名/cdn_enabled 设置。
+    从数据库读取域名/cdn_enabled 设置（线程安全）。
     失败时回退到环境变量配置。
     """
     import time as _time
     now = _time.time()
-    age = now - _DOMAIN_SETTINGS_CACHE["ts"]
-    if 0.0 <= age < 1.0:
-        return _DOMAIN_SETTINGS_CACHE["domain"], _DOMAIN_SETTINGS_CACHE["cdn_enabled"]
+
+    with _domain_cache_lock:
+        age = now - _DOMAIN_SETTINGS_CACHE["ts"]
+        if 0.0 <= age < 1.0:
+            return _DOMAIN_SETTINGS_CACHE["domain"], _DOMAIN_SETTINGS_CACHE["cdn_enabled"]
 
     domain = ""
     cdn_enabled = False
@@ -302,9 +310,10 @@ def _get_effective_domain_settings():
         cdn_enabled = False
         logger.warning(f"[域名配置] 数据库读取失败，使用默认值: error={e}")
 
-    _DOMAIN_SETTINGS_CACHE["ts"] = now
-    _DOMAIN_SETTINGS_CACHE["domain"] = domain
-    _DOMAIN_SETTINGS_CACHE["cdn_enabled"] = cdn_enabled
+    with _domain_cache_lock:
+        _DOMAIN_SETTINGS_CACHE["ts"] = now
+        _DOMAIN_SETTINGS_CACHE["domain"] = domain
+        _DOMAIN_SETTINGS_CACHE["cdn_enabled"] = cdn_enabled
     return domain, cdn_enabled
 
 
@@ -391,14 +400,16 @@ def get_domain(request) -> str:
 
 
 def _get_domain_upload_policy() -> dict:
-    """获取域名上传策略（带缓存）"""
+    """获取域名上传策略（带缓存，线程安全）"""
     import time as _time
     import json as _json
 
     now = _time.time()
-    age = now - _DOMAIN_POLICY_CACHE["ts"]
-    if 0.0 <= age < 5.0:
-        return _DOMAIN_POLICY_CACHE["policy"]
+
+    with _domain_cache_lock:
+        age = now - _DOMAIN_POLICY_CACHE["ts"]
+        if 0.0 <= age < 5.0:
+            return _DOMAIN_POLICY_CACHE["policy"]
 
     policy = {}
     try:
@@ -409,8 +420,9 @@ def _get_domain_upload_policy() -> dict:
     except Exception:
         policy = {}
 
-    _DOMAIN_POLICY_CACHE["ts"] = now
-    _DOMAIN_POLICY_CACHE["policy"] = policy
+    with _domain_cache_lock:
+        _DOMAIN_POLICY_CACHE["ts"] = now
+        _DOMAIN_POLICY_CACHE["policy"] = policy
     return policy
 
 
@@ -426,19 +438,70 @@ def get_image_domain(request=None, scene: str = '') -> str:
     import random as _random
 
     now = _time.time()
-    age = now - _DOMAINS_CACHE["ts"]
-    if age < 0 or age >= 1.0:
-        # 刷新缓存
+
+    with _domain_cache_lock:
+        age = now - _DOMAINS_CACHE["ts"]
+        need_refresh = age < 0 or age >= 1.0
+
+    if need_refresh:
         try:
             from .database import get_active_image_domains
-            _DOMAINS_CACHE["domains"] = get_active_image_domains()
+            new_domains = get_active_image_domains()
         except Exception:
-            _DOMAINS_CACHE["domains"] = []
-        _DOMAINS_CACHE["ts"] = now
+            new_domains = []
+        with _domain_cache_lock:
+            _DOMAINS_CACHE["domains"] = new_domains
+            _DOMAINS_CACHE["ts"] = now
 
-    domains = _DOMAINS_CACHE["domains"]
+    with _domain_cache_lock:
+        domains = list(_DOMAINS_CACHE["domains"])
+
     if not domains:
-        # 没有图片域名，降级到原有逻辑
+        # 没有图片域名，降级时避免返回画集域名
+        # 1. 优先使用 cloudflare_cdn_domain
+        configured_domain, _ = _get_effective_domain_settings()
+        if configured_domain:
+            return get_domain(request)
+
+        # 2. 尝试 default 类型域名
+        try:
+            from .database import get_default_domain
+            default = get_default_domain()
+            if default and default.get('domain'):
+                scheme = 'https' if default.get('use_https', 1) else 'http'
+                return f"{scheme}://{default['domain']}"
+        except Exception:
+            pass
+
+        # 3. 尝试非 gallery 类型的活跃域名
+        try:
+            from .database.connection import get_connection
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT domain, use_https FROM custom_domains
+                    WHERE domain_type != 'gallery' AND is_active = 1
+                    ORDER BY is_default DESC, sort_order ASC
+                    LIMIT 1
+                ''')
+                row = cursor.fetchone()
+                if row:
+                    scheme = 'https' if row['use_https'] else 'http'
+                    return f"{scheme}://{row['domain']}"
+        except Exception:
+            pass
+
+        # 4. 检查 request.host 是否为画集域名，不是才使用
+        if request:
+            try:
+                from .database.domains import is_gallery_domain
+                host = request.host
+                if not is_gallery_domain(host):
+                    return get_domain(request)
+            except Exception:
+                return get_domain(request)
+
+        # 5. 最终 fallback（request 为 None 或 host 是画集域名）
         return get_domain(request)
 
     # 场景路由：查策略 → 匹配活跃域名
@@ -452,12 +515,24 @@ def get_image_domain(request=None, scene: str = '') -> str:
                 for d in domains:
                     if d['domain'] == target_domain:
                         scheme = 'https' if d.get('use_https', 1) else 'http'
-                        return f"{scheme}://{target_domain}"
+                        base = f"{scheme}://{target_domain}"
+                        # 处理反向代理子路径前缀
+                        if request:
+                            prefix = request.headers.get('X-Forwarded-Prefix', '')
+                            if prefix:
+                                base += prefix.rstrip('/')
+                        return base
 
     # 降级：随机选择
     chosen = _random.choice(domains)
     scheme = 'https' if chosen.get('use_https', 1) else 'http'
-    return f"{scheme}://{chosen['domain']}"
+    base = f"{scheme}://{chosen['domain']}"
+    # 处理反向代理子路径前缀
+    if request:
+        prefix = request.headers.get('X-Forwarded-Prefix', '')
+        if prefix:
+            base += prefix.rstrip('/')
+    return base
 
 
 # ===================== 静态文件版本管理 =====================
@@ -492,6 +567,7 @@ __all__ = [
     'get_image_domain',
     'clear_domain_cache',
     'clear_domains_cache',
+    'clear_all_domain_caches',
     # 静态文件版本
     'get_static_file_version',
 ]

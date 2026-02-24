@@ -8,7 +8,7 @@ from flask import request
 from . import admin_bp
 from .admin_helpers import _get_cdn_domain, _admin_json, _admin_options
 from ..config import logger
-from ..utils import get_domain
+from ..utils import get_domain, get_image_domain
 from ..database import (
     get_system_setting,
     admin_list_galleries, admin_create_gallery, admin_get_gallery,
@@ -34,9 +34,10 @@ def admin_galleries_list_create():
         sort = request.args.get('sort', '').strip() or None
         result = admin_list_galleries(page, limit, search=search, sort=sort)
         base_url = get_domain(request)
+        img_base_url = get_image_domain(request)
         for item in result['items']:
             if item.get('cover_image'):
-                item['cover_url'] = f"{base_url}/image/{item['cover_image']}"
+                item['cover_url'] = f"{img_base_url}/image/{item['cover_image']}"
             if item.get('share_enabled') and item.get('share_token'):
                 item['share_url'] = f"{base_url}/g/{item['share_token']}"
         return _admin_json({'success': True, 'data': result})
@@ -66,10 +67,11 @@ def admin_gallery_detail(gallery_id: int):
         if not gallery:
             return _admin_json({'success': False, 'error': '画集不存在'}, 404)
         base_url = get_domain(request)
+        img_base_url = get_image_domain(request)
         if gallery.get('share_enabled') and gallery.get('share_token'):
             gallery['share_url'] = f"{base_url}/g/{gallery['share_token']}"
         if gallery.get('cover_image'):
-            gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
+            gallery['cover_url'] = f"{img_base_url}/image/{gallery['cover_image']}"
         return _admin_json({'success': True, 'data': {'gallery': gallery}})
 
     if request.method == 'PATCH':
@@ -107,7 +109,7 @@ def admin_gallery_images(gallery_id: int):
         limit = request.args.get('limit', 50, type=int)
         limit = max(1, min(200, limit))
         result = admin_get_gallery_images(gallery_id, page, limit)
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         cdn_domain = _get_cdn_domain()
         cdn_enabled = str(get_system_setting('cdn_enabled') or '0') == '1'
         for item in result['items']:
@@ -179,7 +181,7 @@ def admin_gallery_cover(gallery_id: int):
         gallery = admin_set_gallery_cover(gallery_id, encrypted_id)
         if not gallery:
             return _admin_json({'success': False, 'error': '画集不存在或图片不在画集中'}, 404)
-        base_url = get_domain(request)
+        base_url = get_image_domain(request)
         if gallery.get('cover_image'):
             gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
         return _admin_json({'success': True, 'data': {'gallery': gallery}})
@@ -188,7 +190,7 @@ def admin_gallery_cover(gallery_id: int):
     gallery = admin_set_gallery_cover(gallery_id, None)
     if not gallery:
         return _admin_json({'success': False, 'error': '画集不存在'}, 404)
-    base_url = get_domain(request)
+    base_url = get_image_domain(request)
     if gallery.get('cover_image'):
         gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
     return _admin_json({'success': True, 'data': {'gallery': gallery}})

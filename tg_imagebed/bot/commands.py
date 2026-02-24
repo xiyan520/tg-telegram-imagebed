@@ -157,7 +157,7 @@ async def _show_myuploads(message_or_query, username: str, page: int = 1, edit: 
         edit: 是否编辑现有消息（翻页时为 True）
     """
     from ..database import get_user_uploads, get_system_setting
-    from ..utils import get_domain
+    from ..utils import get_image_domain
 
     try:
         per_page = max(1, min(50, int(get_system_setting('bot_myuploads_page_size') or '8')))
@@ -175,7 +175,7 @@ async def _show_myuploads(message_or_query, username: str, page: int = 1, edit: 
             await message_or_query.reply_text(text)
         return
 
-    base_url = get_domain(None)
+    base_url = get_image_domain(None)
     lines = [f"📋 *你的上传记录* （共 {total} 张，第 {page}/{total_pages} 页）\n"]
     for f in files:
         name = f.get('original_filename') or f['encrypted_id'][:12]
@@ -376,7 +376,7 @@ async def _handle_link_format_callback(query):
     """
     from html import escape as html_escape
     from ..database import get_file_info, get_system_setting
-    from ..utils import get_domain, format_size
+    from ..utils import get_image_domain, format_size
 
     try:
         parts = query.data.split(":", 2)
@@ -391,7 +391,7 @@ async def _handle_link_format_callback(query):
             logger.warning(f"lfmt 回调: 文件不存在 encrypted_id={encrypted_id}")
             return
 
-        base_url = get_domain(None)
+        base_url = get_image_domain(None)
         url = f"{base_url}/image/{encrypted_id}"
 
         # 各格式的代码块内容
