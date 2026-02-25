@@ -183,7 +183,7 @@ def gallery_site_detail(gallery_id):
             # 构建分享链接
             share_token = gallery.pop('share_token', None)
             if share_token:
-                gallery['share_url'] = f"{_get_main_site_url(request)}/g/{share_token}"
+                gallery['share_url'] = f"{_get_gallery_site_url(request)}/g/{share_token}"
             else:
                 gallery['share_url'] = None
 
@@ -336,6 +336,25 @@ def _get_main_site_url(request):
 
     # 3. 最终 fallback
     return get_domain(request)
+
+
+def _get_gallery_site_url(request):
+    """获取画集站点 URL，用于构建画集分享链接
+
+    优先级：画集域名（get_active_gallery_domains 第一个） > 主站 URL（向后兼容）
+    """
+    # 1. 优先使用画集域名
+    gallery_domains = get_active_gallery_domains()
+    if gallery_domains:
+        first = gallery_domains[0]
+        return build_domain_url(
+            first['domain'],
+            first.get('port'),
+            bool(first.get('use_https', 1))
+        )
+
+    # 2. 没有画集域名时，fallback 到主站 URL（保持向后兼容）
+    return _get_main_site_url(request)
 
 
 @gallery_site_bp.route('/api/gallery-site/sso-redirect', methods=['GET'])
@@ -660,7 +679,7 @@ def gallery_admin_detail(gallery_id):
 
         # 构建分享链接
         if gallery.get('share_enabled') and gallery.get('share_token'):
-            gallery['share_url'] = f"{_get_main_site_url(request)}/g/{gallery['share_token']}"
+            gallery['share_url'] = f"{_get_gallery_site_url(request)}/g/{gallery['share_token']}"
         else:
             gallery['share_url'] = None
 
@@ -733,7 +752,7 @@ def gallery_admin_share(gallery_id):
 
         # 构建分享链接
         if result.get('share_enabled') and result.get('share_token'):
-            result['share_url'] = f"{_get_main_site_url(request)}/g/{result['share_token']}"
+            result['share_url'] = f"{_get_gallery_site_url(request)}/g/{result['share_token']}"
         else:
             result['share_url'] = None
 
@@ -785,7 +804,7 @@ def gallery_admin_access(gallery_id):
             result['cover_url'] = None
 
         if result.get('share_enabled') and result.get('share_token'):
-            result['share_url'] = f"{_get_main_site_url(request)}/g/{result['share_token']}"
+            result['share_url'] = f"{_get_gallery_site_url(request)}/g/{result['share_token']}"
         else:
             result['share_url'] = None
 

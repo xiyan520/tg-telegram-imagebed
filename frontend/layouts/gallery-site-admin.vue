@@ -10,7 +10,7 @@
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
         <div class="flex items-center justify-between">
           <!-- 左侧：Logo + 标题 -->
-          <NuxtLink to="/gallery-site/admin" class="flex items-center gap-3 group">
+          <NuxtLink to="/gallery-site/" class="flex items-center gap-3 group">
             <div class="relative">
               <div class="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl blur opacity-40 group-hover:opacity-60 transition-opacity"></div>
               <div class="relative w-9 h-9 bg-gradient-to-br from-amber-500 to-orange-500 rounded-xl flex items-center justify-center transform group-hover:scale-105 transition-all shadow-lg">

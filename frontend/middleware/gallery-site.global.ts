@@ -30,8 +30,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const path = to.path
 
   if (isGalleryMode) {
-    // 画集域名：允许 /gallery-site/*、/image/*、/_nuxt/*、/api/* 路径
-    const allowedPrefixes = ['/gallery-site', '/image/', '/_nuxt/', '/api/']
+    // 画集域名：允许 /gallery-site/*、/g/*（分享画集）、/image/*、/_nuxt/*、/api/* 路径
+    const allowedPrefixes = ['/gallery-site', '/g/', '/image/', '/_nuxt/', '/api/']
     const isAllowed = allowedPrefixes.some(p => path.startsWith(p))
     if (!isAllowed) {
       return navigateTo('/gallery-site/', { replace: true })
