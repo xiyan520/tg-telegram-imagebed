@@ -151,6 +151,18 @@
             </div>
           </div>
         </div>
+        <!-- 加载更多按钮 -->
+        <div v-if="uploadsHasMore" class="flex justify-center mt-2">
+          <UButton
+            size="sm"
+            color="gray"
+            variant="soft"
+            :loading="uploadsLoadingMore"
+            @click="loadMoreUploads"
+          >
+            加载更多
+          </UButton>
+        </div>
         <template #footer>
           <div class="flex justify-between items-center">
             <span class="text-sm text-gray-500">已选 {{ addImageIds.length }} 张</span>
@@ -213,9 +225,14 @@ const deleting = ref(false)
 
 // 添加图片相关
 const uploadsLoading = ref(false)
+const uploadsLoadingMore = ref(false)
 const uploadsList = ref<GalleryImage[]>([])
 const addImageIds = ref<string[]>([])
 const addingImages = ref(false)
+// 分页状态：每页 50 条
+const uploadsPage = ref(1)
+const uploadsHasMore = ref(false)
+const UPLOADS_PAGE_SIZE = 50
 
 const toggleSelect = (id: string) => {
   const idx = selectedIds.value.indexOf(id)
@@ -346,13 +363,16 @@ const handleViewImage = (imgs: GalleryImage[], idx: number) => {
   emit('view-image', imgs, idx)
 }
 
-// 打开添加图片弹窗时加载上传列表（排除已在画集中的图片）
+// 打开添加图片弹窗时加载上传列表（排除已在画集中的图片，分页每页 50）
 watch(showAddImages, async (v) => {
   if (!v) return
   uploadsLoading.value = true
   addImageIds.value = []
+  uploadsList.value = []
+  uploadsPage.value = 1
+  uploadsHasMore.value = false
   try {
-    const data = await store.getUploads(1, 100)
+    const data = await store.getUploads(1, UPLOADS_PAGE_SIZE)
     const existingIds = new Set(images.value.map(img => img.encrypted_id))
     uploadsList.value = (data.uploads || [])
       .map((item: any) => ({
@@ -366,11 +386,40 @@ watch(showAddImages, async (v) => {
         added_at: item.created_at
       } as GalleryImage))
       .filter(img => !existingIds.has(img.encrypted_id))
+    // 判断是否还有更多（返回数量等于页大小则可能有更多）
+    uploadsHasMore.value = (data.uploads || []).length >= UPLOADS_PAGE_SIZE
   } catch { /* ignore */ } finally {
     uploadsLoading.value = false
   }
+})
+
+/** 加载更多上传图片 */
+const loadMoreUploads = async () => {
+  if (uploadsLoadingMore.value || !uploadsHasMore.value) return
+  uploadsLoadingMore.value = true
+  try {
+    const nextPage = uploadsPage.value + 1
+    const data = await store.getUploads(nextPage, UPLOADS_PAGE_SIZE)
+    const existingIds = new Set(images.value.map(img => img.encrypted_id))
+    const newItems = (data.uploads || [])
+      .map((item: any) => ({
+        encrypted_id: item.encrypted_id || item.file_id,
+        original_filename: item.original_filename,
+        file_size: item.file_size || 0,
+        created_at: item.created_at,
+        cdn_cached: item.cdn_cached || false,
+        mime_type: item.mime_type || '',
+        image_url: item.image_url || `${baseURL}/image/${item.encrypted_id || item.file_id}`,
+        added_at: item.created_at
+      } as GalleryImage))
+      .filter(img => !existingIds.has(img.encrypted_id))
+    uploadsList.value.push(...newItems)
+    uploadsPage.value = nextPage
+    uploadsHasMore.value = (data.uploads || []).length >= UPLOADS_PAGE_SIZE
+  } catch { /* ignore */ } finally {
+    uploadsLoadingMore.value = false
+  }
 }
-)
 
 const handleAddImages = async () => {
   if (addImageIds.value.length === 0) return

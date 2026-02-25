@@ -73,8 +73,10 @@ def get_tg_user_by_username(username: str) -> Optional[Dict]:
 def _generate_code(code_type: str) -> str:
     """生成验证码或登录链接 code"""
     if code_type in ('verify', 'web_verify'):
-        # 6 位数字验证码
-        return ''.join(secrets.choice(string.digits) for _ in range(6))
+        # 8 位字母数字混合验证码（大写字母 + 数字，排除易混淆字符 O/0/I/1）
+        # 熵：约 34^8 ≈ 1.8×10^12，远优于 6 位纯数字（10^6）
+        alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+        return ''.join(secrets.choice(alphabet) for _ in range(8))
     else:
         # 32 字符随机 token
         return secrets.token_urlsafe(24)

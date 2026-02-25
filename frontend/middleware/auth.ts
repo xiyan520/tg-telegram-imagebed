@@ -1,15 +1,24 @@
 export default defineNuxtRouteMiddleware(async (to, from) => {
   const authStore = useAuthStore()
 
-  // 检查是否需要首次设置
+  // 检查是否需要首次设置（使用 useState 缓存，避免每次路由跳转重复请求）
   if (import.meta.client) {
-    try {
-      const res = await $fetch<{ need_setup: boolean }>('/api/setup/status')
-      if (res.need_setup) {
-        return navigateTo('/setup')
+    const setupChecked = useState<boolean>('setup_status_checked', () => false)
+    const needSetup = useState<boolean>('setup_status', () => false)
+
+    if (!setupChecked.value) {
+      try {
+        const res = await $fetch<{ need_setup: boolean }>('/api/setup/status')
+        needSetup.value = !!res.need_setup
+        setupChecked.value = true
+      } catch {
+        // 接口异常时继续正常认证流程
+        setupChecked.value = true
       }
-    } catch {
-      // 接口异常时继续正常认证流程
+    }
+
+    if (needSetup.value) {
+      return navigateTo('/setup')
     }
   }
 

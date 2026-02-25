@@ -66,13 +66,15 @@
 </template>
 
 <script setup lang="ts">
+import type { UploadResult } from '~/types/upload'
+
 const toast = useNotification()
 const { uploadFiles, abortUpload } = useUpload()
 const { triggerStatsRefresh } = useStatsRefresh()
 const runtimeConfig = useRuntimeConfig()
 
 const emit = defineEmits<{
-  uploaded: [images: any[]]
+  uploaded: [images: UploadResult[]]
 }>()
 
 const isDragging = ref(false)

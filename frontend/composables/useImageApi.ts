@@ -1,51 +1,11 @@
 import type {
-  ApiResponse, UploadResult, PublicStats,
+  ApiResponse, PublicStats,
   AdminStatsData, AdminImagesData, AdminDeleteData
 } from '~/types/api'
 
 export const useImageApi = () => {
   const config = useRuntimeConfig()
   const baseURL = config.public.apiBase
-
-  // 上传图片
-  const uploadImages = async (
-    files: File[],
-    onProgress?: (progress: { label: string; percent: number }) => void
-  ) => {
-    const results: UploadResult[] = []
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-      const formData = new FormData()
-      formData.append('file', file)
-
-      if (onProgress) {
-        onProgress({
-          label: `上传中 (${i + 1}/${files.length})...`,
-          percent: Math.round(((i + 1) / files.length) * 100)
-        })
-      }
-
-      try {
-        const response = await $fetch<ApiResponse<UploadResult>>(`${baseURL}/api/upload`, {
-          method: 'POST',
-          body: formData
-        })
-
-        if (response.success && response.data) {
-          results.push(response.data)
-        } else {
-          throw new Error(response.message || '上传失败')
-        }
-      } catch (error: any) {
-        throw new Error(error.message || `上传 ${file.name} 失败`)
-      }
-    }
-
-    return results
-  }
-
-  // 获取统计信息
   const getStats = async (): Promise<PublicStats> => {
     try {
       const response = await $fetch<ApiResponse<PublicStats>>(`${baseURL}/api/stats`)
@@ -123,7 +83,6 @@ export const useImageApi = () => {
   }
 
   return {
-    uploadImages,
     getStats,
     getAdminStats,
     getImages,

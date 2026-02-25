@@ -20,7 +20,7 @@ from ..database import (
     get_system_setting, get_system_setting_int
 )
 from ..utils import (
-    add_cache_headers, format_size, get_domain, get_image_domain, get_static_file_version, LOCAL_IP
+    add_cache_headers, format_size, get_domain, get_image_domain, get_static_file_version
 )
 from ..services.cdn_service import cloudflare_cdn, get_monitor_queue_size
 from ..storage.router import get_storage_router
@@ -316,7 +316,6 @@ def get_info():
     max_file_size_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=100)
 
     response = jsonify({
-        'server_ip': LOCAL_IP,
         'domain': get_domain(request),
         'cdn_domain': f"https://{cdn_domain}" if cdn_domain else None,
         'port': PORT,

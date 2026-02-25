@@ -304,6 +304,8 @@
 import type { GalleryImage } from '~/composables/useGalleryApi'
 import { useScrollLock, useWindowSize, useEventListener } from '@vueuse/core'
 
+const toast = useNotification()
+
 const props = withDefaults(defineProps<{
   open: boolean
   index: number
@@ -427,26 +429,36 @@ useEventListener(import.meta.client ? window : undefined, 'keydown', (e: Keyboar
   else if (e.key === '?') { e.preventDefault(); showHelpOverlay.value = !showHelpOverlay.value }
 }, { passive: false })
 
-// 下载当前图片
-const downloadCurrent = () => {
+// 下载当前图片（使用 fetch + blob 方式，解决跨域限制）
+const downloadCurrent = async () => {
   if (!import.meta.client || !currentImage.value) return
-  const link = document.createElement('a')
-  link.href = currentImage.value.image_url
-  link.download = currentImage.value.original_filename || 'image'
-  link.target = '_blank'
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
+  const url = currentImage.value.image_url
+  const filename = currentImage.value.original_filename || 'image'
+  try {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch (e: any) {
+    toast.error('下载失败', e.message || '无法下载图片，请尝试直接右键保存')
+  }
 }
 
-// 预加载相邻图片（带去重）
-const preloadedUrls = new Set<string>()
+// 预加载相邻图片（带去重，使用 ref 管理生命周期，避免模块级内存泄漏）
+const preloadedUrls = ref(new Set<string>())
 const preloadAt = (idx: number) => {
   if (!import.meta.client) return
   const url = props.images[idx]?.image_url
-  if (!url || preloadedUrls.has(url)) return
-  preloadedUrls.add(url)
-  if (preloadedUrls.size > 64) preloadedUrls.clear()
+  if (!url || preloadedUrls.value.has(url)) return
+  preloadedUrls.value.add(url)
+  if (preloadedUrls.value.size > 64) preloadedUrls.value.clear()
   const img = new Image()
   img.decoding = 'async'
   img.src = url
@@ -660,7 +672,11 @@ watch(safeIndex, () => {
   if (props.open) { scale.value = 1; translateX.value = 0; translateY.value = 0 }
 })
 
-onBeforeUnmount(() => { clearTimers() })
+onBeforeUnmount(() => {
+  clearTimers()
+  // 组件卸载时清空预加载缓存，防止内存泄漏
+  preloadedUrls.value.clear()
+})
 </script>
 
 <style scoped>

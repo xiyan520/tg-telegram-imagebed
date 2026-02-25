@@ -46,10 +46,8 @@ useHead(computed(() => {
   return head
 }))
 
-// 加载 SEO 设置
-onMounted(() => {
-  loadSeoSettings()
-})
+// 加载 SEO 设置（SPA 模式下 setup 即客户端，尽早发起请求）
+loadSeoSettings()
 </script>
 
 <style>

@@ -12,6 +12,7 @@ import logging
 import time
 import json
 import re
+import threading
 import requests
 from datetime import datetime, timedelta
 from functools import wraps
@@ -26,12 +27,14 @@ logger = logging.getLogger(__name__)
 # ===================== 画集域名 SSO Token 存储 =====================
 # 格式: {token_str: {'created_at': float, 'username': str, 'used': bool}}
 _gallery_auth_tokens: dict[str, dict] = {}
+# 多线程并发保护锁（waitress 多线程模型下必须加锁）
+_gallery_auth_tokens_lock = threading.Lock()
 
 _GALLERY_TOKEN_EXPIRE_SECONDS = 60  # token 有效期 60 秒
 
 
 def _cleanup_gallery_tokens():
-    """清理过期的画集 SSO token"""
+    """清理过期的画集 SSO token（调用方须持有锁）"""
     now = time.time()
     expired = [
         t for t, info in _gallery_auth_tokens.items()
@@ -43,13 +46,14 @@ def _cleanup_gallery_tokens():
 
 def generate_gallery_auth_token(username: str) -> str:
     """生成一次性画集 SSO token（60秒有效，一次性使用）"""
-    _cleanup_gallery_tokens()
-    token = secrets.token_urlsafe(32)
-    _gallery_auth_tokens[token] = {
-        'created_at': time.time(),
-        'username': username,
-        'used': False,
-    }
+    with _gallery_auth_tokens_lock:
+        _cleanup_gallery_tokens()
+        token = secrets.token_urlsafe(32)
+        _gallery_auth_tokens[token] = {
+            'created_at': time.time(),
+            'username': username,
+            'used': False,
+        }
     return token
 
 
@@ -59,18 +63,19 @@ def verify_gallery_auth_token(token: str) -> tuple[bool, str]:
     返回: (valid, username)
     验证后立即标记为已使用，防止重放
     """
-    _cleanup_gallery_tokens()
-    info = _gallery_auth_tokens.get(token)
-    if not info:
-        return False, ''
-    if info['used']:
-        return False, ''
-    if time.time() - info['created_at'] > _GALLERY_TOKEN_EXPIRE_SECONDS:
-        del _gallery_auth_tokens[token]
-        return False, ''
-    # 标记为已使用
-    info['used'] = True
-    return True, info['username']
+    with _gallery_auth_tokens_lock:
+        _cleanup_gallery_tokens()
+        info = _gallery_auth_tokens.get(token)
+        if not info:
+            return False, ''
+        if info['used']:
+            return False, ''
+        if time.time() - info['created_at'] > _GALLERY_TOKEN_EXPIRE_SECONDS:
+            del _gallery_auth_tokens[token]
+            return False, ''
+        # 标记为已使用（原子操作，防止重放攻击）
+        info['used'] = True
+        return True, info['username']
 
 
 # 从 utils.py 导入 get_domain 和 format_size
@@ -109,6 +114,8 @@ except ImportError:
 # ===================== 登录速率限制器（内存级） =====================
 _login_tracker: dict[str, dict] = {}
 # 结构: { ip: { 'attempts': int, 'locked_until': float, 'lockout_level': int, 'last_attempt': float } }
+# 最大追踪条目数，防止内存无限增长（DoS 防护）
+_LOGIN_TRACKER_MAX_ENTRIES = 10000
 
 
 def _get_client_ip(req) -> str:
@@ -161,6 +168,10 @@ def _record_login_failure(ip: str):
     info = _login_tracker.get(ip)
 
     if not info:
+        # 超出最大条目数时，清理最旧的条目（防止内存无限增长）
+        if len(_login_tracker) >= _LOGIN_TRACKER_MAX_ENTRIES:
+            oldest_ip = next(iter(_login_tracker))
+            del _login_tracker[oldest_ip]
         _login_tracker[ip] = {
             'attempts': 1,
             'locked_until': 0,
@@ -658,10 +669,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         _log_security_event('login_failed', ip, username)
         _, _, remaining = _check_login_allowed(ip)
         logger.warning(f"管理员登录失败: {username}, IP={ip}, 剩余尝试={remaining}")
+        # 不在响应中暴露剩余尝试次数，防止攻击者枚举
         return jsonify({
             'success': False,
             'message': '用户名或密码错误',
-            'remaining_attempts': remaining
         }), 401
 
     @app.route('/api/admin/logout', methods=['POST'])

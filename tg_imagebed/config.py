@@ -26,11 +26,11 @@ def _normalize_proxy_url(proxy: str) -> str:
 
 # ===================== 基础路径配置 =====================
 BASE_DIR = Path(__file__).resolve().parent.parent
-FRONTEND_DIR = os.path.join(os.getcwd(), "frontend")
-STATIC_FOLDER = os.path.join(os.getcwd(), "frontend", ".output", "public")
+FRONTEND_DIR = str(BASE_DIR / "frontend")
+STATIC_FOLDER = str(BASE_DIR / "frontend" / ".output" / "public")
 
 # 数据目录（固定，Docker 通过 volume 映射 ./data:/app/data）
-DATA_DIR = os.path.join(os.getcwd(), "data")
+DATA_DIR = str(BASE_DIR / "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 DATABASE_PATH = os.path.join(DATA_DIR, "telegram_imagebed.db")
@@ -39,7 +39,9 @@ LOG_FILE = os.path.join(DATA_DIR, "telegram_imagebed.log")
 # ===================== 服务器配置（硬编码） =====================
 PORT = 18793
 HOST = '0.0.0.0'
-ALLOWED_ORIGINS = '*'
+# CORS 允许的来源：优先读取环境变量 ALLOWED_ORIGINS，默认 '*'（开发模式）
+# 生产环境建议设置为具体域名，如 "https://example.com,https://www.example.com"
+ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '*').strip() or '*'
 SESSION_LIFETIME = 3600
 REMEMBER_ME_LIFETIME = 30 * 24 * 3600  # "记住我"session有效期：30天
 
@@ -81,8 +83,17 @@ if not _secret_key:
     try:
         with open(_secret_key_file, 'w', encoding='utf-8') as f:
             f.write(_secret_key)
+        # 设置文件权限为 0o600（仅所有者可读写），防止其他用户读取密钥
+        # Windows 下 chmod 无效但不会报错，Linux/Docker 环境下生效
+        os.chmod(_secret_key_file, 0o600)
     except Exception:
         pass  # 写入失败时使用内存中的临时密钥
+else:
+    # 已存在的密钥文件也确保权限正确
+    try:
+        os.chmod(_secret_key_file, 0o600)
+    except Exception:
+        pass
 
 SECRET_KEY = _secret_key
 

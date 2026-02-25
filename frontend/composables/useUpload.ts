@@ -17,10 +17,10 @@ export const useUpload = () => {
   const authStore = useAuthStore()
   const tokenStore = useTokenStore()
 
-  // 当前活跃的 XHR 实例引用，用于支持取消上传
-  let _currentXhr: XMLHttpRequest | null = null
+  // 用 Map 按文件名跟踪 XHR，避免多文件并发时的竞态问题
+  const _xhrMap = new Map<string, XMLHttpRequest>()
 
-  /** 单文件 XHR 上传（支持实时进度） */
+  /** 单文件 XHR 上传（支持实时进度），返回独立的 abort 函数 */
   const _xhrUpload = (
     url: string,
     file: File,
@@ -31,15 +31,20 @@ export const useUpload = () => {
       total: number
       onProgress?: (p: UploadProgress) => void
     }
-  ): Promise<ApiResponse<UploadResult | TokenUploadResult>> => {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      _currentXhr = xhr
+  ): { promise: Promise<ApiResponse<UploadResult | TokenUploadResult>>; abort: () => void } => {
+    const xhr = new XMLHttpRequest()
+    // 以文件名+时间戳作为 key，支持同名文件并发
+    const key = `${file.name}_${Date.now()}_${opts.idx}`
+    _xhrMap.set(key, xhr)
+
+    const cleanup = () => _xhrMap.delete(key)
+
+    const promise = new Promise<ApiResponse<UploadResult | TokenUploadResult>>((resolve, reject) => {
       const fd = new FormData()
       fd.append('file', file)
 
       xhr.addEventListener('load', () => {
-        _currentXhr = null
+        cleanup()
         if (xhr.status >= 200 && xhr.status < 300) {
           try { resolve(JSON.parse(xhr.responseText)) }
           catch { reject(new Error('解析响应失败')) }
@@ -50,8 +55,21 @@ export const useUpload = () => {
           } catch { reject(new Error(`上传失败: ${xhr.status}`)) }
         }
       })
-      xhr.addEventListener('error', () => { _currentXhr = null; reject(new Error('网络错误')) })
-      xhr.addEventListener('abort', () => { _currentXhr = null; reject(new Error('上传已取消')) })
+      xhr.addEventListener('error', () => { cleanup(); reject(new Error('网络错误')) })
+      xhr.addEventListener('abort', () => { cleanup(); reject(new Error('上传已取消')) })
+
+      if (opts.onProgress) {
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable && opts.onProgress) {
+            const filePercent = Math.round((e.loaded / e.total) * 100)
+            const overall = Math.round(((opts.idx + filePercent / 100) / opts.total) * 100)
+            opts.onProgress({
+              label: `上传中 (${opts.idx + 1}/${opts.total})...`,
+              percent: overall
+            })
+          }
+        })
+      }
 
       xhr.open('POST', url)
       if (opts.withCredentials) xhr.withCredentials = true
@@ -60,14 +78,23 @@ export const useUpload = () => {
       }
       xhr.send(fd)
     })
+
+    const abort = () => {
+      if (_xhrMap.has(key)) {
+        xhr.abort()
+        cleanup()
+      }
+    }
+
+    return { promise, abort }
   }
 
-  /** 中止当前上传请求 */
+  /** 中止所有当前上传请求 */
   const abortUpload = () => {
-    if (_currentXhr) {
-      _currentXhr.abort()
-      _currentXhr = null
+    for (const xhr of _xhrMap.values()) {
+      xhr.abort()
     }
+    _xhrMap.clear()
   }
 
   /** 上传文件列表，自动检测模式 */
@@ -98,9 +125,10 @@ export const useUpload = () => {
     }
 
     for (let i = 0; i < files.length; i++) {
-      const resp = await _xhrUpload(url, files[i], {
+      const { promise } = _xhrUpload(url, files[i], {
         headers, withCredentials, idx: i, total: files.length, onProgress
       })
+      const resp = await promise
       if (resp.success) results.push(resp.data)
     }
 

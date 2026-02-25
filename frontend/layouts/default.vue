@@ -264,10 +264,55 @@ const loadStats = async () => {
 
 // 定时刷新统计数据
 let statsRefreshInterval: NodeJS.Timeout | null = null
+// BroadcastChannel：协调多标签页，仅一个标签页执行轮询
+let pollChannel: BroadcastChannel | null = null
+const POLL_CHANNEL_NAME = 'stats-poll-leader'
+let isPollingLeader = false
+
+/**
+ * 尝试成为轮询 leader：
+ * 广播 "claim" 消息，若 200ms 内无其他标签页响应 "active"，则成为 leader
+ */
+const tryBecomePollLeader = (): Promise<boolean> => {
+  return new Promise((resolve) => {
+    if (!('BroadcastChannel' in globalThis)) {
+      // 不支持 BroadcastChannel，直接成为 leader
+      resolve(true)
+      return
+    }
+    pollChannel = new BroadcastChannel(POLL_CHANNEL_NAME)
+    let resolved = false
+
+    pollChannel.onmessage = (e) => {
+      if (e.data?.type === 'active' && !resolved) {
+        // 已有其他标签页在轮询
+        resolved = true
+        resolve(false)
+      }
+      if (e.data?.type === 'claim') {
+        // 有新标签页想成为 leader，若自己是 leader 则回应
+        if (isPollingLeader) {
+          pollChannel?.postMessage({ type: 'active' })
+        }
+      }
+    }
+
+    pollChannel.postMessage({ type: 'claim' })
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true
+        resolve(true)
+      }
+    }, 200)
+  })
+}
 
 // 启动轮询
-const startPolling = () => {
+const startPolling = async () => {
   if (statsRefreshInterval) return
+  const isLeader = await tryBecomePollLeader()
+  if (!isLeader) return
+  isPollingLeader = true
   statsRefreshInterval = setInterval(() => {
     loadStats()
   }, 30000)
@@ -278,6 +323,11 @@ const stopPolling = () => {
   if (statsRefreshInterval) {
     clearInterval(statsRefreshInterval)
     statsRefreshInterval = null
+  }
+  isPollingLeader = false
+  if (pollChannel) {
+    pollChannel.close()
+    pollChannel = null
   }
 }
 
@@ -422,5 +472,15 @@ onUnmounted(() => {
 
 .animation-delay-6000 {
   animation-delay: 6s;
+}
+
+/* 无障碍：减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-blob,
+  .animate-float,
+  .animate-spin-slow,
+  .animate-pulse-slow {
+    animation: none !important;
+  }
 }
 </style>

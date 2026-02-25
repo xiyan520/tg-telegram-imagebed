@@ -243,8 +243,6 @@ import { apiSections } from '~/data/apiDocs'
 const config = useRuntimeConfig()
 const toast = useLightToast()
 const { copy: clipboardCopy } = useClipboardCopy()
-const { uploadImages } = useImageApi()
-
 const baseUrl = computed(() => config.public.apiBase || window.location.origin)
 
 const testFileInput = ref<HTMLInputElement>()

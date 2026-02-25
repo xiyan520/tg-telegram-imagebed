@@ -106,7 +106,7 @@ LOCAL_IP = get_local_ip()
 
 
 # ===================== 加密工具 =====================
-def encrypt_file_id(file_id: str, file_path: str) -> str:
+def sign_file_id(file_id: str, file_path: str) -> str:
     """
     生成不可预测的文件 ID
 
@@ -178,7 +178,7 @@ def add_cache_headers(response: Response, cache_type: str = 'public', max_age: O
     if 'Cache-Control' in response.headers and cache_type == 'public':
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-        response.headers['X-XSS-Protection'] = '1; mode=block'
+        response.headers['Content-Security-Policy'] = "default-src 'self'; img-src *; media-src *"
         return response
 
     # 从数据库获取 CDN 启用状态
@@ -222,10 +222,10 @@ def add_cache_headers(response: Response, cache_type: str = 'public', max_age: O
     elif cache_type == 'static':
         response.headers['Cache-Control'] = f'public, max-age={browser_ttl}, s-maxage={edge_ttl}'
 
-    # 添加安全头部
+    # 添加安全头部（移除已废弃的 X-XSS-Protection，改用 CSP）
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['X-Frame-Options'] = 'SAMEORIGIN'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; img-src *; media-src *"
 
     # 添加 CDN 标签
     if cache_type in ['public', 'static']:
@@ -437,6 +437,66 @@ def _get_domain_upload_policy() -> dict:
     return policy
 
 
+def _get_fallback_domain(request=None) -> str:
+    """
+    获取降级域名（无图片专用域名时使用）
+
+    降级优先级：
+    1. cloudflare_cdn_domain（已配置时直接使用 get_domain）
+    2. custom_domains 中 default 类型的活跃域名
+    3. custom_domains 中非 gallery 类型的活跃域名
+    4. 检查 request.host 是否为画集域名
+    5. 最终回退到 get_domain(request)
+    """
+    # 1. 优先使用 cloudflare_cdn_domain
+    configured_domain, _ = _get_effective_domain_settings()
+    if configured_domain:
+        return get_domain(request)
+
+    # 2. 尝试 default 类型域名
+    try:
+        from .database import get_default_domain
+        from .database.domains import build_domain_url
+        default = get_default_domain()
+        if default and default.get('domain'):
+            use_https = bool(default.get('use_https', 1))
+            return build_domain_url(default['domain'], default.get('port'), use_https)
+    except Exception:
+        pass
+
+    # 3. 尝试非 gallery 类型的活跃域名
+    try:
+        from .database.connection import get_connection
+        from .database.domains import build_domain_url as _build_url
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT domain, use_https, port FROM custom_domains
+                WHERE domain_type != 'gallery' AND is_active = 1
+                ORDER BY is_default DESC, sort_order ASC
+                LIMIT 1
+            ''')
+            row = cursor.fetchone()
+            if row:
+                use_https = bool(row['use_https'])
+                return _build_url(row['domain'], row['port'], use_https)
+    except Exception:
+        pass
+
+    # 4. 检查 request.host 是否为画集域名，不是才使用
+    if request:
+        try:
+            from .database.domains import is_gallery_domain
+            host = request.host
+            if not is_gallery_domain(host):
+                return get_domain(request)
+        except Exception:
+            return get_domain(request)
+
+    # 5. 最终 fallback
+    return get_domain(request)
+
+
 def get_image_domain(request=None, scene: str = '') -> str:
     """
     获取图片专用域名 URL
@@ -468,54 +528,8 @@ def get_image_domain(request=None, scene: str = '') -> str:
         domains = list(_DOMAINS_CACHE["domains"])
 
     if not domains:
-        # 没有图片域名，降级时避免返回画集域名
-        # 1. 优先使用 cloudflare_cdn_domain
-        configured_domain, _ = _get_effective_domain_settings()
-        if configured_domain:
-            return get_domain(request)
-
-        # 2. 尝试 default 类型域名
-        try:
-            from .database import get_default_domain
-            from .database.domains import build_domain_url
-            default = get_default_domain()
-            if default and default.get('domain'):
-                use_https = bool(default.get('use_https', 1))
-                return build_domain_url(default['domain'], default.get('port'), use_https)
-        except Exception:
-            pass
-
-        # 3. 尝试非 gallery 类型的活跃域名
-        try:
-            from .database.connection import get_connection
-            from .database.domains import build_domain_url as _build_url
-            with get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT domain, use_https, port FROM custom_domains
-                    WHERE domain_type != 'gallery' AND is_active = 1
-                    ORDER BY is_default DESC, sort_order ASC
-                    LIMIT 1
-                ''')
-                row = cursor.fetchone()
-                if row:
-                    use_https = bool(row['use_https'])
-                    return _build_url(row['domain'], row['port'], use_https)
-        except Exception:
-            pass
-
-        # 4. 检查 request.host 是否为画集域名，不是才使用
-        if request:
-            try:
-                from .database.domains import is_gallery_domain
-                host = request.host
-                if not is_gallery_domain(host):
-                    return get_domain(request)
-            except Exception:
-                return get_domain(request)
-
-        # 5. 最终 fallback（request 为 None 或 host 是画集域名）
-        return get_domain(request)
+        # 没有图片域名，使用统一降级逻辑
+        return _get_fallback_domain(request)
 
     # 场景路由：查策略 → 匹配活跃域名
     if scene:
@@ -569,8 +583,8 @@ __all__ = [
     'acquire_lock', 'release_lock',
     # 网络工具
     'get_local_ip', 'LOCAL_IP',
-    # 加密工具
-    'encrypt_file_id',
+    # 加密工具（sign_file_id 为正式名，encrypt_file_id 保留向后兼容）
+    'sign_file_id', 'encrypt_file_id',
     # MIME类型
     'get_mime_type',
     # 缓存头部
@@ -586,3 +600,6 @@ __all__ = [
     # 静态文件版本
     'get_static_file_version',
 ]
+
+# 向后兼容别名
+encrypt_file_id = sign_file_id

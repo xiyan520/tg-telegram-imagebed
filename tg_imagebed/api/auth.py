@@ -22,7 +22,7 @@ from ..database import (
 )
 from ..database.connection import get_connection
 from ..services.file_service import process_upload
-from .upload import validate_image_magic, is_extension_allowed
+from .upload import validate_image_magic, is_extension_allowed, validate_upload_file
 
 
 def _extract_bearer_token() -> str:
@@ -30,13 +30,18 @@ def _extract_bearer_token() -> str:
     return extract_bearer_token()
 
 
+def _get_client_ip() -> str:
+    """提取客户端 IP（兼容反向代理 X-Forwarded-For）"""
+    xff = (request.headers.get('X-Forwarded-For') or '').strip()
+    return xff.split(',')[0].strip() if xff else (request.remote_addr or '127.0.0.1')
+
+
 @auth_bp.route('/api/auth/token/generate', methods=['POST'])
 def generate_token():
     """生成游客 Token"""
     try:
         # 提取客户端 IP（处理代理情况）
-        xff = (request.headers.get('X-Forwarded-For') or '').strip()
-        ip_address = xff.split(',')[0].strip() if xff else request.remote_addr
+        ip_address = _get_client_ip()
         user_agent = request.headers.get('User-Agent', '')
 
         # TG 认证检查：如果要求 TG 登录才能生成 Token
@@ -218,36 +223,12 @@ def upload_with_token():
     if file.filename == '':
         return add_cache_headers(jsonify({'success': False, 'error': '未选择文件'}), 'no-cache'), 400
 
-    content_type = (file.content_type or '').strip().lower()
-
-    # 检查文件扩展名是否在允许列表中（SVG 等危险格式由白名单统一控制）
-    if not is_extension_allowed(file.filename):
-        ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in (file.filename or '') else ''
-        return add_cache_headers(jsonify({'success': False, 'error': f'不支持的文件格式: .{ext}'}), 'no-cache'), 400
-
-    # 初步检查 Content-Type
-    if content_type and not content_type.startswith('image/'):
-        return add_cache_headers(jsonify({'success': False, 'error': '只允许上传图片文件'}), 'no-cache'), 400
-
-    file.seek(0, 2)
-    file_size = file.tell()
-    file.seek(0)
-
-    # 使用动态配置的文件大小限制
-    max_size_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
-    max_size_bytes = max_size_mb * 1024 * 1024
-
-    if file_size > max_size_bytes:
-        return add_cache_headers(jsonify({'success': False, 'error': f'文件大小超过 {max_size_mb}MB 限制'}), 'no-cache'), 400
+    # 公共文件校验（扩展名、Content-Type、大小、魔数）
+    err, file_content = validate_upload_file(file)
+    if err:
+        return err
 
     try:
-        file_content = file.read()
-
-        # 魔数校验：验证文件实际类型
-        detected_mime = validate_image_magic(file_content)
-        if not detected_mime:
-            return add_cache_headers(jsonify({'success': False, 'error': '无效的图片文件格式'}), 'no-cache'), 400
-
         result = process_upload(
             file_content=file_content,
             filename=file.filename,
@@ -362,10 +343,13 @@ def token_profile_api():
     token_data = verification['token_data']
 
     if request.method == 'GET':
+        # GET 响应中不返回完整 token（客户端已持有，无需回显；防止日志/代理泄露）
+        raw = token
+        token_masked = f"{raw[:8]}…{raw[-4:]}" if len(raw) > 12 else raw
         return add_cache_headers(jsonify({
             'success': True,
             'data': {
-                'token': token,
+                'token_masked': token_masked,
                 'description': token_data.get('description')
             }
         }), 'no-cache')
@@ -383,7 +367,6 @@ def token_profile_api():
     return add_cache_headers(jsonify({
         'success': True,
         'data': {
-            'token': token,
             'description': new_description
         }
     }), 'no-cache')
@@ -463,6 +446,70 @@ def unbind_token_from_tg():
     return add_cache_headers(jsonify({'success': True, 'message': '解绑成功'}), 'no-cache')
 
 
+def _delete_tg_message(file_row: dict) -> bool:
+    """
+    同步删除 Telegram 频道中的消息（单一职责：仅处理 TG 消息删除）
+    返回是否成功删除
+    """
+    chat_id = file_row.get('group_chat_id')
+    message_id = file_row.get('group_message_id')
+    storage_backend = (file_row.get('storage_backend') or 'telegram').strip()
+
+    # 兼容历史数据：从 storage_meta 中提取 message_id，从后端配置获取 chat_id
+    if not message_id or not chat_id:
+        try:
+            import json as _json
+            meta_raw = file_row.get('storage_meta') or '{}'
+            meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+            if not message_id:
+                message_id = meta.get('message_id')
+            if not chat_id and storage_backend:
+                from ..storage.router import get_storage_router as _get_router
+                be = _get_router().get_backend(storage_backend)
+                if hasattr(be, '_chat_id'):
+                    chat_id = be._chat_id
+        except Exception:
+            pass
+
+    if not (chat_id and message_id):
+        return False
+
+    try:
+        from ..bot_control import get_effective_bot_token
+        bot_token, _ = get_effective_bot_token()
+        if not bot_token:
+            return False
+        resp = http_requests.post(
+            f"https://api.telegram.org/bot{bot_token}/deleteMessage",
+            data={'chat_id': chat_id, 'message_id': message_id},
+            timeout=5,
+        )
+        return resp.ok and resp.json().get('ok', False)
+    except Exception:
+        return False
+
+
+def _delete_storage_file(file_row: dict) -> None:
+    """
+    删除存储后端文件（单一职责：仅处理存储文件删除）
+    失败时仅记录日志，不抛出异常
+    """
+    storage_backend = (file_row.get('storage_backend') or 'telegram').strip()
+    storage_key = file_row.get('storage_key') or ''
+    encrypted_id = file_row.get('encrypted_id', '')
+
+    if not storage_key:
+        return
+
+    try:
+        from ..storage.router import get_storage_router
+        router = get_storage_router()
+        backend = router.get_backend(storage_backend)
+        backend.delete(storage_key=storage_key)
+    except Exception as e:
+        logger.debug(f"用户删除-存储文件删除失败: {encrypted_id}, {e}")
+
+
 def _delete_file_record(encrypted_id: str, token: str, *, delete_storage: bool = True) -> dict:
     """
     删除单个图片记录，可选同时删除存储后端文件。
@@ -491,55 +538,13 @@ def _delete_file_record(encrypted_id: str, token: str, *, delete_storage: bool =
             file_row = dict(row)
 
             if delete_storage:
-                storage_backend = (file_row.get('storage_backend') or 'telegram').strip()
-                storage_key = file_row.get('storage_key') or ''
-
                 # 1. 删除存储后端文件
-                if storage_key:
-                    try:
-                        from ..storage.router import get_storage_router
-                        router = get_storage_router()
-                        backend = router.get_backend(storage_backend)
-                        backend.delete(storage_key=storage_key)
-                    except Exception as e:
-                        logger.debug(f"用户删除-存储文件删除失败: {encrypted_id}, {e}")
+                _delete_storage_file(file_row)
 
                 # 2. TG 消息同步删除
                 tg_sync_enabled = str(get_system_setting('tg_sync_delete_enabled') or '1') == '1'
                 if tg_sync_enabled:
-                    chat_id = file_row.get('group_chat_id')
-                    message_id = file_row.get('group_message_id')
-
-                    # 兼容历史数据：从 storage_meta 中提取 message_id，从后端配置获取 chat_id
-                    if not message_id or not chat_id:
-                        try:
-                            import json as _json
-                            meta_raw = file_row.get('storage_meta') or '{}'
-                            meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
-                            if not message_id:
-                                message_id = meta.get('message_id')
-                            if not chat_id and storage_backend:
-                                from ..storage.router import get_storage_router as _get_router
-                                be = _get_router().get_backend(storage_backend)
-                                if hasattr(be, '_chat_id'):
-                                    chat_id = be._chat_id
-                        except Exception:
-                            pass
-
-                    if chat_id and message_id:
-                        try:
-                            from ..bot_control import get_effective_bot_token
-                            bot_token, _ = get_effective_bot_token()
-                            if bot_token:
-                                resp = http_requests.post(
-                                    f"https://api.telegram.org/bot{bot_token}/deleteMessage",
-                                    data={'chat_id': chat_id, 'message_id': message_id},
-                                    timeout=5,
-                                )
-                                if resp.ok and resp.json().get('ok'):
-                                    result['tg_deleted'] = True
-                        except Exception:
-                            pass
+                    result['tg_deleted'] = _delete_tg_message(file_row)
 
             # 3. 删除数据库记录
             cursor.execute(
@@ -629,7 +634,8 @@ def user_batch_delete_images():
         else:
             failed += 1
 
-    logger.info(f"用户批量删除图片: token={token[:20]}..., 删除={deleted}, 失败={failed}, TG同步={tg_deleted}")
+    token_masked = f"{token[:8]}…{token[-4:]}" if len(token) > 12 else token
+    logger.info(f"用户批量删除图片: token={token_masked}, 删除={deleted}, 失败={failed}, TG同步={tg_deleted}")
 
     return add_cache_headers(jsonify({
         'success': True,

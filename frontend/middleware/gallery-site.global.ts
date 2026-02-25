@@ -10,6 +10,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // 仅在客户端执行（ssr: false）
   if (!import.meta.client) return
 
+  // 静态资源和系统路径白名单，直接放行
+  const staticWhitelist = ['/favicon.ico', '/_nuxt/', '/api/', '/__nuxt_error', '/image/']
+  if (staticWhitelist.some(p => to.path === p || to.path.startsWith(p))) return
+
   // 获取缓存的站点模式
   const siteMode = useState<SiteModeInfo | null>('gallery-site-mode', () => null)
   const siteModeChecked = useState<boolean>('gallery-site-mode-checked', () => false)

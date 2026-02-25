@@ -13,7 +13,7 @@ import requests
 
 from ..config import logger
 from ..database import save_file_info, get_file_info, update_file_path_in_db
-from ..utils import encrypt_file_id, get_mime_type
+from ..utils import sign_file_id, get_mime_type
 from .cdn_service import add_to_cdn_monitor
 from ..storage.router import get_storage_router
 from ..bot_control import get_effective_bot_token
@@ -101,8 +101,8 @@ def process_upload(
         else:
             scene = "guest"
 
-    # 计算文件哈希
-    file_hash = hashlib.md5(file_content).hexdigest()
+    # 计算文件哈希（使用 SHA256，比 MD5 更安全）
+    file_hash = hashlib.sha256(file_content).hexdigest()
 
     # 构建说明
     caption = f"{source} | 文件名: {filename} | 大小: {file_size} bytes | 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
@@ -128,8 +128,8 @@ def process_upload(
     if not put_result:
         return None
 
-    # 生成加密 ID
-    encrypted_id = encrypt_file_id(put_result.file_id, put_result.file_path)
+    # 生成签名 ID
+    encrypted_id = sign_file_id(put_result.file_id, put_result.file_path)
 
     # 获取 MIME 类型
     mime_type = get_mime_type(filename)
@@ -214,8 +214,8 @@ def record_existing_telegram_file(
     if not content_type:
         content_type = get_mime_type(filename)
 
-    file_hash = hashlib.md5(file_content or b'').hexdigest()
-    encrypted_id = encrypt_file_id(file_id, file_path)
+    file_hash = hashlib.sha256(file_content or b'').hexdigest()
+    encrypted_id = sign_file_id(file_id, file_path)
     mime_type = get_mime_type(filename)
     upload_time = int(time.time())
 

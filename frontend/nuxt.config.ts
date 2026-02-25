@@ -15,12 +15,10 @@ export default defineNuxtConfig({
     baseURL: '/',
     buildAssetsDir: '/_nuxt/',
     head: {
-      title: ' ',
+      title: '',
       meta: [
         { charset: 'utf-8' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-        { name: 'description', content: '专业的图片托管服务，基于Telegram云存储，支持Cloudflare CDN全球加速' },
-        { name: 'keywords', content: '图床,免费图床,Telegram,云存储,CDN加速,图片托管' }
       ],
       link: [
         { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' }

@@ -169,6 +169,16 @@ def create_app() -> Flask:
 
     app.secret_key = SECRET_KEY
 
+    # 设置 Flask 请求体大小上限（防止超大请求耗尽内存）
+    # 动态读取系统设置，回退到 100MB 硬上限
+    try:
+        from tg_imagebed.database import get_system_setting_int
+        max_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
+    except Exception:
+        max_mb = 20
+    # 额外留 2MB 余量给表单字段和 multipart 边界
+    app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
+
     # 配置管理员会话
     admin_module.configure_admin_session(app)
 
@@ -254,7 +264,17 @@ def main():
 
     logger.info("前端已内置到Flask中，统一端口服务")
 
-    time.sleep(2)
+    # 等待 Flask 就绪（健康检查轮询，最多等待 10 秒）
+    import urllib.request
+    _health_url = f"http://127.0.0.1:{PORT}/api/health"
+    for _i in range(20):
+        try:
+            urllib.request.urlopen(_health_url, timeout=1)
+            break
+        except Exception:
+            time.sleep(0.5)
+    else:
+        logger.warning("Flask 健康检查超时，继续启动 Bot 线程")
 
     # Telegram 机器人独立线程运行：失败不影响 Web 服务
     bot_thread = start_telegram_bot_thread()

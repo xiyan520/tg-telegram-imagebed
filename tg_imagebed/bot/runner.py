@@ -171,7 +171,7 @@ def run_telegram_bot():
 
                 # 保存 Bot 实例和事件循环引用（供 Web 端跨线程调用）
                 set_bot_instance(telegram_app.bot)
-                set_bot_loop(asyncio.get_event_loop())
+                set_bot_loop(asyncio.get_running_loop())
 
                 # 注册命令菜单（让 Telegram 客户端显示命令提示）
                 from telegram import BotCommand

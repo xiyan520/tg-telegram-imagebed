@@ -1,5 +1,6 @@
 import { useTokenStore } from '~/stores/token'
 import { createGalleryApi } from './useGalleryApiFactory'
+import { parseFetchErrorData, createAccessError, hasAccessFlags, createApiErrorHandler } from './useApiError'
 import type { ApiResponse } from '~/types/api'
 
 export interface Gallery {
@@ -73,31 +74,7 @@ export const useGalleryApi = () => {
 
   // ===================== 特有方法 =====================
 
-  // 解析 FetchError 响应数据（处理字符串/对象/嵌套结构）
-  const parseFetchErrorData = (e: any): Record<string, any> => {
-    const raw = e?.data ?? e?.response?._data
-    if (raw == null) return {}
-    if (typeof raw === 'string') {
-      try { return JSON.parse(raw) } catch { return { error: raw } }
-    }
-    // 处理嵌套 { data: {...} } 结构
-    if (raw.data && typeof raw.data === 'object') return raw.data
-    return raw
-  }
-
-  // 创建带访问控制信息的错误
-  const createAccessError = (data: Record<string, any>, fallbackMsg: string, originalError?: any): Error & Record<string, any> => {
-    const err: any = new Error(data.error || originalError?.message || fallbackMsg)
-    err.requires_password = data.requires_password
-    err.requires_token = data.requires_token
-    err.gallery_id = data.gallery_id
-    err.gallery_name = data.gallery_name
-    return err
-  }
-
-  // 检查错误是否已包含访问控制信息
-  const hasAccessFlags = (e: any): boolean =>
-    e && typeof e === 'object' && ('requires_token' in e || 'requires_password' in e)
+  const handleAccessError = createApiErrorHandler({ fallbackMessage: '画集不存在或分享已关闭' })
 
   // 获取分享画集（公开访问）
   const getSharedGallery = async (shareToken: string, page = 1, limit = 50) => {
@@ -124,9 +101,7 @@ export const useGalleryApi = () => {
         has_more: boolean
       }
     } catch (e: any) {
-      if (hasAccessFlags(e)) throw e
-      const data = parseFetchErrorData(e)
-      throw createAccessError(data, '画集不存在或分享已关闭', e)
+      handleAccessError(e)
     }
   }
 
@@ -168,9 +143,7 @@ export const useGalleryApi = () => {
         has_more: boolean
       }
     } catch (e: any) {
-      if (hasAccessFlags(e)) throw e
-      const data = parseFetchErrorData(e)
-      throw createAccessError(data, '画集不存在或分享已关闭', e)
+      handleAccessError(e)
     }
   }
 

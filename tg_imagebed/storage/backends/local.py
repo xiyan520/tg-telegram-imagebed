@@ -139,8 +139,8 @@ class LocalBackend(StorageBackend):
 
         path = (self._root / key).resolve()
 
-        # 安全检查
-        if not str(path).startswith(str(self._root)):
+        # 安全检查：使用 is_relative_to 防止路径遍历（与 put_bytes 保持一致）
+        if not path.is_relative_to(self._root.resolve()):
             return DownloadResult(
                 status_code=403,
                 content_type='text/plain',
@@ -213,7 +213,8 @@ class LocalBackend(StorageBackend):
         """删除本地文件"""
         try:
             path = (self._root / storage_key).resolve()
-            if not str(path).startswith(str(self._root)):
+            # 安全检查：使用 is_relative_to 防止路径遍历（与 put_bytes 保持一致）
+            if not path.is_relative_to(self._root.resolve()):
                 return False
             if path.exists():
                 path.unlink()

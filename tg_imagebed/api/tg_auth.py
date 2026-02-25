@@ -21,6 +21,9 @@ from ..database import (
 
 class SimpleRateLimiter:
     """简单的内存速率限制器"""
+    # 最大追踪条目数，防止内存无限增长（DoS 防护）
+    _MAX_ENTRIES = 10000
+
     def __init__(self, max_requests: int, window_seconds: int):
         self._max = max_requests
         self._window = window_seconds
@@ -34,6 +37,10 @@ class SimpleRateLimiter:
         self._requests[key] = [t for t in reqs if t > cutoff]
         if len(self._requests[key]) >= self._max:
             return False
+        # 超出最大条目数时，清理最旧的条目（LRU 淘汰）
+        if len(self._requests) >= self._MAX_ENTRIES:
+            oldest_key = next(iter(self._requests))
+            del self._requests[oldest_key]
         self._requests[key].append(now)
         return True
 

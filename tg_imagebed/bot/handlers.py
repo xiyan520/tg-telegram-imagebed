@@ -63,6 +63,161 @@ def _parse_id_list(raw: str) -> set:
         return set()
 
 
+async def _check_group_permissions(update, get_system_setting, has_bound_tokens) -> tuple:
+    """
+    检查群组上传权限
+
+    Returns:
+        (allowed: bool, reply_enabled: bool, delete_delay: int)
+    """
+    from ..database import get_system_setting as _gs
+    if str(_gs('group_upload_admin_only') or '0') == '1':
+        admin_raw = str(_gs('group_admin_ids') or '').strip()
+        admin_ids = _parse_id_list(admin_raw)
+        user = update.effective_user
+        if not user or not admin_ids or user.id not in admin_ids:
+            return False, False, 0
+    elif str(_gs('group_upload_tg_bound_only') or '0') == '1':
+        user = update.effective_user
+        if not user or not has_bound_tokens(user.id):
+            return False, False, 0
+
+    reply_enabled = str(_gs('group_upload_reply') or '1') == '1'
+    try:
+        delete_delay = max(0, int(_gs('group_upload_delete_delay') or '0'))
+    except (ValueError, TypeError):
+        delete_delay = 0
+    return True, reply_enabled, delete_delay
+
+
+async def _check_private_permissions(update, get_system_setting, has_bound_tokens) -> bool:
+    """
+    检查私聊上传权限，不通过时直接回复错误消息
+
+    Returns:
+        allowed: bool
+    """
+    from ..database import get_system_setting as _gs
+    message = update.effective_message
+    if str(_gs('bot_private_upload_enabled') or '1') != '1':
+        await message.reply_text("❌ 私聊上传功能已关闭")
+        return False
+
+    mode = str(_gs('bot_private_upload_mode') or 'open').strip().lower()
+    user = update.effective_user
+
+    if mode == 'admin_only':
+        admin_raw = str(_gs('bot_private_admin_ids') or '').strip()
+        admin_ids = _parse_id_list(admin_raw)
+        if not user or not admin_ids or user.id not in admin_ids:
+            await message.reply_text("❌ 仅管理员可通过私聊上传")
+            return False
+    elif mode == 'tg_bound':
+        if not user or not has_bound_tokens(user.id):
+            await message.reply_text(
+                "❌ 仅绑定 Token 的用户可通过私聊上传\n\n"
+                "💡 请先使用 /login 登录 Web 端并生成 Token"
+            )
+            return False
+    return True
+
+
+def _extract_file_from_message(message, get_allowed_extensions, get_mime_type_fn):
+    """
+    从消息中提取文件信息
+
+    Returns:
+        (tg_file, filename, content_type, file_unique_id) 或 (None, ...) 表示无图片
+    """
+    tg_file = None
+    filename = ""
+    content_type = "image/jpeg"
+    file_unique_id = None
+
+    if message.photo:
+        tg_file = message.photo[-1]
+        file_unique_id = tg_file.file_unique_id
+        filename = f"telegram_{file_unique_id}.jpg"
+        content_type = "image/jpeg"
+    elif message.document:
+        doc = message.document
+        mime = (doc.mime_type or "").lower()
+        doc_name = (doc.file_name or "").lower()
+        allowed = get_allowed_extensions()
+        is_image = mime.startswith("image/") or any(
+            doc_name.endswith(f'.{ext}') for ext in allowed
+        )
+        if is_image:
+            tg_file = doc
+            file_unique_id = doc.file_unique_id
+            filename = doc.file_name or f"telegram_{file_unique_id}"
+            content_type = doc.mime_type or get_mime_type_fn(filename)
+
+    return tg_file, filename, content_type, file_unique_id
+
+
+async def _resolve_upload_token(user, is_group: bool, get_active_user_tokens, get_default_upload_token, message) -> tuple:
+    """
+    解析上传关联 Token
+
+    Returns:
+        (token: Optional[str], should_return: bool)
+        should_return=True 表示需要中断处理（多 Token 无默认的私聊场景）
+    """
+    if not user:
+        return None, False
+
+    active_tokens = get_active_user_tokens(user.id)
+    if len(active_tokens) == 1:
+        return active_tokens[0]['token'], False
+    elif len(active_tokens) > 1:
+        default = get_default_upload_token(user.id)
+        if default:
+            return default, False
+        # 多 Token 无默认：私聊提示，群组静默使用回退
+        if not is_group:
+            await message.reply_text(
+                "⚠️ 你有多个 Token，请先设置默认上传 Token\n\n"
+                "使用 /settoken 选择默认 Token"
+            )
+            return None, True
+    return None, False
+
+
+def _build_reply_text(result: dict, permanent_url: str, filename: str, get_system_setting) -> tuple:
+    """
+    构建上传成功的回复文本
+
+    Returns:
+        (text: str, parse_mode: Optional[str])
+    """
+    reply_template = str(get_system_setting('bot_reply_template') or '').strip()
+    show_size = str(get_system_setting('bot_reply_show_size') or '1') == '1'
+    show_filename = str(get_system_setting('bot_reply_show_filename') or '0') == '1'
+
+    if reply_template:
+        text = reply_template.format(
+            url=permanent_url,
+            size=format_size(result['file_size']),
+            filename=result.get('original_filename') or filename,
+            id=result['encrypted_id'],
+        )
+        return text, None
+
+    from html import escape as html_escape
+    lines = [
+        "✅ <b>上传成功！</b>\n",
+        f"🔗 <b>永久直链:</b>\n<code>{html_escape(permanent_url)}</code>\n",
+    ]
+    if show_filename:
+        fname = html_escape(result.get('original_filename') or filename)
+        lines.append(f"📄 <b>文件名:</b> {fname}")
+    if show_size:
+        lines.append(f"📊 <b>文件大小:</b> {format_size(result['file_size'])}")
+    lines.append("💡 链接永久有效")
+    return '\n'.join(lines), 'HTML'
+
+
 async def handle_photo(update: Update, context):
     """处理图片上传（私聊/群组/频道）"""
     from ..services.file_service import process_upload, record_existing_telegram_file
@@ -78,49 +233,18 @@ async def handle_photo(update: Update, context):
     chat_type = (getattr(chat, 'type', '') or '').lower()
     is_group = chat_type in ('group', 'supergroup', 'channel')
 
-    # 群组/频道：执行权限检查
+    # 权限检查
     reply_enabled = True
     delete_delay = 0
     if is_group:
-        if str(get_system_setting('group_upload_admin_only') or '0') == '1':
-            admin_raw = str(get_system_setting('group_admin_ids') or '').strip()
-            admin_ids = _parse_id_list(admin_raw)
-            user = update.effective_user
-            if not user or not admin_ids or user.id not in admin_ids:
-                return
-        # 中间层：仅 TG 绑定用户（admin_only 未开启时才检查）
-        elif str(get_system_setting('group_upload_tg_bound_only') or '0') == '1':
-            user = update.effective_user
-            if not user or not has_bound_tokens(user.id):
-                return  # 静默拒绝（群组中不宜回复提示）
-
-        reply_enabled = str(get_system_setting('group_upload_reply') or '1') == '1'
-        try:
-            delete_delay = max(0, int(get_system_setting('group_upload_delete_delay') or '0'))
-        except (ValueError, TypeError):
-            delete_delay = 0
-    else:
-        # 私聊上传权限检查（在文件下载之前执行，避免浪费带宽）
-        if str(get_system_setting('bot_private_upload_enabled') or '1') != '1':
-            await message.reply_text("❌ 私聊上传功能已关闭")
+        allowed, reply_enabled, delete_delay = await _check_group_permissions(
+            update, get_system_setting, has_bound_tokens
+        )
+        if not allowed:
             return
-
-        mode = str(get_system_setting('bot_private_upload_mode') or 'open').strip().lower()
-        user = update.effective_user
-
-        if mode == 'admin_only':
-            admin_raw = str(get_system_setting('bot_private_admin_ids') or '').strip()
-            admin_ids = _parse_id_list(admin_raw)
-            if not user or not admin_ids or user.id not in admin_ids:
-                await message.reply_text("❌ 仅管理员可通过私聊上传")
-                return
-        elif mode == 'tg_bound':
-            if not user or not has_bound_tokens(user.id):
-                await message.reply_text(
-                    "❌ 仅绑定 Token 的用户可通过私聊上传\n\n"
-                    "💡 请先使用 /login 登录 Web 端并生成 Token"
-                )
-                return
+    else:
+        if not await _check_private_permissions(update, get_system_setting, has_bound_tokens):
+            return
 
     # 获取用户信息
     user = update.effective_user
@@ -130,23 +254,11 @@ async def handle_photo(update: Update, context):
         username = getattr(chat, 'title', '') or 'channel'
 
     # 解析上传关联 Token
-    upload_auth_token = None
-    if user:
-        active_tokens = get_active_user_tokens(user.id)
-        if len(active_tokens) == 1:
-            upload_auth_token = active_tokens[0]['token']
-        elif len(active_tokens) > 1:
-            default = get_default_upload_token(user.id)
-            if default:
-                upload_auth_token = default
-            else:
-                # 多 Token 无默认：提示用户选择（仅私聊提示，群组静默使用回退）
-                if not is_group:
-                    await message.reply_text(
-                        "⚠️ 你有多个 Token，请先设置默认上传 Token\n\n"
-                        "使用 /settoken 选择默认 Token"
-                    )
-                    return
+    upload_auth_token, should_return = await _resolve_upload_token(
+        user, is_group, get_active_user_tokens, get_default_upload_token, message
+    )
+    if should_return:
+        return
 
     # 检测批量上传（media_group_id）
     media_group_id = getattr(message, 'media_group_id', None)
@@ -161,31 +273,11 @@ async def handle_photo(update: Update, context):
             pass
 
     try:
-        # 提取图片：优先photo，其次document（文件形式发送的图片）
-        tg_file = None
-        filename = ""
-        content_type = "image/jpeg"
-        file_unique_id = None
-
-        if message.photo:
-            tg_file = message.photo[-1]
-            file_unique_id = tg_file.file_unique_id
-            filename = f"telegram_{file_unique_id}.jpg"
-            content_type = "image/jpeg"
-        elif message.document:
-            doc = message.document
-            mime = (doc.mime_type or "").lower()
-            doc_name = (doc.file_name or "").lower()
-            from ..config import get_allowed_extensions
-            allowed = get_allowed_extensions()
-            is_image = mime.startswith("image/") or any(
-                doc_name.endswith(f'.{ext}') for ext in allowed
-            )
-            if is_image:
-                tg_file = doc
-                file_unique_id = doc.file_unique_id
-                filename = doc.file_name or f"telegram_{file_unique_id}"
-                content_type = doc.mime_type or _get_mime_type(filename)
+        # 提取图片信息
+        from ..config import get_allowed_extensions
+        tg_file, filename, content_type, file_unique_id = _extract_file_from_message(
+            message, get_allowed_extensions, _get_mime_type
+        )
 
         if not tg_file:
             if status_msg:
@@ -197,7 +289,7 @@ async def handle_photo(update: Update, context):
                     pass
             return
 
-        # Caption 自定义文件名：用说明文字替换默认文件名（保留原始扩展名）
+        # Caption 自定义文件名
         if message.caption and str(get_system_setting('bot_caption_filename_enabled') or '1') == '1':
             from .commands import _sanitize_filename
             original_ext = os.path.splitext(filename)[1] or '.jpg'
@@ -218,7 +310,6 @@ async def handle_photo(update: Update, context):
                 )
                 _media_group_batches[batch_key] = batch
 
-            # 批量上限保护
             if len(batch.items) >= _MAX_BATCH_ITEMS:
                 logger.warning(f"批量上传超过上限 {_MAX_BATCH_ITEMS}，忽略多余图片: chat={chat.id} group={media_group_id}")
                 return
@@ -236,7 +327,6 @@ async def handle_photo(update: Update, context):
             if batch.first_message_id is None or message.message_id < batch.first_message_id:
                 batch.first_message_id = message.message_id
 
-            # 首张图片时发送状态消息
             if batch.status_message_id is None:
                 try:
                     status_msg = await message.reply_text("⏳ 正在处理相册图片，请稍候...")
@@ -244,7 +334,6 @@ async def handle_photo(update: Update, context):
                 except Exception:
                     pass
 
-            # 重置 debounce 定时器
             if batch.flush_task:
                 batch.flush_task.cancel()
             batch.flush_task = asyncio.create_task(
@@ -291,38 +380,10 @@ async def handle_photo(update: Update, context):
             base_url = get_image_domain(None, scene='guest')
             permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
-            # 读取回复配置
-            reply_template = str(get_system_setting('bot_reply_template') or '').strip()
-            show_size = str(get_system_setting('bot_reply_show_size') or '1') == '1'
-            show_filename = str(get_system_setting('bot_reply_show_filename') or '0') == '1'
             link_formats = str(get_system_setting('bot_reply_link_formats') or 'url')
+            text, parse_mode = _build_reply_text(result, permanent_url, filename, get_system_setting)
 
-            if reply_template:
-                # 自定义模板（用户自行控制格式，不做 parse_mode 处理）
-                text = reply_template.format(
-                    url=permanent_url,
-                    size=format_size(result['file_size']),
-                    filename=result.get('original_filename') or filename,
-                    id=result['encrypted_id'],
-                )
-                parse_mode = None
-            else:
-                # 默认模板（使用 HTML 格式，与 callback 编辑保持一致）
-                from html import escape as html_escape
-                lines = [
-                    "✅ <b>上传成功！</b>\n",
-                    f"🔗 <b>永久直链:</b>\n<code>{html_escape(permanent_url)}</code>\n",
-                ]
-                if show_filename:
-                    fname = html_escape(result.get('original_filename') or filename)
-                    lines.append(f"📄 <b>文件名:</b> {fname}")
-                if show_size:
-                    lines.append(f"📊 <b>文件大小:</b> {format_size(result['file_size'])}")
-                lines.append("💡 链接永久有效")
-                text = '\n'.join(lines)
-                parse_mode = 'HTML'
-
-            # 私聊场景添加 inline 按钮（格式按钮 + 打开链接 + 删除）
+            # 私聊场景添加 inline 按钮
             reply_markup = None
             if not is_group and str(get_system_setting('bot_inline_buttons_enabled') or '1') == '1':
                 from .commands import build_upload_success_keyboard
@@ -332,17 +393,13 @@ async def handle_photo(update: Update, context):
 
             reply_msg_id = None
             if status_msg:
-                await status_msg.edit_text(
-                    text, parse_mode=parse_mode, reply_markup=reply_markup
-                )
+                await status_msg.edit_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
                 reply_msg_id = status_msg.message_id
             else:
-                sent = await message.reply_text(
-                    text, parse_mode=parse_mode, reply_markup=reply_markup
-                )
+                sent = await message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
                 reply_msg_id = sent.message_id
 
-            # 群组延迟删除回复（后台执行，不阻塞）
+            # 群组延迟删除回复
             if is_group and delete_delay > 0 and reply_msg_id:
                 async def delayed_delete():
                     try:
@@ -368,7 +425,6 @@ async def handle_photo(update: Update, context):
         err_type = type(e).__name__
         logger.error(f"Error processing photo: {err_type}: {e}")
 
-        # 区分错误类型给出友好提示
         if "Forbidden" in str(e) or "权限" in str(e):
             err_msg = "❌ 权限不足，请检查 Bot 权限设置"
         elif "NetworkError" in err_type or "TimedOut" in err_type:

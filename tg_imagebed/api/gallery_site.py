@@ -389,10 +389,15 @@ def gallery_sso_redirect():
 # ===================== 管理端点 CORS + 认证 =====================
 
 def _set_admin_cors_headers(response):
-    """设置管理端点的 CORS 头（支持 credentials）"""
+    """设置管理端点的 CORS 头（仅允许已配置的 Origin，支持 credentials）"""
     origin = request.headers.get('Origin')
     if origin:
-        response.headers['Access-Control-Allow-Origin'] = origin
+        # 从配置中获取允许的 Origin 列表（与主站 CORS 策略保持一致）
+        from ..config import ALLOWED_ORIGINS
+        allowed = [o.strip() for o in ALLOWED_ORIGINS.split(',') if o.strip()]
+        # ALLOWED_ORIGINS='*' 时反射请求 Origin（开发模式）；否则严格白名单
+        if ALLOWED_ORIGINS == '*' or origin in allowed:
+            response.headers['Access-Control-Allow-Origin'] = origin
     response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
@@ -402,7 +407,10 @@ def _handle_admin_options():
     response = make_response()
     origin = request.headers.get('Origin')
     if origin:
-        response.headers['Access-Control-Allow-Origin'] = origin
+        from ..config import ALLOWED_ORIGINS
+        allowed = [o.strip() for o in ALLOWED_ORIGINS.split(',') if o.strip()]
+        if ALLOWED_ORIGINS == '*' or origin in allowed:
+            response.headers['Access-Control-Allow-Origin'] = origin
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     response.headers['Access-Control-Allow-Credentials'] = 'true'

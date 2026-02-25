@@ -8,6 +8,53 @@ const LEGACY_IS_GUEST_KEY = 'is_guest'
 
 const nowIso = () => new Date().toISOString()
 
+// ── Token 混淆编解码（base64 + 字符位移，防止明文存储）──────────────────────
+const SHIFT = 3
+
+/**
+ * 编码：base64 后对每个字符做位移混淆
+ * 存储格式：'ob:' 前缀 + 混淆字符串
+ */
+const obfuscateToken = (token: string): string => {
+  if (!token) return token
+  try {
+    const b64 = btoa(unescape(encodeURIComponent(token)))
+    const shifted = b64.split('').map(c => {
+      const code = c.charCodeAt(0)
+      // 仅对 ASCII 可打印字符做位移
+      if (code >= 33 && code <= 126) {
+        return String.fromCharCode(((code - 33 + SHIFT) % 94) + 33)
+      }
+      return c
+    }).join('')
+    return `ob:${shifted}`
+  } catch {
+    return token
+  }
+}
+
+/**
+ * 解码：检测前缀，有则还原，无则视为旧格式直接返回（自动迁移）
+ */
+const deobfuscateToken = (stored: string): string => {
+  if (!stored) return stored
+  // 旧格式（无前缀）直接返回
+  if (!stored.startsWith('ob:')) return stored
+  try {
+    const shifted = stored.slice(3)
+    const b64 = shifted.split('').map(c => {
+      const code = c.charCodeAt(0)
+      if (code >= 33 && code <= 126) {
+        return String.fromCharCode(((code - 33 - SHIFT + 94) % 94) + 33)
+      }
+      return c
+    }).join('')
+    return decodeURIComponent(escape(atob(b64)))
+  } catch {
+    return stored
+  }
+}
+
 export const maskToken = (token: string) => {
   const t = (token || '').trim()
   if (t.length <= 12) return t
@@ -75,7 +122,15 @@ export const useTokenStore = defineStore('token', {
   actions: {
     persistVault() {
       if (!import.meta.client) return
-      localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(this.vault))
+      // 存储前对每个 token 做混淆处理
+      const vaultToStore = {
+        ...this.vault,
+        items: this.vault.items.map(i => ({
+          ...i,
+          token: obfuscateToken(i.token)
+        }))
+      }
+      localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(vaultToStore))
     },
 
     loadVault() {
@@ -87,7 +142,8 @@ export const useTokenStore = defineStore('token', {
           .filter(i => i && typeof i.id === 'string' && typeof i.token === 'string')
           .map(i => ({
             id: i.id,
-            token: (i.token || '').trim(),
+            // 读取时解码（兼容旧格式明文 token）
+            token: deobfuscateToken((i.token || '').trim()),
             albumName: typeof i.albumName === 'string' ? i.albumName : '',
             addedAt: i.addedAt || nowIso(),
             lastSelectedAt: i.lastSelectedAt,
@@ -173,7 +229,8 @@ export const useTokenStore = defineStore('token', {
       const t = (token || '').trim()
       if (!t) throw new Error('Token不能为空')
 
-      // 先验证 Token 有效性，无效则不添加
+      // 先验证 Token 有效性，无效则不添加；复用验证结果避免后续重复请求
+      let verifiedTokenInfo: any = null
       if (opts?.verify) {
         const config = useRuntimeConfig()
         const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/verify`, {
@@ -185,6 +242,8 @@ export const useTokenStore = defineStore('token', {
           err.tokenInvalid = true
           throw err
         }
+        // 保存验证结果，后续直接写入缓存，无需再次请求
+        verifiedTokenInfo = response.data
       }
 
       const existing = this.vault.items.find(i => i.token === t)
@@ -194,9 +253,14 @@ export const useTokenStore = defineStore('token', {
           this.vault.activeId = existing.id
           existing.lastSelectedAt = nowIso()
         }
+        // 复用验证结果写入缓存，避免第二次 API 调用
+        if (verifiedTokenInfo) {
+          existing.tokenInfo = verifiedTokenInfo
+          existing.lastVerifiedAt = nowIso()
+          this.tokenInfo = verifiedTokenInfo
+        }
         this.persistVault()
         this.syncActiveFromVault()
-        if (opts?.verify) await this.verifyToken()
         return existing.id
       }
 
@@ -206,6 +270,11 @@ export const useTokenStore = defineStore('token', {
         albumName: typeof opts?.albumName === 'string' ? opts.albumName.slice(0, 50) : '',
         addedAt: nowIso()
       }
+      // 复用验证结果写入缓存，避免第二次 API 调用
+      if (verifiedTokenInfo) {
+        item.tokenInfo = verifiedTokenInfo
+        item.lastVerifiedAt = nowIso()
+      }
       this.vault.items.unshift(item)
       if (opts?.makeActive !== false) {
         this.vault.activeId = item.id
@@ -213,8 +282,9 @@ export const useTokenStore = defineStore('token', {
       }
       this.persistVault()
       this.syncActiveFromVault()
-      // 已在上面验证过，这里同步 tokenInfo
-      if (opts?.verify) await this.verifyToken()
+      if (verifiedTokenInfo) {
+        this.tokenInfo = verifiedTokenInfo
+      }
       return item.id
     },
 
@@ -277,9 +347,9 @@ export const useTokenStore = defineStore('token', {
         })
 
         if (response.success && response.valid) {
-          this.tokenInfo = response.data
+          this.tokenInfo = response.data ?? null
           const active = this.vault.items.find(i => i.id === this.vault.activeId)
-          if (active) {
+          if (active && response.data) {
             active.tokenInfo = response.data
             active.lastVerifiedAt = nowIso()
             this.persistVault()
@@ -359,7 +429,7 @@ export const useTokenStore = defineStore('token', {
           params: { page, limit, _t: Date.now() }
         })
 
-        if (response.success) {
+        if (response.success && response.data) {
           if (response.data.total_uploads !== undefined) {
             // 更新当前 tokenInfo
             if (this.tokenInfo) {
