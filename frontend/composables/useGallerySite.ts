@@ -15,6 +15,7 @@ export interface GallerySiteItem {
   image_count: number
   cover_image?: string
   cover_url?: string
+  share_url?: string | null
   created_at: string
   updated_at: string
 }

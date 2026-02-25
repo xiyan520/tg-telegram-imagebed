@@ -385,15 +385,24 @@ def get_domain(request) -> str:
     except Exception:
         pass
 
-    # 尝试从活跃图片域名中获取（任意一个即可）
+    # 尝试从非画集的活跃域名中获取（优先 default 类型，避免返回 image 域名）
     try:
-        from .database import get_active_image_domains
+        from .database.connection import get_connection
         from .database.domains import build_domain_url
-        img_domains = get_active_image_domains()
-        if img_domains:
-            d = img_domains[0]
-            use_https = bool(d.get('use_https', 1))
-            return build_domain_url(d['domain'], d.get('port'), use_https)
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT domain, use_https, port FROM custom_domains
+                WHERE domain_type != 'gallery' AND is_active = 1
+                ORDER BY
+                    CASE domain_type WHEN 'default' THEN 0 ELSE 1 END,
+                    is_default DESC, sort_order ASC
+                LIMIT 1
+            ''')
+            row = cursor.fetchone()
+            if row:
+                use_https = bool(row['use_https'])
+                return build_domain_url(row['domain'], row['port'], use_https)
     except Exception:
         pass
 

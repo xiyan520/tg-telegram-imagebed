@@ -18,7 +18,7 @@
               </div>
             </div>
             <span class="text-lg font-bold font-serif bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-400 dark:to-orange-400 bg-clip-text text-transparent">
-              画集管理后台
+              {{ siteName }} · 管理
             </span>
           </NuxtLink>
 
@@ -114,7 +114,7 @@
     <footer class="relative border-t border-stone-200/60 dark:border-stone-700/60" style="z-index: 10;">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <p class="text-center text-xs text-stone-400 dark:text-stone-500">
-          画集管理后台
+          {{ siteName }} · 管理
         </p>
       </div>
     </footer>
@@ -127,6 +127,15 @@ const mobileMenuOpen = ref(false)
 const router = useRouter()
 
 const adminUsername = useState<string>('gallery-site-admin-username', () => '')
+
+// 从缓存的站点模式中获取画集站点名称
+const siteMode = useState<{ mode: string; site_name?: string } | null>('gallery-site-mode', () => null)
+const siteName = computed(() => siteMode.value?.site_name || '画集')
+
+// 画集管理后台独立的浏览器标题，不跟随主站
+useHead(computed(() => ({
+  title: `${siteName.value} · 管理`,
+})))
 
 const navLinkClass = 'px-4 py-2 text-sm font-medium text-stone-600 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-colors hover:bg-amber-50 dark:hover:bg-amber-900/20'
 

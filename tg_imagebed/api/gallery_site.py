@@ -80,22 +80,20 @@ def site_mode_api():
         # 检查画集站点总开关
         gallery_enabled = str(get_system_setting('gallery_site_enabled') or '1') == '1'
 
-        if gallery_enabled and is_gallery_domain(host):
-            site_name = get_system_setting('gallery_site_name') or '画集'
-            site_description = get_system_setting('gallery_site_description') or '精选图片画集'
-            response = jsonify({
-                'success': True,
-                'data': {
-                    'mode': 'gallery',
-                    'site_name': site_name,
-                    'site_description': site_description,
-                }
-            })
-        else:
-            response = jsonify({
-                'success': True,
-                'data': {'mode': 'default'}
-            })
+        # 始终返回画集站点信息，供 /gallery-site/ 页面使用（不依赖域名模式）
+        site_name = get_system_setting('gallery_site_name') or '画集'
+        site_description = get_system_setting('gallery_site_description') or '精选图片画集'
+
+        mode = 'gallery' if (gallery_enabled and is_gallery_domain(host)) else 'default'
+
+        response = jsonify({
+            'success': True,
+            'data': {
+                'mode': mode,
+                'site_name': site_name,
+                'site_description': site_description,
+            }
+        })
 
         return _set_public_cors_headers(add_cache_headers(response, 'no-cache'))
 
@@ -169,7 +167,8 @@ def gallery_site_detail(gallery_id):
 
             # 获取画集信息（仅公开且已分享）
             cursor.execute('''
-                SELECT g.id, g.name, g.description, g.created_at, g.updated_at,
+                SELECT g.id, g.name, g.description, g.share_token,
+                    g.created_at, g.updated_at,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count
                 FROM galleries g
                 WHERE g.id = ? AND g.share_enabled = 1 AND g.access_mode = 'public'
@@ -180,6 +179,13 @@ def gallery_site_detail(gallery_id):
                 return _set_public_cors_headers(response), 404
 
             gallery = dict(gallery_row)
+
+            # 构建分享链接
+            share_token = gallery.pop('share_token', None)
+            if share_token:
+                gallery['share_url'] = f"{_get_main_site_url(request)}/g/{share_token}"
+            else:
+                gallery['share_url'] = None
 
             # 获取图片列表
             offset = (page - 1) * per_page

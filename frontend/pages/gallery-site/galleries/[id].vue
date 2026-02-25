@@ -29,9 +29,17 @@
         <p v-if="gallery.description" class="mt-2 text-stone-500 dark:text-stone-400">
           {{ gallery.description }}
         </p>
-        <p class="mt-2 text-sm text-stone-400 dark:text-stone-500">
-          共 {{ gallery.image_count }} 张图片
-        </p>
+        <div class="mt-2 flex items-center gap-3 text-sm text-stone-400 dark:text-stone-500">
+          <span>共 {{ gallery.image_count }} 张图片</span>
+          <button
+            v-if="gallery.share_url"
+            class="inline-flex items-center gap-1 text-stone-400 dark:text-stone-500 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+            @click="copyShareUrl"
+          >
+            <UIcon :name="copied ? 'heroicons:check' : 'heroicons:share'" class="w-3.5 h-3.5" />
+            <span>{{ copied ? '已复制' : '分享' }}</span>
+          </button>
+        </div>
       </div>
 
       <!-- 图片网格 -->
@@ -172,6 +180,32 @@ const totalImages = ref(0)
 const imagesPerPage = 20
 const totalPages = computed(() => Math.ceil(totalImages.value / imagesPerPage))
 
+// 复制分享地址
+const copied = ref(false)
+let copyTimer: ReturnType<typeof setTimeout> | null = null
+
+const copyShareUrl = async () => {
+  const url = gallery.value?.share_url
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+    copied.value = true
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copied.value = false }, 2000)
+  } catch {
+    // fallback
+    const input = document.createElement('input')
+    input.value = url
+    document.body.appendChild(input)
+    input.select()
+    document.execCommand('copy')
+    document.body.removeChild(input)
+    copied.value = true
+    if (copyTimer) clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copied.value = false }, 2000)
+  }
+}
+
 // 灯箱状态
 const lightboxOpen = ref(false)
 const lightboxIndex = ref(0)
@@ -231,6 +265,9 @@ watch(currentPage, () => {
 onMounted(() => loadGallery())
 
 // 组件卸载时确保恢复 body 滚动
-onUnmounted(() => { document.body.style.overflow = '' })
+onUnmounted(() => {
+  document.body.style.overflow = ''
+  if (copyTimer) clearTimeout(copyTimer)
+})
 </script>
 

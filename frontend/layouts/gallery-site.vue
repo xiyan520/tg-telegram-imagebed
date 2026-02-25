@@ -120,8 +120,13 @@ const colorMode = useColorMode()
 const mobileMenuOpen = ref(false)
 
 // 从缓存的站点模式中获取站点名称
-const siteMode = useState<{ mode: string; site_name?: string } | null>('gallery-site-mode', () => null)
+const siteMode = useState<{ mode: string; site_name?: string; site_description?: string } | null>('gallery-site-mode', () => null)
 const siteName = computed(() => siteMode.value?.site_name || '画集')
+
+// 画集站点独立的浏览器标题，不跟随主站
+useHead(computed(() => ({
+  title: siteName.value,
+})))
 
 /** 切换深色/浅色模式 */
 const toggleColorMode = () => {
