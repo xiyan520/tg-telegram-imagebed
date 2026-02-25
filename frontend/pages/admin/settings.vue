@@ -59,14 +59,17 @@
                   class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700"
                 >
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}</span>
+                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}{{ d.port ? ':' + d.port : '' }}</span>
                     <UBadge color="amber" variant="solid" size="xs">默认</UBadge>
                     <UBadge :color="d.use_https ? 'green' : 'gray'" variant="subtle" size="xs">
                       {{ d.use_https ? 'HTTPS' : 'HTTP' }}
                     </UBadge>
                     <span v-if="d.remark" class="text-xs text-stone-400 dark:text-stone-500">{{ d.remark }}</span>
                   </div>
-                  <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" @click="confirmDeleteDomain(d)" />
+                  <div class="flex items-center gap-1">
+                    <UButton icon="heroicons:pencil-square" color="blue" variant="ghost" size="xs" title="编辑" @click="openEditDomainModal(d)" />
+                    <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" @click="confirmDeleteDomain(d)" />
+                  </div>
                 </div>
               </div>
               <div v-else class="p-3 bg-stone-50 dark:bg-neutral-800 rounded-xl text-sm text-stone-500 dark:text-stone-400">
@@ -84,7 +87,7 @@
                   class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700"
                 >
                   <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}</span>
+                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}{{ d.port ? ':' + d.port : '' }}</span>
                     <UBadge :color="d.is_active ? 'green' : 'gray'" variant="subtle" size="xs">
                       {{ d.is_active ? '活跃' : '停用' }}
                     </UBadge>
@@ -110,6 +113,7 @@
                       title="设为默认"
                       @click="handleSetDefault(d)"
                     />
+                    <UButton icon="heroicons:pencil-square" color="blue" variant="ghost" size="xs" title="编辑" @click="openEditDomainModal(d)" />
                     <UButton
                       icon="heroicons:trash"
                       color="red"
@@ -135,7 +139,7 @@
                   class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700"
                 >
                   <div class="flex items-center gap-2 flex-wrap">
-                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}</span>
+                    <span class="text-sm font-medium text-stone-900 dark:text-white">{{ d.domain }}{{ d.port ? ':' + d.port : '' }}</span>
                     <UBadge color="violet" variant="subtle" size="xs">画集</UBadge>
                     <UBadge :color="d.is_active ? 'green' : 'gray'" variant="subtle" size="xs">
                       {{ d.is_active ? '活跃' : '停用' }}
@@ -154,6 +158,7 @@
                       :title="d.is_active ? '停用' : '启用'"
                       @click="toggleDomainActive(d)"
                     />
+                    <UButton icon="heroicons:pencil-square" color="blue" variant="ghost" size="xs" title="编辑" @click="openEditDomainModal(d)" />
                     <UButton
                       icon="heroicons:trash"
                       color="red"
@@ -293,12 +298,12 @@
         </div>
       </UCard>
 
-      <!-- 添加域名弹窗 -->
+      <!-- 添加/编辑域名弹窗 -->
       <UModal v-model="showDomainModal">
         <UCard>
           <template #header>
             <div class="flex items-center justify-between">
-              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">添加域名</h3>
+              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">{{ isEditMode ? '编辑域名' : '添加域名' }}</h3>
               <UButton icon="heroicons:x-mark" color="gray" variant="ghost" size="xs" @click="showDomainModal = false" />
             </div>
           </template>
@@ -306,6 +311,16 @@
           <div class="space-y-4">
             <UFormGroup label="域名">
               <UInput v-model="domainForm.domain" placeholder="例如: img.example.com" />
+            </UFormGroup>
+
+            <UFormGroup label="端口" help="留空表示不指定端口，访问时不带端口号">
+              <UInput
+                v-model.number="domainForm.port"
+                type="number"
+                placeholder="例如: 8080（留空则不使用）"
+                :min="1"
+                :max="65535"
+              />
             </UFormGroup>
 
             <UFormGroup label="类型">
@@ -332,7 +347,7 @@
           <template #footer>
             <div class="flex justify-end gap-2">
               <UButton color="gray" variant="outline" @click="showDomainModal = false">取消</UButton>
-              <UButton color="primary" :loading="domainSaving" @click="handleAddDomain">添加</UButton>
+              <UButton color="primary" :loading="domainSaving" @click="handleSaveDomain">{{ isEditMode ? '保存' : '添加' }}</UButton>
             </div>
           </template>
         </UCard>
@@ -1301,9 +1316,12 @@ const domainDeleting = ref(false)
 const showDomainModal = ref(false)
 const showDeleteDomainModal = ref(false)
 const deletingDomain = ref<DomainItem | null>(null)
+const isEditMode = ref(false)
+const editingDomainId = ref<number | null>(null)
 
 const domainForm = ref({
   domain: '',
+  port: null as number | null,
   domain_type: 'image',
   use_https: true,
   remark: ''
@@ -1414,28 +1432,68 @@ const loadDomains = async () => {
 
 // 打开添加域名弹窗
 const openAddDomainModal = () => {
-  domainForm.value = { domain: '', domain_type: 'image', use_https: true, remark: '' }
+  isEditMode.value = false
+  editingDomainId.value = null
+  domainForm.value = { domain: '', port: null, domain_type: 'image', use_https: true, remark: '' }
   showDomainModal.value = true
 }
 
-// 添加域名
-const handleAddDomain = async () => {
+// 打开编辑域名弹窗
+const openEditDomainModal = (d: DomainItem) => {
+  isEditMode.value = true
+  editingDomainId.value = d.id
+  domainForm.value = {
+    domain: d.domain,
+    port: d.port || null,
+    domain_type: d.domain_type,
+    use_https: !!d.use_https,
+    remark: d.remark || ''
+  }
+  showDomainModal.value = true
+}
+
+// 保存域名（统一处理添加和编辑）
+const handleSaveDomain = async () => {
   if (!domainForm.value.domain.trim()) {
     notification.error('错误', '请输入域名')
     return
   }
   domainSaving.value = true
   try {
-    await domainsApi.addDomain(domainForm.value)
-    notification.success('添加成功', `域名 ${domainForm.value.domain} 已添加`)
+    if (isEditMode.value && editingDomainId.value) {
+      await domainsApi.updateDomain(editingDomainId.value, {
+        domain: domainForm.value.domain,
+        port: domainForm.value.port,
+        domain_type: domainForm.value.domain_type,
+        use_https: domainForm.value.use_https,
+        remark: domainForm.value.remark,
+      })
+      notification.success('更新成功', `域名 ${domainForm.value.domain} 已更新`)
+    } else {
+      await domainsApi.addDomain({
+        domain: domainForm.value.domain,
+        port: domainForm.value.port,
+        domain_type: domainForm.value.domain_type,
+        use_https: domainForm.value.use_https,
+        remark: domainForm.value.remark,
+      })
+      notification.success('添加成功', `域名 ${domainForm.value.domain} 已添加`)
+    }
     showDomainModal.value = false
     await loadDomains()
   } catch (e: any) {
-    notification.error('添加失败', e.message || '无法添加域名')
+    notification.error(isEditMode.value ? '更新失败' : '添加失败', e.message || '操作失败')
   } finally {
     domainSaving.value = false
   }
 }
+
+// 端口输入处理：空值转为 null
+watch(() => domainForm.value.port, (val) => {
+  if (val === 0 || val === '' || isNaN(val as any)) {
+    domainForm.value.port = null
+  }
+})
 
 // 切换域名启用/停用
 const toggleDomainActive = async (d: DomainItem) => {

@@ -7,6 +7,7 @@
 export interface DomainItem {
   id: number
   domain: string
+  port: number | null  // 端口号，null 表示不指定端口
   domain_type: 'default' | 'image' | 'gallery'
   is_active: number | boolean
   use_https: number | boolean
@@ -19,6 +20,7 @@ export interface DomainItem {
 
 export interface AddDomainData {
   domain: string
+  port?: number | null  // 端口号，null 或不传表示不指定端口
   domain_type: string
   use_https?: boolean
   remark?: string
@@ -49,7 +51,7 @@ export function useDomainsApi() {
   }
 
   // 更新域名
-  const updateDomain = async (id: number, data: Partial<AddDomainData & { is_active: boolean }>) => {
+  const updateDomain = async (id: number, data: Partial<AddDomainData & { is_active: boolean; port: number | null }>) => {
     const res = await $fetch<any>(`${apiBase}/api/admin/domains/${id}`, {
       method: 'PUT',
       credentials: 'include',

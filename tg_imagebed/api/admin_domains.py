@@ -14,7 +14,7 @@ from ..database import (
     add_domain, update_domain, delete_domain, set_default_domain,
     get_active_gallery_domains, update_system_setting,
 )
-from ..database.domains import _normalize_domain
+from ..database.domains import _normalize_domain, build_domain_url
 from .. import admin_module
 
 
@@ -66,7 +66,20 @@ def admin_domains_api():
         use_https = 1 if data.get('use_https', True) else 0
         remark = str(data.get('remark', '')).strip()[:200]
 
-        domain_id = add_domain(domain, domain_type, use_https, remark)
+        # 解析端口（可选，整数或 null）
+        raw_port = data.get('port')
+        port = None
+        if raw_port is not None:
+            try:
+                port = int(raw_port)
+                if port < 1 or port > 65535:
+                    response = jsonify({'success': False, 'error': '端口号必须在 1-65535 之间'})
+                    return _set_admin_cors_headers(response), 400
+            except (TypeError, ValueError):
+                response = jsonify({'success': False, 'error': '端口号必须为整数'})
+                return _set_admin_cors_headers(response), 400
+
+        domain_id = add_domain(domain, domain_type, use_https, remark, port=port)
         if not domain_id:
             response = jsonify({'success': False, 'error': '添加域名失败，该域名可能已存在'})
             return _set_admin_cors_headers(response), 400
@@ -149,6 +162,22 @@ def admin_domain_detail(domain_id):
                 pass
         if 'remark' in data:
             kwargs['remark'] = str(data['remark']).strip()[:200]
+
+        # 端口：传 null 表示清除端口，传整数表示设置端口
+        if 'port' in data:
+            raw_port = data['port']
+            if raw_port is None:
+                kwargs['port'] = None
+            else:
+                try:
+                    port_val = int(raw_port)
+                    if port_val < 1 or port_val > 65535:
+                        response = jsonify({'success': False, 'error': '端口号必须在 1-65535 之间'})
+                        return _set_admin_cors_headers(response), 400
+                    kwargs['port'] = port_val
+                except (TypeError, ValueError):
+                    response = jsonify({'success': False, 'error': '端口号必须为整数'})
+                    return _set_admin_cors_headers(response), 400
 
         if not update_domain(domain_id, **kwargs):
             response = jsonify({'success': False, 'error': '更新失败或域名不存在'})
@@ -273,10 +302,12 @@ def public_domains_api():
         domains = get_active_image_domains()
         result = []
         for d in domains:
-            scheme = 'https' if d.get('use_https', 1) else 'http'
+            use_https = bool(d.get('use_https', 1))
+            url = build_domain_url(d['domain'], d.get('port'), use_https)
             result.append({
                 'domain': d['domain'],
-                'url': f"{scheme}://{d['domain']}",
+                'url': url,
+                'port': d.get('port'),
                 'is_default': bool(d.get('is_default', 0)),
                 'remark': d.get('remark', ''),
             })
@@ -321,14 +352,16 @@ def admin_gallery_site_entry():
 
         # 返回第一个活跃画集域名
         d = gallery_domains[0]
-        scheme = 'https' if d.get('use_https', 1) else 'http'
+        use_https = bool(d.get('use_https', 1))
         domain = d['domain']
+        url = build_domain_url(domain, d.get('port'), use_https)
         response = jsonify({
             'success': True,
             'data': {
                 'available': True,
                 'domain': domain,
-                'url': f"{scheme}://{domain}",
+                'url': url,
+                'port': d.get('port'),
                 'remark': d.get('remark', ''),
             }
         })

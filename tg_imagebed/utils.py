@@ -377,21 +377,23 @@ def get_domain(request) -> str:
     # 尝试从 custom_domains 表获取默认域名
     try:
         from .database import get_default_domain
+        from .database.domains import build_domain_url
         default = get_default_domain()
         if default and default.get('domain'):
-            scheme = 'https' if default.get('use_https', 1) else 'http'
-            return f"{scheme}://{default['domain']}"
+            use_https = bool(default.get('use_https', 1))
+            return build_domain_url(default['domain'], default.get('port'), use_https)
     except Exception:
         pass
 
     # 尝试从活跃图片域名中获取（任意一个即可）
     try:
         from .database import get_active_image_domains
+        from .database.domains import build_domain_url
         img_domains = get_active_image_domains()
         if img_domains:
             d = img_domains[0]
-            scheme = 'https' if d.get('use_https', 1) else 'http'
-            return f"{scheme}://{d['domain']}"
+            use_https = bool(d.get('use_https', 1))
+            return build_domain_url(d['domain'], d.get('port'), use_https)
     except Exception:
         pass
 
@@ -466,28 +468,30 @@ def get_image_domain(request=None, scene: str = '') -> str:
         # 2. 尝试 default 类型域名
         try:
             from .database import get_default_domain
+            from .database.domains import build_domain_url
             default = get_default_domain()
             if default and default.get('domain'):
-                scheme = 'https' if default.get('use_https', 1) else 'http'
-                return f"{scheme}://{default['domain']}"
+                use_https = bool(default.get('use_https', 1))
+                return build_domain_url(default['domain'], default.get('port'), use_https)
         except Exception:
             pass
 
         # 3. 尝试非 gallery 类型的活跃域名
         try:
             from .database.connection import get_connection
+            from .database.domains import build_domain_url as _build_url
             with get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT domain, use_https FROM custom_domains
+                    SELECT domain, use_https, port FROM custom_domains
                     WHERE domain_type != 'gallery' AND is_active = 1
                     ORDER BY is_default DESC, sort_order ASC
                     LIMIT 1
                 ''')
                 row = cursor.fetchone()
                 if row:
-                    scheme = 'https' if row['use_https'] else 'http'
-                    return f"{scheme}://{row['domain']}"
+                    use_https = bool(row['use_https'])
+                    return _build_url(row['domain'], row['port'], use_https)
         except Exception:
             pass
 
@@ -511,11 +515,12 @@ def get_image_domain(request=None, scene: str = '') -> str:
         if target_domain:
             active_domain_set = {d['domain'] for d in domains}
             if target_domain in active_domain_set:
-                # 找到匹配的域名记录，获取 scheme
+                # 找到匹配的域名记录，获取 scheme 和 port
                 for d in domains:
                     if d['domain'] == target_domain:
-                        scheme = 'https' if d.get('use_https', 1) else 'http'
-                        base = f"{scheme}://{target_domain}"
+                        from .database.domains import build_domain_url
+                        use_https = bool(d.get('use_https', 1))
+                        base = build_domain_url(target_domain, d.get('port'), use_https)
                         # 处理反向代理子路径前缀
                         if request:
                             prefix = request.headers.get('X-Forwarded-Prefix', '')
@@ -524,9 +529,10 @@ def get_image_domain(request=None, scene: str = '') -> str:
                         return base
 
     # 降级：随机选择
+    from .database.domains import build_domain_url
     chosen = _random.choice(domains)
-    scheme = 'https' if chosen.get('use_https', 1) else 'http'
-    base = f"{scheme}://{chosen['domain']}"
+    use_https = bool(chosen.get('use_https', 1))
+    base = build_domain_url(chosen['domain'], chosen.get('port'), use_https)
     # 处理反向代理子路径前缀
     if request:
         prefix = request.headers.get('X-Forwarded-Prefix', '')

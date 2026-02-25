@@ -19,7 +19,7 @@ from ..database import (
     is_gallery_domain,
 )
 from ..database.connection import get_connection
-from ..database.domains import get_default_domain, get_active_gallery_domains
+from ..database.domains import get_default_domain, get_active_gallery_domains, build_domain_url
 from .. import admin_module
 from ..database.admin_galleries import admin_get_gallery, admin_delete_gallery, admin_get_gallery_images, admin_update_gallery_share, admin_add_images_to_gallery, admin_remove_images_from_gallery, admin_set_gallery_cover
 from ..database.galleries import update_gallery_access, list_gallery_token_access, grant_gallery_token_access, revoke_gallery_token_access
@@ -302,23 +302,29 @@ def _get_main_site_url(request):
     # 1. 使用 default 域名
     default_domain = get_default_domain()
     if default_domain:
-        scheme = 'https' if default_domain.get('use_https') else 'http'
-        return f"{scheme}://{default_domain['domain']}"
+        return build_domain_url(
+            default_domain['domain'],
+            default_domain.get('port'),
+            bool(default_domain.get('use_https', 1))
+        )
 
     # 2. 尝试获取非 gallery 类型的活跃域名
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT domain, use_https FROM custom_domains
+                SELECT domain, use_https, port FROM custom_domains
                 WHERE domain_type != 'gallery' AND is_active = 1
                 ORDER BY is_default DESC, sort_order ASC
                 LIMIT 1
             ''')
             row = cursor.fetchone()
             if row:
-                scheme = 'https' if row['use_https'] else 'http'
-                return f"{scheme}://{row['domain']}"
+                return build_domain_url(
+                    row['domain'],
+                    row['port'],
+                    bool(row['use_https'])
+                )
     except Exception:
         pass
 

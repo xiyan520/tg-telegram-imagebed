@@ -10,17 +10,32 @@ from .connection import get_connection, db_retry
 
 
 def _normalize_domain(value: str) -> str:
-    """标准化域名（去协议、去路径、去端口、拒绝@）"""
+    """标准化域名（去协议、去路径、去端口、转小写，拒绝@）"""
     raw = str(value or '').strip()
     if not raw:
         return ''
     if '://' in raw:
         parsed = urlsplit(raw)
-        raw = (parsed.netloc or '').strip()
+        raw = (parsed.hostname or '').strip()
+        # 如果 hostname 为空，尝试 netloc
+        if not raw:
+            raw = (parsed.netloc or '').strip()
+    # 去掉路径、查询参数、锚点
     raw = raw.split('/')[0].split('?')[0].split('#')[0].strip()
     if '@' in raw:
         return ''
-    return raw
+    # 去掉端口号
+    if ':' in raw:
+        raw = raw.split(':')[0]
+    return raw.lower()
+
+
+def build_domain_url(domain: str, port: int | None = None, use_https: bool = True) -> str:
+    """根据域名、端口、协议构建完整 URL"""
+    scheme = 'https' if use_https else 'http'
+    if port is not None:
+        return f"{scheme}://{domain}:{port}"
+    return f"{scheme}://{domain}"
 
 
 # ===================== 域名 CRUD =====================
@@ -32,7 +47,7 @@ def get_all_domains() -> List[Dict[str, Any]]:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, domain, domain_type, use_https, is_active,
-                       is_default, sort_order, remark, created_at, updated_at
+                       is_default, sort_order, remark, port, created_at, updated_at
                 FROM custom_domains
                 ORDER BY sort_order ASC, id ASC
             ''')
@@ -50,7 +65,7 @@ def get_domains_by_type(domain_type: str) -> List[Dict[str, Any]]:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, domain, domain_type, use_https, is_active,
-                       is_default, sort_order, remark, created_at, updated_at
+                       is_default, sort_order, remark, port, created_at, updated_at
                 FROM custom_domains
                 WHERE domain_type = ?
                 ORDER BY sort_order ASC, id ASC
@@ -68,7 +83,7 @@ def get_active_image_domains() -> List[Dict[str, Any]]:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, domain, use_https, is_default, sort_order, remark
+                SELECT id, domain, use_https, is_default, sort_order, remark, port
                 FROM custom_domains
                 WHERE domain_type = 'image' AND is_active = 1
                 ORDER BY sort_order ASC, id ASC
@@ -87,7 +102,7 @@ def get_default_domain() -> Optional[Dict[str, Any]]:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, domain, domain_type, use_https, is_active,
-                       is_default, sort_order, remark
+                       is_default, sort_order, remark, port
                 FROM custom_domains
                 WHERE is_default = 1
                 LIMIT 1
@@ -101,7 +116,8 @@ def get_default_domain() -> Optional[Dict[str, Any]]:
 
 @db_retry()
 def add_domain(domain: str, domain_type: str = 'image',
-               use_https: int = 1, remark: str = '') -> Optional[int]:
+               use_https: int = 1, remark: str = '',
+               port: int | None = None) -> Optional[int]:
     """添加域名，返回 id"""
     normalized = _normalize_domain(domain)
     if not normalized:
@@ -118,11 +134,11 @@ def add_domain(domain: str, domain_type: str = 'image',
                 logger.warning(f"域名已存在: {normalized}")
                 return None
             cursor.execute('''
-                INSERT INTO custom_domains (domain, domain_type, use_https, remark)
-                VALUES (?, ?, ?, ?)
-            ''', (normalized, domain_type, use_https, remark))
+                INSERT INTO custom_domains (domain, domain_type, use_https, remark, port)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (normalized, domain_type, use_https, remark, port))
             domain_id = cursor.lastrowid
-            logger.info(f"添加域名: {normalized} (type={domain_type}, id={domain_id})")
+            logger.info(f"添加域名: {normalized} (type={domain_type}, port={port}, id={domain_id})")
             return domain_id
     except Exception as e:
         logger.error(f"添加域名失败: {e}")
@@ -134,7 +150,7 @@ def update_domain(domain_id: int, **kwargs) -> bool:
     """更新域名"""
     allowed_fields = {
         'domain', 'domain_type', 'use_https', 'is_active',
-        'is_default', 'sort_order', 'remark'
+        'is_default', 'sort_order', 'remark', 'port'
     }
     updates = {}
     for key, value in kwargs.items():
@@ -216,8 +232,8 @@ def get_random_image_domain() -> Optional[str]:
         if not domains:
             return None
         chosen = random.choice(domains)
-        scheme = 'https' if chosen.get('use_https', 1) else 'http'
-        return f"{scheme}://{chosen['domain']}"
+        use_https = bool(chosen.get('use_https', 1))
+        return build_domain_url(chosen['domain'], chosen.get('port'), use_https)
     except Exception as e:
         logger.error(f"随机获取图片域名失败: {e}")
         return None
@@ -228,15 +244,21 @@ def is_allowed_image_domain(host: str) -> bool:
     """检查 host 是否为允许的图片域名（同时允许默认域名访问图片）"""
     if not host:
         return False
+    # 提取主机名（去端口、转小写），用于匹配
+    hostname = host.split(':')[0].strip().lower()
+    if not hostname:
+        return False
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
             # 同时允许 image 类型和 default 类型的活跃域名访问图片
             # 避免开启图片域名限制后，通过主站域名访问的图片全部 403
+            # 域名字段存储纯域名（不含端口），直接匹配
             cursor.execute('''
                 SELECT COUNT(*) FROM custom_domains
-                WHERE domain = ? AND domain_type IN ('image', 'default') AND is_active = 1
-            ''', (host,))
+                WHERE domain = ?
+                  AND domain_type IN ('image', 'default') AND is_active = 1
+            ''', (hostname,))
             row = cursor.fetchone()
             return row[0] > 0 if row else False
     except Exception as e:
@@ -252,7 +274,7 @@ def get_active_gallery_domains() -> List[Dict[str, Any]]:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT id, domain, use_https, is_default, sort_order, remark
+                SELECT id, domain, use_https, is_default, sort_order, remark, port
                 FROM custom_domains
                 WHERE domain_type = 'gallery' AND is_active = 1
                 ORDER BY sort_order ASC, id ASC
@@ -268,13 +290,19 @@ def is_gallery_domain(host: str) -> bool:
     """检查 host 是否为画集域名"""
     if not host:
         return False
+    # 提取主机名（去端口、转小写），用于匹配
+    hostname = host.split(':')[0].strip().lower()
+    if not hostname:
+        return False
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
+            # 域名字段存储纯域名（不含端口），直接匹配
             cursor.execute('''
                 SELECT COUNT(*) FROM custom_domains
-                WHERE domain = ? AND domain_type = 'gallery' AND is_active = 1
-            ''', (host,))
+                WHERE domain = ?
+                  AND domain_type = 'gallery' AND is_active = 1
+            ''', (hostname,))
             row = cursor.fetchone()
             return row[0] > 0 if row else False
     except Exception as e:

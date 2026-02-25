@@ -43,7 +43,7 @@
           @click="openLightbox(idx)"
         >
           <img
-            :src="`/image/${img.encrypted_id}`"
+            :src="img.url"
             :alt="img.original_filename"
             class="w-full h-full object-cover transform group-hover:scale-[1.03] transition-transform duration-300"
             loading="lazy"
@@ -134,7 +134,7 @@
           <div class="absolute inset-0 flex items-center justify-center p-12 sm:p-16">
             <img
               v-if="currentLightboxImage"
-              :src="`/image/${currentLightboxImage.encrypted_id}`"
+              :src="currentLightboxImage.url"
               :alt="currentLightboxImage.original_filename"
               class="max-w-full max-h-full object-contain select-none"
               draggable="false"

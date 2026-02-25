@@ -490,6 +490,41 @@ def init_database(quiet: bool = False) -> None:
             except Exception as e:
                 logger.debug(f"域名迁移检查失败（可忽略）: {e}")
 
+            # 迁移：为 custom_domains 添加 port 列
+            cursor.execute("PRAGMA table_info(custom_domains)")
+            cd_columns = {row[1] for row in cursor.fetchall()}
+            if 'port' not in cd_columns:
+                logger.info("添加 port 列到 custom_domains")
+                cursor.execute('ALTER TABLE custom_domains ADD COLUMN port INTEGER')
+
+            # 迁移：标准化已有域名记录（转小写），并拆分端口到 port 列
+            try:
+                cursor.execute("SELECT id, domain, port FROM custom_domains")
+                for row in cursor.fetchall():
+                    old_val = row[1] or ''
+                    old_port = row[2]
+                    raw = old_val.strip().lower()
+                    # 如果域名中包含端口（如 example.com:8080），拆分到 port 列
+                    extracted_port = None
+                    if ':' in raw:
+                        parts = raw.split(':', 1)
+                        raw = parts[0]
+                        try:
+                            extracted_port = int(parts[1])
+                        except (ValueError, IndexError):
+                            pass
+                    # 只在域名或端口有变化时更新
+                    new_port = old_port if old_port is not None else extracted_port
+                    if raw and (raw != old_val or new_port != old_port):
+                        cursor.execute(
+                            'UPDATE custom_domains SET domain = ?, port = ? WHERE id = ?',
+                            (raw, new_port, row[0])
+                        )
+                        if not quiet:
+                            logger.info(f"标准化域名: {old_val} -> {raw}, port={new_port}")
+            except Exception as e:
+                logger.debug(f"域名标准化迁移失败（可忽略）: {e}")
+
             # 创建索引
             indexes = [
                 ('idx_file_storage_created', 'file_storage(created_at)'),
