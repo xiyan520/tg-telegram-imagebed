@@ -177,14 +177,21 @@ DEFAULT_SYSTEM_SETTINGS = {
     'gallery_site_enabled': '1',               # 画集站点总开关
     'gallery_site_images_per_page': '20',      # 画集站点每页图片数
     'gallery_sso_main_url': '',                # 画集 SSO 主站 URL（回调目标）
-    # 应用更新配置
-    'app_update_repo_url': 'https://github.com/xiyan520/tg-telegram-imagebed.git',  # 固定官方仓库
-    'app_update_branch': 'main',               # 更新分支
-    'app_update_last_status': 'idle',          # 最近更新状态
-    'app_update_last_error': '',               # 最近错误信息
-    'app_update_last_commit': '',              # 最近更新后的提交
-    'app_update_last_run_at': '',              # 最近执行时间
-    'app_update_last_duration_ms': '0',        # 最近执行耗时（ms）
+    # 应用更新配置（Release Artifact）
+    'app_update_source': 'release',            # 更新源：release
+    'app_update_release_repo': 'xiyan520/tg-telegram-imagebed',  # 固定官方仓库（owner/repo）
+    'app_update_release_asset_name': 'tg-imagebed-release.zip',  # Release 主包
+    'app_update_release_sha_name': 'tg-imagebed-release.zip.sha256',  # Release 校验文件
+    # 兼容旧配置（保留只读）
+    'app_update_repo_url': 'https://github.com/xiyan520/tg-telegram-imagebed.git',
+    'app_update_branch': 'main',
+    # 最近执行记录
+    'app_update_last_status': 'idle',
+    'app_update_last_error': '',
+    'app_update_last_version': '',
+    'app_update_last_commit': '',              # 兼容旧字段（现存储版本号）
+    'app_update_last_run_at': '',
+    'app_update_last_duration_ms': '0',
 }
 
 def init_system_settings() -> None:

@@ -1167,7 +1167,7 @@
         <AdminSettingsSectionCard
             :id="sectionDomId('about_update')"
             title="关于与更新"
-            description="版本信息与 GitHub 热更新"
+            description="版本信息与 Release 热更新"
             icon="heroicons:arrow-path"
             :dirty="Boolean(dirtyMap.about_update)"
             :saving="Boolean(sectionSaving.about_update)"
@@ -1204,13 +1204,13 @@
             <p class="mt-1 text-base font-semibold text-stone-900 dark:text-white">{{ updateInfo.app_version || '--' }}</p>
           </div>
           <div class="rounded-xl border border-stone-200/70 bg-white/80 p-3 dark:border-neutral-700/70 dark:bg-neutral-900/70">
-            <p class="text-xs uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400">当前提交</p>
-            <p class="mt-1 text-base font-semibold text-stone-900 dark:text-white">{{ updateInfo.current_commit || settings.app_update_last_commit || '--' }}</p>
+            <p class="text-xs uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400">当前版本</p>
+            <p class="mt-1 text-base font-semibold text-stone-900 dark:text-white">{{ updateInfo.current_version || settings.app_update_last_version || settings.app_update_last_commit || '--' }}</p>
           </div>
           <div class="rounded-xl border border-stone-200/70 bg-white/80 p-3 dark:border-neutral-700/70 dark:bg-neutral-900/70">
-            <p class="text-xs uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400">仓库状态</p>
+            <p class="text-xs uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400">更新模式</p>
             <p class="mt-1 text-base font-semibold text-stone-900 dark:text-white">
-              {{ updateInfo.is_git_repo ? (updateInfo.repo_clean ? '可更新' : '有未提交改动') : '非源码模式' }}
+              {{ updateInfo.update_source === 'release' ? 'Release Artifact' : (updateInfo.update_source || '--') }}
             </p>
           </div>
           <div class="rounded-xl border border-stone-200/70 bg-white/80 p-3 dark:border-neutral-700/70 dark:bg-neutral-900/70">
@@ -1224,10 +1224,10 @@
         <div class="mt-4 rounded-xl border border-stone-200/80 bg-stone-50/70 p-3 dark:border-neutral-700/80 dark:bg-neutral-800/60">
           <p class="text-sm font-medium text-stone-900 dark:text-white">环境检查</p>
           <div class="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-            <div :class="envBadgeClass(updateInfo.git_available)">git: {{ updateInfo.git_available ? 'OK' : '缺失' }}</div>
+            <div :class="envBadgeClass(updateInfo.release_supported)">release: {{ updateInfo.release_supported ? 'OK' : '不可用' }}</div>
             <div :class="envBadgeClass(updateInfo.pip_available)">pip: {{ updateInfo.pip_available ? 'OK' : '缺失' }}</div>
-            <div :class="envBadgeClass(updateInfo.node_available)">node: {{ updateInfo.node_available ? 'OK' : '缺失' }}</div>
-            <div :class="envBadgeClass(updateInfo.npm_available)">npm: {{ updateInfo.npm_available ? 'OK' : '缺失' }}</div>
+            <div :class="envBadgeClass(updateCheck.asset_found)">asset: {{ updateCheck.asset_found ? 'OK' : '未检查/缺失' }}</div>
+            <div :class="envBadgeClass(updateCheck.sha_found)">sha256: {{ updateCheck.sha_found ? 'OK' : '未检查/缺失' }}</div>
           </div>
         </div>
       </UCard>
@@ -1239,22 +1239,23 @@
               <UIcon name="heroicons:cloud-arrow-down" class="w-5 h-5 text-white" />
             </div>
             <div>
-              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">热更新配置</h3>
-              <p class="text-xs text-stone-500 dark:text-stone-400">固定官方仓库，仅允许 main/master 分支</p>
+              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">Release 更新配置</h3>
+              <p class="text-xs text-stone-500 dark:text-stone-400">固定官方仓库与资产名，使用校验文件保证完整性</p>
             </div>
           </div>
         </template>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <UFormGroup label="GitHub 仓库（固定）">
-            <UInput :model-value="settings.app_update_repo_url" disabled />
+          <UFormGroup label="更新源（固定）">
+            <UInput :model-value="settings.app_update_source" disabled />
           </UFormGroup>
-          <UFormGroup label="更新分支">
-            <USelect
-              v-model="settings.app_update_branch"
-              :options="updateBranchOptions"
-              option-attribute="label"
-              value-attribute="value"
-            />
+          <UFormGroup label="Release 仓库（固定）">
+            <UInput :model-value="settings.app_update_release_repo" disabled />
+          </UFormGroup>
+          <UFormGroup label="更新包文件名（固定）">
+            <UInput :model-value="settings.app_update_release_asset_name" disabled />
+          </UFormGroup>
+          <UFormGroup label="校验文件名（固定）">
+            <UInput :model-value="settings.app_update_release_sha_name" disabled />
           </UFormGroup>
         </div>
       </UCard>
@@ -1268,7 +1269,7 @@
               </div>
               <div>
                 <h3 class="text-lg font-semibold text-stone-900 dark:text-white">更新操作</h3>
-                <p class="text-xs text-stone-500 dark:text-stone-400">检查远端提交并执行自动更新</p>
+                <p class="text-xs text-stone-500 dark:text-stone-400">检查最新 Release 并执行自动更新</p>
               </div>
             </div>
             <UBadge :color="updateStatusColor(updateTask.state)" variant="subtle">
@@ -1280,16 +1281,16 @@
         <div class="space-y-4">
           <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div class="rounded-xl border border-stone-200/70 bg-white/80 p-3 dark:border-neutral-700/70 dark:bg-neutral-900/70">
-              <p class="text-xs text-stone-500 dark:text-stone-400">本地提交</p>
-              <p class="mt-1 font-medium text-stone-900 dark:text-white">{{ updateCheck.current_commit || updateInfo.current_commit || '--' }}</p>
+              <p class="text-xs text-stone-500 dark:text-stone-400">本地版本</p>
+              <p class="mt-1 font-medium text-stone-900 dark:text-white">{{ updateCheck.current_version || updateInfo.current_version || '--' }}</p>
             </div>
             <div class="rounded-xl border border-stone-200/70 bg-white/80 p-3 dark:border-neutral-700/70 dark:bg-neutral-900/70">
-              <p class="text-xs text-stone-500 dark:text-stone-400">远端提交</p>
-              <p class="mt-1 font-medium text-stone-900 dark:text-white">{{ updateCheck.remote_commit || '--' }}</p>
+              <p class="text-xs text-stone-500 dark:text-stone-400">最新版本</p>
+              <p class="mt-1 font-medium text-stone-900 dark:text-white">{{ updateCheck.latest_version || '--' }}</p>
             </div>
             <div class="rounded-xl border border-stone-200/70 bg-white/80 p-3 dark:border-neutral-700/70 dark:bg-neutral-900/70">
-              <p class="text-xs text-stone-500 dark:text-stone-400">落后提交数</p>
-              <p class="mt-1 font-medium text-stone-900 dark:text-white">{{ updateCheck.behind_count ?? '--' }}</p>
+              <p class="text-xs text-stone-500 dark:text-stone-400">Release 标签</p>
+              <p class="mt-1 font-medium text-stone-900 dark:text-white">{{ updateCheck.release_tag || '--' }}</p>
             </div>
           </div>
 
@@ -1311,10 +1312,10 @@
               :disabled="updateBusy || !canRunHotUpdate"
               @click="runHotUpdate"
             >
-              一键热更新
+              一键更新
             </UButton>
             <span v-if="!canRunHotUpdate" class="text-xs text-rose-600 dark:text-rose-400">
-              当前环境不满足热更新条件（需 git + pip + node + npm + 源码仓库）
+              当前环境不满足 Release 热更新条件（需 release + pip + 完整资产）
             </span>
           </div>
 
@@ -1419,11 +1420,17 @@ const settings = ref<AdminSystemSettings>({
   max_guest_tokens_per_ip: 3,
   // 图片域名限制
   image_domain_restriction_enabled: false,
-  // 热更新
+  // 热更新（Release Artifact）
+  app_update_source: 'release',
+  app_update_release_repo: 'xiyan520/tg-telegram-imagebed',
+  app_update_release_asset_name: 'tg-imagebed-release.zip',
+  app_update_release_sha_name: 'tg-imagebed-release.zip.sha256',
+  // 兼容旧字段
   app_update_repo_url: 'https://github.com/xiyan520/tg-telegram-imagebed.git',
   app_update_branch: 'main',
   app_update_last_status: 'idle',
   app_update_last_error: '',
+  app_update_last_version: '',
   app_update_last_commit: '',
   app_update_last_run_at: '',
   app_update_last_duration_ms: 0,
@@ -1440,7 +1447,7 @@ const sectionItems: SettingsSectionItem[] = [
   { key: 'bot', label: 'Bot 功能', description: '交互能力和回复模板', icon: 'heroicons:chat-bubble-left-right' },
   { key: 'tg_auth', label: 'TG 认证', description: '登录绑定与会话参数', icon: 'heroicons:shield-check' },
   { key: 'proxy_and_tokens', label: '代理与风险操作', description: '网络代理与批量禁用', icon: 'heroicons:shield-exclamation' },
-  { key: 'about_update', label: '关于与更新', description: '版本信息与热更新', icon: 'heroicons:arrow-path' },
+  { key: 'about_update', label: '关于与更新', description: '版本信息与 Release 热更新', icon: 'heroicons:arrow-path' },
 ]
 
 const sectionFieldGroups: Record<SettingsSectionKey, string[]> = {
@@ -1485,7 +1492,7 @@ const sectionFieldGroups: Record<SettingsSectionKey, string[]> = {
     'tg_session_expire_days',
   ],
   proxy_and_tokens: ['proxy_url'],
-  about_update: ['app_update_branch'],
+  about_update: ['app_update_source'],
 }
 
 const activeSection = ref<SettingsSectionKey>('domains')
@@ -1547,20 +1554,24 @@ const proxyPlaceholder = computed(() => {
 
 type UpdateRuntimeInfo = {
   app_version: string
-  current_commit: string
-  current_branch: string
-  git_available: boolean
+  current_version: string
+  update_source: string
+  release_repo: string
+  release_asset_name: string
+  release_sha_name: string
+  release_supported: boolean
+  repo_allowed: boolean
   pip_available: boolean
-  node_available: boolean
-  npm_available: boolean
-  is_git_repo: boolean
-  repo_clean: boolean
 }
 
 type UpdateCheckResult = {
-  current_commit: string
-  remote_commit: string
-  behind_count: number | null
+  current_version: string
+  latest_version: string
+  release_tag: string
+  release_name: string
+  published_at: string
+  asset_found: boolean
+  sha_found: boolean
   has_update: boolean
 }
 
@@ -1580,20 +1591,24 @@ const updateStatusTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 const updateInfo = ref<UpdateRuntimeInfo>({
   app_version: '',
-  current_commit: '',
-  current_branch: '',
-  git_available: false,
+  current_version: '',
+  update_source: '',
+  release_repo: '',
+  release_asset_name: '',
+  release_sha_name: '',
+  release_supported: false,
+  repo_allowed: false,
   pip_available: false,
-  node_available: false,
-  npm_available: false,
-  is_git_repo: false,
-  repo_clean: false,
 })
 
 const updateCheck = ref<UpdateCheckResult>({
-  current_commit: '',
-  remote_commit: '',
-  behind_count: null,
+  current_version: '',
+  latest_version: '',
+  release_tag: '',
+  release_name: '',
+  published_at: '',
+  asset_found: false,
+  sha_found: false,
   has_update: false,
 })
 
@@ -1605,22 +1620,16 @@ const updateTask = ref<UpdateTaskState>({
   logs: [],
 })
 
-const updateBranchOptions = [
-  { label: 'main', value: 'main' },
-  { label: 'master', value: 'master' },
-]
-
 const updateBusy = computed(() => {
-  return ['running', 'rolling_back', 'restarting'].includes(updateTask.value.state)
+  return ['running', 'downloading', 'verifying', 'applying', 'rolling_back', 'restarting'].includes(updateTask.value.state)
 })
 
 const canRunHotUpdate = computed(() => {
   return Boolean(
-    updateInfo.value.git_available &&
+    updateInfo.value.release_supported &&
     updateInfo.value.pip_available &&
-    updateInfo.value.node_available &&
-    updateInfo.value.npm_available &&
-    updateInfo.value.is_git_repo
+    updateCheck.value.asset_found &&
+    updateCheck.value.sha_found
   )
 })
 
@@ -1635,6 +1644,9 @@ const updateStatusColor = (state?: string) => {
     case 'success':
       return 'green'
     case 'running':
+    case 'downloading':
+    case 'verifying':
+    case 'applying':
     case 'restarting':
       return 'amber'
     case 'rolled_back':
@@ -1670,21 +1682,19 @@ const loadUpdateInfo = async () => {
     if (res?.success && res.data) {
       updateInfo.value = {
         app_version: res.data.app_version || '',
-        current_commit: res.data.current_commit || '',
-        current_branch: res.data.current_branch || '',
-        git_available: Boolean(res.data.git_available),
+        current_version: res.data.current_version || '',
+        update_source: res.data.update_source || '',
+        release_repo: res.data.release_repo || '',
+        release_asset_name: res.data.release_asset_name || '',
+        release_sha_name: res.data.release_sha_name || '',
+        release_supported: Boolean(res.data.release_supported),
+        repo_allowed: Boolean(res.data.repo_allowed),
         pip_available: Boolean(res.data.pip_available),
-        node_available: Boolean(res.data.node_available),
-        npm_available: Boolean(res.data.npm_available),
-        is_git_repo: Boolean(res.data.is_git_repo),
-        repo_clean: Boolean(res.data.repo_clean),
       }
-      if (res.data.branch) {
-        settings.value.app_update_branch = res.data.branch
-      }
-      if (res.data.repo_url) {
-        settings.value.app_update_repo_url = res.data.repo_url
-      }
+      settings.value.app_update_source = res.data.update_source || settings.value.app_update_source
+      settings.value.app_update_release_repo = res.data.release_repo || settings.value.app_update_release_repo
+      settings.value.app_update_release_asset_name = res.data.release_asset_name || settings.value.app_update_release_asset_name
+      settings.value.app_update_release_sha_name = res.data.release_sha_name || settings.value.app_update_release_sha_name
     }
   } catch (error: any) {
     notification.error('更新信息加载失败', error?.data?.error || error?.message || '无法获取更新运行信息')
@@ -1707,11 +1717,12 @@ const loadUpdateStatus = async () => {
         error: res.data.error || '',
         logs: Array.isArray(res.data.logs) ? res.data.logs : [],
       }
-      if (res.data.current_commit) {
-        settings.value.app_update_last_commit = res.data.current_commit
+      if (res.data.current_version) {
+        settings.value.app_update_last_version = res.data.current_version
+        settings.value.app_update_last_commit = res.data.current_version
       }
-      if (res.data.runtime?.current_commit) {
-        updateInfo.value.current_commit = res.data.runtime.current_commit
+      if (res.data.runtime?.current_version) {
+        updateInfo.value.current_version = res.data.runtime.current_version
       }
     }
   } catch (error: any) {
@@ -1730,12 +1741,16 @@ const checkForUpdates = async () => {
     })
     if (res?.success && res.data) {
       updateCheck.value = {
-        current_commit: res.data.current_commit || '',
-        remote_commit: res.data.remote_commit || '',
-        behind_count: typeof res.data.behind_count === 'number' ? res.data.behind_count : null,
+        current_version: res.data.current_version || '',
+        latest_version: res.data.latest_version || '',
+        release_tag: res.data.release_tag || '',
+        release_name: res.data.release_name || '',
+        published_at: res.data.published_at || '',
+        asset_found: Boolean(res.data.asset_found),
+        sha_found: Boolean(res.data.sha_found),
         has_update: Boolean(res.data.has_update),
       }
-      notification.success('检查完成', res.data.has_update ? `发现 ${res.data.behind_count} 个新提交` : '当前已是最新版本')
+      notification.success('检查完成', res.data.has_update ? `发现新版本 ${res.data.latest_version}` : '当前已是最新版本')
     }
   } catch (error: any) {
     notification.error('检查失败', error?.data?.error || error?.message || '无法检查更新')
@@ -1746,7 +1761,7 @@ const checkForUpdates = async () => {
 
 const runHotUpdate = async () => {
   if (!canRunHotUpdate.value) {
-    notification.error('环境不满足', '当前环境无法执行源码热更新')
+    notification.error('环境不满足', '当前环境无法执行 Release 热更新')
     return
   }
   updateRunning.value = true
@@ -1756,7 +1771,7 @@ const runHotUpdate = async () => {
       credentials: 'include',
     })
     if (res?.success) {
-      notification.success('已启动', '热更新任务已开始执行，请等待自动重启')
+      notification.success('已启动', '更新任务已开始执行，请等待自动重启')
       await loadUpdateStatus()
       scheduleUpdateStatusPoll()
     } else {
@@ -1764,7 +1779,7 @@ const runHotUpdate = async () => {
     }
   } catch (error: any) {
     const statusCode = Number(error?.statusCode || error?.response?.status || 0)
-    const message = error?.data?.message || error?.data?.error || error?.message || '无法启动热更新'
+    const message = error?.data?.message || error?.data?.error || error?.message || '无法启动更新任务'
     if (statusCode === 409) {
       notification.warning('任务未启动', message || '已有任务在运行')
       return

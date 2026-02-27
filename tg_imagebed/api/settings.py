@@ -19,6 +19,9 @@ from ..database.domains import _normalize_domain
 from .. import admin_module
 
 OFFICIAL_UPDATE_REPO_URL = 'https://github.com/xiyan520/tg-telegram-imagebed.git'
+OFFICIAL_UPDATE_RELEASE_REPO = 'xiyan520/tg-telegram-imagebed'
+OFFICIAL_UPDATE_ASSET_NAME = 'tg-imagebed-release.zip'
+OFFICIAL_UPDATE_SHA_NAME = 'tg-imagebed-release.zip.sha256'
 
 
 def _set_admin_cors_headers(response):
@@ -134,11 +137,17 @@ def _format_settings_for_response(settings: dict) -> dict:
         'seo_footer_text': settings.get('seo_footer_text', ''),
         # 图片域名限制
         'image_domain_restriction_enabled': settings.get('image_domain_restriction_enabled', '0') == '1',
-        # 热更新配置
+        # 热更新配置（Release Artifact）
+        'app_update_source': settings.get('app_update_source', 'release'),
+        'app_update_release_repo': settings.get('app_update_release_repo', OFFICIAL_UPDATE_RELEASE_REPO),
+        'app_update_release_asset_name': settings.get('app_update_release_asset_name', OFFICIAL_UPDATE_ASSET_NAME),
+        'app_update_release_sha_name': settings.get('app_update_release_sha_name', OFFICIAL_UPDATE_SHA_NAME),
+        # 兼容旧字段（只读）
         'app_update_repo_url': settings.get('app_update_repo_url', OFFICIAL_UPDATE_REPO_URL),
         'app_update_branch': settings.get('app_update_branch', 'main'),
         'app_update_last_status': settings.get('app_update_last_status', 'idle'),
         'app_update_last_error': settings.get('app_update_last_error', ''),
+        'app_update_last_version': settings.get('app_update_last_version', ''),
         'app_update_last_commit': settings.get('app_update_last_commit', ''),
         'app_update_last_run_at': settings.get('app_update_last_run_at', ''),
         'app_update_last_duration_ms': _safe_int(settings.get('app_update_last_duration_ms'), 0, 0),
@@ -591,7 +600,36 @@ def admin_system_settings():
             if 'image_domain_restriction_enabled' in data:
                 settings_to_update['image_domain_restriction_enabled'] = '1' if data['image_domain_restriction_enabled'] else '0'
 
-            # 热更新配置
+            # 热更新配置（Release Artifact）
+            if 'app_update_source' in data:
+                source = str(data.get('app_update_source') or '').strip().lower()
+                if source != 'release':
+                    errors.append('更新源仅支持 release')
+                else:
+                    settings_to_update['app_update_source'] = 'release'
+
+            if 'app_update_release_repo' in data:
+                repo = str(data.get('app_update_release_repo') or '').strip()
+                if repo and repo != OFFICIAL_UPDATE_RELEASE_REPO:
+                    errors.append('Release 仓库仅允许使用官方仓库')
+                else:
+                    settings_to_update['app_update_release_repo'] = OFFICIAL_UPDATE_RELEASE_REPO
+
+            if 'app_update_release_asset_name' in data:
+                asset_name = str(data.get('app_update_release_asset_name') or '').strip()
+                if asset_name and asset_name != OFFICIAL_UPDATE_ASSET_NAME:
+                    errors.append('Release 资产名仅允许使用官方默认值')
+                else:
+                    settings_to_update['app_update_release_asset_name'] = OFFICIAL_UPDATE_ASSET_NAME
+
+            if 'app_update_release_sha_name' in data:
+                sha_name = str(data.get('app_update_release_sha_name') or '').strip()
+                if sha_name and sha_name != OFFICIAL_UPDATE_SHA_NAME:
+                    errors.append('Release 校验文件名仅允许使用官方默认值')
+                else:
+                    settings_to_update['app_update_release_sha_name'] = OFFICIAL_UPDATE_SHA_NAME
+
+            # 热更新兼容配置（固定）
             if 'app_update_repo_url' in data:
                 incoming_repo = str(data.get('app_update_repo_url') or '').strip()
                 if incoming_repo and incoming_repo != OFFICIAL_UPDATE_REPO_URL:

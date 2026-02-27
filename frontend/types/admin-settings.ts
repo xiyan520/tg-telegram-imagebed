@@ -71,10 +71,15 @@ export interface AdminSystemSettings {
   tg_session_expire_days: number
   max_guest_tokens_per_ip: number
   image_domain_restriction_enabled: boolean
+  app_update_source: string
+  app_update_release_repo: string
+  app_update_release_asset_name: string
+  app_update_release_sha_name: string
   app_update_repo_url: string
   app_update_branch: string
   app_update_last_status: string
   app_update_last_error: string
+  app_update_last_version: string
   app_update_last_commit: string
   app_update_last_run_at: string
   app_update_last_duration_ms: number

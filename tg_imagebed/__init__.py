@@ -10,5 +10,18 @@ tg_imagebed - Telegram 图床应用包
 - services/: 服务层
 - api/: 路由层
 """
+from pathlib import Path
 
-__version__ = "2.0.0"
+
+def _load_version() -> str:
+    version_file = Path(__file__).resolve().parent.parent / 'VERSION'
+    try:
+        value = version_file.read_text(encoding='utf-8').strip()
+        if value:
+            return value
+    except Exception:
+        pass
+    return '0.0.0'
+
+
+__version__ = _load_version()

@@ -38,6 +38,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p /app/data
 
 # 复制后端代码（根目录仅 main.py，其余都在 tg_imagebed 包内）
+COPY VERSION .
 COPY main.py .
 COPY tg_imagebed/ ./tg_imagebed/
 
