@@ -59,6 +59,61 @@ export interface AdminConfig {
   cdnMonitor: string
 }
 
+export type AdminActivityType = 'all' | 'upload' | 'security'
+
+export interface AdminDashboardActivityItem {
+  id: string
+  type: 'upload' | 'security'
+  level: 'info' | 'success' | 'warning' | 'error'
+  title: string
+  description: string
+  actor?: string
+  ip?: string
+  time: string
+  meta?: Record<string, any>
+}
+
+export interface AdminDashboardActivityData {
+  items: AdminDashboardActivityItem[]
+  page: number
+  limit: number
+  has_more: boolean
+  type: AdminActivityType
+}
+
+export type AdminImageSortBy =
+  | 'created_at'
+  | 'file_size'
+  | 'access_count'
+  | 'cdn_hit_count'
+  | 'direct_hit_count'
+
+export type AdminImageSortOrder = 'asc' | 'desc'
+
+export interface AdminImagesQuery {
+  page?: number
+  limit?: number
+  search?: string
+  /**
+   * 兼容旧筛选参数
+   * all | cached | uncached | group
+   */
+  filter?: string
+  /**
+   * 兼容旧排序参数
+   */
+  sort?: string
+  sort_by?: AdminImageSortBy
+  sort_order?: AdminImageSortOrder
+  source?: string
+  date_from?: string
+  date_to?: string
+  size_min?: number
+  size_max?: number
+  access_min?: number
+  access_max?: number
+}
+
 /** 管理员图片列表项（GET /api/admin/images） */
 export interface AdminImageItem {
   encrypted_id: string

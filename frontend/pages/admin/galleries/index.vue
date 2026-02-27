@@ -1,14 +1,12 @@
 <template>
   <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-stone-900 dark:text-white">画集管理</h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
-          共 {{ total }} 个画集
-        </p>
-      </div>
-      <div class="flex items-center gap-2">
+    <AdminPageHeader
+      title="画集管理"
+      eyebrow="Resources"
+      icon="heroicons:rectangle-stack"
+      :description="`共 ${total} 个画集`"
+    >
+      <template #actions>
         <UButton
           icon="heroicons:globe-alt"
           :color="shareAllLink?.enabled ? 'green' : 'gray'"
@@ -31,8 +29,8 @@
         >
           创建画集
         </UButton>
-      </div>
-    </div>
+      </template>
+    </AdminPageHeader>
 
     <!-- 搜索筛选栏 + 画集网格 -->
     <UCard>

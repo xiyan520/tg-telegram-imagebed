@@ -3,6 +3,7 @@
  */
 
 export type AdminPermission = 'admin'
+export type AdminMenuGroupKey = 'monitor' | 'resources' | 'config'
 
 export type ActiveMatch =
   | { type: 'exact' }
@@ -13,10 +14,24 @@ export interface AdminMenuItem {
   label: string
   to: string
   icon: string
+  groupKey: AdminMenuGroupKey
   permissions: AdminPermission[]
   activeMatch: ActiveMatch
+  mobilePrimary?: boolean
   badge?: string | number
 }
+
+export interface AdminMenuGroup {
+  key: AdminMenuGroupKey
+  label: string
+  items: AdminMenuItem[]
+}
+
+export const adminMenuGroupsMeta: Array<{ key: AdminMenuGroupKey; label: string }> = [
+  { key: 'monitor', label: '监控' },
+  { key: 'resources', label: '资源' },
+  { key: 'config', label: '配置' },
+]
 
 // 导航菜单数据
 export const adminMenu: AdminMenuItem[] = [
@@ -25,6 +40,8 @@ export const adminMenu: AdminMenuItem[] = [
     label: '仪表板',
     to: '/admin/dashboard',
     icon: 'heroicons:squares-2x2',
+    groupKey: 'monitor',
+    mobilePrimary: true,
     permissions: ['admin'],
     activeMatch: { type: 'exact' },
   },
@@ -33,6 +50,8 @@ export const adminMenu: AdminMenuItem[] = [
     label: '图片管理',
     to: '/admin/images',
     icon: 'heroicons:photo',
+    groupKey: 'resources',
+    mobilePrimary: true,
     permissions: ['admin'],
     activeMatch: { type: 'prefix', prefixes: ['/admin/images'] },
   },
@@ -41,6 +60,8 @@ export const adminMenu: AdminMenuItem[] = [
     label: 'Token管理',
     to: '/admin/tokens',
     icon: 'heroicons:key',
+    groupKey: 'resources',
+    mobilePrimary: true,
     permissions: ['admin'],
     activeMatch: { type: 'prefix', prefixes: ['/admin/tokens'] },
   },
@@ -49,6 +70,8 @@ export const adminMenu: AdminMenuItem[] = [
     label: '画集管理',
     to: '/admin/galleries',
     icon: 'heroicons:rectangle-stack',
+    groupKey: 'resources',
+    mobilePrimary: true,
     permissions: ['admin'],
     activeMatch: { type: 'prefix', prefixes: ['/admin/galleries'] },
   },
@@ -57,6 +80,7 @@ export const adminMenu: AdminMenuItem[] = [
     label: '系统设置',
     to: '/admin/settings',
     icon: 'heroicons:cog-6-tooth',
+    groupKey: 'config',
     permissions: ['admin'],
     activeMatch: { type: 'prefix', prefixes: ['/admin/settings'] },
   },
@@ -65,6 +89,7 @@ export const adminMenu: AdminMenuItem[] = [
     label: 'SEO 设置',
     to: '/admin/seo',
     icon: 'heroicons:magnifying-glass',
+    groupKey: 'config',
     permissions: ['admin'],
     activeMatch: { type: 'prefix', prefixes: ['/admin/seo'] },
   },
@@ -73,6 +98,7 @@ export const adminMenu: AdminMenuItem[] = [
     label: '存储设置',
     to: '/admin/storage',
     icon: 'heroicons:server-stack',
+    groupKey: 'config',
     permissions: ['admin'],
     activeMatch: { type: 'prefix', prefixes: ['/admin/storage'] },
   },
@@ -81,6 +107,7 @@ export const adminMenu: AdminMenuItem[] = [
     label: '公告管理',
     to: '/admin/announcements',
     icon: 'heroicons:megaphone',
+    groupKey: 'config',
     permissions: ['admin'],
     activeMatch: { type: 'prefix', prefixes: ['/admin/announcements'] },
   },
@@ -105,6 +132,16 @@ export function filterMenuByAuth(isAuthed: boolean): AdminMenuItem[] {
   return isAuthed ? adminMenu : []
 }
 
+export function groupMenuItems(items: AdminMenuItem[]): AdminMenuGroup[] {
+  return adminMenuGroupsMeta
+    .map(meta => ({
+      key: meta.key,
+      label: meta.label,
+      items: items.filter(item => item.groupKey === meta.key)
+    }))
+    .filter(group => group.items.length > 0)
+}
+
 /**
  * 组合式函数：获取管理菜单
  */
@@ -114,11 +151,14 @@ export function useAdminMenu() {
 
   // 过滤后的菜单
   const menu = computed(() => filterMenuByAuth(authStore.isAuthenticated))
+  const groupedMenu = computed(() => groupMenuItems(menu.value))
+  const mobilePrimaryMenu = computed(() => menu.value.filter(item => item.mobilePrimary).slice(0, 4))
+  const mobileSecondaryMenu = computed(() => menu.value.filter(item => !mobilePrimaryMenu.value.some(primary => primary.key === item.key)))
 
   // 当前激活的菜单项
   const activeKey = computed(() => {
     const path = route.path
-    const activeItem = adminMenu.find((item) => isMenuActive(path, item))
+    const activeItem = menu.value.find((item) => isMenuActive(path, item))
     return activeItem?.key || ''
   })
 
@@ -129,6 +169,9 @@ export function useAdminMenu() {
 
   return {
     menu,
+    groupedMenu,
+    mobilePrimaryMenu,
+    mobileSecondaryMenu,
     activeKey,
     isActive,
     adminMenu,

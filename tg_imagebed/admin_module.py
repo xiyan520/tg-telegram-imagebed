@@ -799,6 +799,15 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             limit = request.args.get('limit', 20, type=int)
             search = request.args.get('search', '').strip()
             filter_type = request.args.get('filter', 'all').strip().lower()
+            sort_by = request.args.get('sort_by', 'created_at').strip().lower()
+            sort_order = request.args.get('sort_order', 'desc').strip().lower()
+            source = request.args.get('source', '').strip().lower()
+            date_from = request.args.get('date_from', '').strip()
+            date_to = request.args.get('date_to', '').strip()
+            size_min = request.args.get('size_min', type=float)
+            size_max = request.args.get('size_max', type=float)
+            access_min = request.args.get('access_min', type=float)
+            access_max = request.args.get('access_max', type=float)
 
             # 边界保护：确保 page >= 1，1 <= limit <= 200
             page = max(1, page)
@@ -808,7 +817,49 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             if filter_type not in ('all', 'cached', 'uncached', 'group'):
                 filter_type = 'all'
 
-            logger.info(f"获取图片列表请求: page={page}, limit={limit}, search={search}, filter={filter_type}")
+            # 验证排序参数
+            sort_by_map = {
+                'created_at': 'fs.created_at',
+                'file_size': 'fs.file_size',
+                'access_count': 'fs.access_count',
+                'cdn_hit_count': 'fs.cdn_hit_count',
+                'direct_hit_count': 'fs.direct_hit_count',
+            }
+            if sort_by not in sort_by_map:
+                sort_by = 'created_at'
+
+            if sort_order not in ('asc', 'desc'):
+                sort_order = 'desc'
+
+            if source == 'all':
+                source = ''
+
+            def _parse_query_date(value: str, day_end: bool = False):
+                raw = str(value or '').strip()
+                if not raw:
+                    return None
+                try:
+                    dt = datetime.strptime(raw, '%Y-%m-%d')
+                    if day_end:
+                        dt = dt + timedelta(days=1) - timedelta(seconds=1)
+                    return dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    logger.debug(f"无效日期参数: {raw}")
+                    return None
+
+            date_from_dt = _parse_query_date(date_from, day_end=False)
+            date_to_dt = _parse_query_date(date_to, day_end=True)
+
+            logger.info(
+                "获取图片列表请求: page=%s, limit=%s, search=%s, filter=%s, sort_by=%s, sort_order=%s, source=%s",
+                page,
+                limit,
+                search,
+                filter_type,
+                sort_by,
+                sort_order,
+                source or 'all'
+            )
 
             with get_connection() as conn:
                 cursor = conn.cursor()
@@ -869,6 +920,48 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                         # 如果列不存在，返回空结果
                         where_clauses.append('1 = 0')
 
+                # 来源筛选（新增）
+                if source:
+                    if source == 'group':
+                        if 'is_group_upload' in columns:
+                            where_clauses.append('fs.is_group_upload = 1')
+                        else:
+                            where_clauses.append('fs.source = ?')
+                            where_params.append('group')
+                    elif source == 'token':
+                        where_clauses.append('fs.source LIKE ?')
+                        where_params.append('%token%')
+                    elif source == 'guest':
+                        where_clauses.append('(fs.source = ? OR fs.source = ? OR fs.source = ? OR fs.source LIKE ?)')
+                        where_params.extend(['guest', 'anonymous', 'web', 'guest_%'])
+                    else:
+                        where_clauses.append('fs.source = ?')
+                        where_params.append(source)
+
+                # 时间范围筛选（新增）
+                if date_from_dt:
+                    where_clauses.append('datetime(fs.created_at) >= datetime(?)')
+                    where_params.append(date_from_dt)
+                if date_to_dt:
+                    where_clauses.append('datetime(fs.created_at) <= datetime(?)')
+                    where_params.append(date_to_dt)
+
+                # 文件大小筛选（新增，字节）
+                if size_min is not None and size_min >= 0:
+                    where_clauses.append('fs.file_size >= ?')
+                    where_params.append(int(size_min))
+                if size_max is not None and size_max >= 0:
+                    where_clauses.append('fs.file_size <= ?')
+                    where_params.append(int(size_max))
+
+                # 访问量筛选（新增）
+                if access_min is not None and access_min >= 0:
+                    where_clauses.append('COALESCE(fs.access_count, 0) >= ?')
+                    where_params.append(int(access_min))
+                if access_max is not None and access_max >= 0:
+                    where_clauses.append('COALESCE(fs.access_count, 0) <= ?')
+                    where_params.append(int(access_max))
+
                 # 拼接 WHERE 子句
                 if where_clauses:
                     query += ' WHERE ' + ' AND '.join(where_clauses)
@@ -882,7 +975,14 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                 total_count = cursor.fetchone()[0]
 
                 # 获取当前页数据
-                query += ' ORDER BY fs.created_at DESC LIMIT ? OFFSET ?'
+                sort_column = sort_by_map.get(sort_by, 'fs.created_at')
+                # 访问统计列在旧库可能不存在，兜底回退到总访问量排序
+                if sort_by == 'cdn_hit_count' and 'cdn_hit_count' not in columns:
+                    sort_column = 'fs.access_count'
+                if sort_by == 'direct_hit_count' and 'direct_hit_count' not in columns:
+                    sort_column = 'fs.access_count'
+
+                query += f' ORDER BY {sort_column} {sort_order.upper()} LIMIT ? OFFSET ?'
                 params = list(where_params)
                 params.extend([limit, offset])
 

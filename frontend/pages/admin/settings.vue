@@ -1,21 +1,40 @@
 <template>
-  <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-stone-900 dark:text-white">系统设置</h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">配置域名、CDN 加速和上传策略</p>
-      </div>
-      <UButton
-        icon="heroicons:arrow-path"
-        color="gray"
-        variant="outline"
-        :loading="loading"
-        @click="loadSettings"
-      >
-        刷新
-      </UButton>
-    </div>
+  <div class="relative space-y-6 pb-10">
+    <div class="pointer-events-none absolute -top-20 right-0 h-44 w-44 rounded-full bg-amber-200/30 blur-3xl dark:bg-amber-700/15" />
+    <div class="pointer-events-none absolute top-56 -left-10 h-40 w-40 rounded-full bg-orange-200/25 blur-3xl dark:bg-orange-700/10" />
+    <AdminPageHeader
+      title="系统设置"
+      eyebrow="Config"
+      icon="heroicons:cog-6-tooth"
+      description="配置域名、CDN 加速和上传策略"
+    >
+      <template #actions>
+        <UButton
+          icon="heroicons:arrow-path"
+          color="gray"
+          variant="outline"
+          :loading="loading"
+          @click="loadSettings"
+        >
+          刷新
+        </UButton>
+        <UButton
+          color="gray"
+          variant="outline"
+          icon="heroicons:arrow-uturn-left"
+          :disabled="!isAnyDirty"
+          @click="resetSettings"
+        >
+          重置未保存
+        </UButton>
+        <UButton color="primary" icon="heroicons:check" :loading="saving || policySaving || gallerySiteSettingsSaving" @click="saveAllSettings">
+          保存全部
+          <UBadge v-if="dirtyCount > 0" color="amber" variant="solid" size="xs" class="ml-1.5">
+            {{ dirtyCount }}
+          </UBadge>
+        </UButton>
+      </template>
+    </AdminPageHeader>
 
     <!-- 加载状态 -->
     <div v-if="loading && !settingsLoaded" class="flex justify-center py-12">
@@ -23,6 +42,31 @@
     </div>
 
     <template v-else>
+      <div class="space-y-4">
+        <AdminSettingsTopNav
+          class="hidden lg:block"
+          :items="sectionItems"
+          :active-key="activeSection"
+          :dirty-map="dirtyMap"
+          @select="scrollToSection"
+        />
+        <AdminSettingsMobileNavDrawer
+          class="lg:hidden"
+          :items="sectionItems"
+          :active-key="activeSection"
+          :dirty-map="dirtyMap"
+          @select="scrollToSection"
+        />
+
+        <AdminSettingsSectionCard
+            :id="sectionDomId('domains')"
+            title="域名与路由"
+            description="域名列表、画集入口和图片访问路由策略"
+            icon="heroicons:globe-alt"
+            :dirty="Boolean(dirtyMap.domains)"
+            :saving="Boolean(sectionSaving.domains)"
+            @save="saveSection('domains')"
+        >
       <!-- 域名管理 -->
       <UCard>
         <template #header>
@@ -297,6 +341,7 @@
           </UFormGroup>
         </div>
       </UCard>
+        </AdminSettingsSectionCard>
 
       <!-- 添加/编辑域名弹窗 -->
       <UModal v-model="showDomainModal">
@@ -371,6 +416,33 @@
         </UCard>
       </UModal>
 
+      <UModal v-model="confirmModalOpen" :ui="{ width: 'sm:max-w-md' }">
+        <UCard>
+          <template #header>
+            <div class="flex items-center gap-2">
+              <UIcon name="heroicons:exclamation-triangle" class="h-5 w-5 text-amber-500" />
+              <span class="font-semibold text-stone-900 dark:text-white">{{ confirmModalTitle }}</span>
+            </div>
+          </template>
+          <p class="text-sm text-stone-600 dark:text-stone-400">{{ confirmModalMessage }}</p>
+          <template #footer>
+            <div class="flex justify-end gap-2">
+              <UButton color="gray" variant="ghost" @click="onConfirmCancel">取消</UButton>
+              <UButton color="primary" @click="onConfirmOk">确认</UButton>
+            </div>
+          </template>
+        </UCard>
+      </UModal>
+
+        <AdminSettingsSectionCard
+            :id="sectionDomId('cdn')"
+            title="CDN 加速"
+            description="Cloudflare 域名、缓存策略与转发能力"
+            icon="heroicons:bolt"
+            :dirty="Boolean(dirtyMap.cdn)"
+            :saving="Boolean(sectionSaving.cdn)"
+            @save="saveSection('cdn')"
+        >
       <!-- CDN 配置 -->
       <UCard>
         <template #header>
@@ -523,7 +595,17 @@
           </div>
         </div>
       </UCard>
+        </AdminSettingsSectionCard>
 
+        <AdminSettingsSectionCard
+            :id="sectionDomId('guest_policy')"
+            title="游客上传策略"
+            description="控制匿名上传行为与既有 Token 处理方式"
+            icon="heroicons:users"
+            :dirty="Boolean(dirtyMap.guest_policy)"
+            :saving="Boolean(sectionSaving.guest_policy)"
+            @save="saveSection('guest_policy')"
+        >
       <!-- 游客上传策略 -->
       <UCard>
         <template #header>
@@ -607,7 +689,17 @@
           </div>
         </div>
       </UCard>
+        </AdminSettingsSectionCard>
 
+        <AdminSettingsSectionCard
+            :id="sectionDomId('token_limits')"
+            title="Token 限制"
+            description="游客 Token 的数量、有效期与 IP 限额"
+            icon="heroicons:key"
+            :dirty="Boolean(dirtyMap.token_limits)"
+            :saving="Boolean(sectionSaving.token_limits)"
+            @save="saveSection('token_limits')"
+        >
       <!-- Token 限制设置 -->
       <UCard>
         <template #header>
@@ -663,7 +755,17 @@
           </UFormGroup>
         </div>
       </UCard>
+        </AdminSettingsSectionCard>
 
+        <AdminSettingsSectionCard
+            :id="sectionDomId('upload_limits')"
+            title="上传限制"
+            description="文件大小、每日配额和可用后缀白名单"
+            icon="heroicons:cloud-arrow-up"
+            :dirty="Boolean(dirtyMap.upload_limits)"
+            :saving="Boolean(sectionSaving.upload_limits)"
+            @save="saveSection('upload_limits')"
+        >
       <!-- 上传限制 -->
       <UCard>
         <template #header>
@@ -718,7 +820,17 @@
           </template>
         </UFormGroup>
       </UCard>
+        </AdminSettingsSectionCard>
 
+        <AdminSettingsSectionCard
+            :id="sectionDomId('bot')"
+            title="Bot 功能与回复"
+            description="交互开关、inline 按钮、回复模板与链接格式"
+            icon="heroicons:chat-bubble-left-right"
+            :dirty="Boolean(dirtyMap.bot)"
+            :saving="Boolean(sectionSaving.bot)"
+            @save="saveSection('bot')"
+        >
       <!-- Bot 功能配置 -->
       <UCard>
         <template #header>
@@ -853,7 +965,17 @@
           </div>
         </div>
       </UCard>
+        </AdminSettingsSectionCard>
 
+        <AdminSettingsSectionCard
+            :id="sectionDomId('tg_auth')"
+            title="Telegram 认证"
+            description="登录绑定策略与验证码、会话有效期配置"
+            icon="heroicons:shield-check"
+            :dirty="Boolean(dirtyMap.tg_auth)"
+            :saving="Boolean(sectionSaving.tg_auth)"
+            @save="saveSection('tg_auth')"
+        >
       <!-- TG 认证配置 -->
       <UCard>
         <template #header>
@@ -930,7 +1052,17 @@
           </div>
         </div>
       </UCard>
+        </AdminSettingsSectionCard>
 
+        <AdminSettingsSectionCard
+            :id="sectionDomId('proxy_and_tokens')"
+            title="网络代理与 Token 操作"
+            description="代理配置与批量禁用 Token 的风险操作"
+            icon="heroicons:globe-americas"
+            :dirty="Boolean(dirtyMap.proxy_and_tokens)"
+            :saving="Boolean(sectionSaving.proxy_and_tokens)"
+            @save="saveSection('proxy_and_tokens')"
+        >
       <!-- 网络代理 -->
       <UCard>
         <template #header>
@@ -1030,24 +1162,22 @@
           </div>
         </div>
       </UCard>
-
-      <!-- 保存按钮 -->
-      <div class="flex justify-end gap-3 pt-4">
-        <UButton color="gray" variant="outline" @click="resetSettings">
-          重置
-        </UButton>
-        <UButton color="primary" :loading="saving" @click="saveSettings">
-          <template #leading>
-            <UIcon name="heroicons:check" />
-          </template>
-          保存设置
-        </UButton>
+        </AdminSettingsSectionCard>
       </div>
     </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import { nextTick } from 'vue'
+import type { DomainItem } from '~/composables/useDomainsApi'
+import type {
+  AdminSystemSettings,
+  DomainPolicyForm,
+  SettingsSectionItem,
+  SettingsSectionKey,
+} from '~/types/admin-settings'
+
 definePageMeta({
   layout: 'admin',
   middleware: 'auth'
@@ -1062,7 +1192,7 @@ const saving = ref(false)
 const revokingTokens = ref(false)
 const settingsLoaded = ref(false)
 
-const settings = ref({
+const settings = ref<AdminSystemSettings>({
   // 游客上传策略
   guest_upload_policy: 'open',
   guest_token_generation_enabled: true,
@@ -1119,7 +1249,67 @@ const settings = ref({
   image_domain_restriction_enabled: false,
 })
 
-const originalSettings = ref<typeof settings.value | null>(null)
+const originalSettings = ref<AdminSystemSettings | null>(null)
+
+const sectionItems: SettingsSectionItem[] = [
+  { key: 'domains', label: '域名与路由', description: '域名、画集入口、路由策略', icon: 'heroicons:globe-alt' },
+  { key: 'cdn', label: 'CDN 加速', description: 'Cloudflare 缓存与重定向', icon: 'heroicons:bolt' },
+  { key: 'guest_policy', label: '游客策略', description: '匿名上传与已有 Token 处理', icon: 'heroicons:users' },
+  { key: 'token_limits', label: 'Token 限制', description: '数量、有效期和 IP 限额', icon: 'heroicons:key' },
+  { key: 'upload_limits', label: '上传限制', description: '大小、每日配额、文件类型', icon: 'heroicons:cloud-arrow-up' },
+  { key: 'bot', label: 'Bot 功能', description: '交互能力和回复模板', icon: 'heroicons:chat-bubble-left-right' },
+  { key: 'tg_auth', label: 'TG 认证', description: '登录绑定与会话参数', icon: 'heroicons:shield-check' },
+  { key: 'proxy_and_tokens', label: '代理与风险操作', description: '网络代理与批量禁用', icon: 'heroicons:shield-exclamation' },
+]
+
+const sectionFieldGroups: Record<SettingsSectionKey, string[]> = {
+  domains: ['image_domain_restriction_enabled'],
+  cdn: [
+    'cdn_enabled',
+    'cloudflare_cdn_domain',
+    'cloudflare_api_token',
+    'cloudflare_zone_id',
+    'cloudflare_cache_level',
+    'cloudflare_browser_ttl',
+    'cloudflare_edge_ttl',
+    'enable_smart_routing',
+    'fallback_to_origin',
+    'enable_cache_warming',
+    'cache_warming_delay',
+    'cdn_monitor_enabled',
+    'cdn_redirect_enabled',
+    'cdn_redirect_max_count',
+    'cdn_redirect_delay',
+  ],
+  guest_policy: ['guest_upload_policy', 'guest_token_generation_enabled', 'guest_existing_tokens_policy'],
+  token_limits: ['guest_token_max_upload_limit', 'guest_token_max_expires_days', 'max_guest_tokens_per_ip'],
+  upload_limits: ['max_file_size_mb', 'daily_upload_limit', 'allowed_extensions'],
+  bot: [
+    'bot_caption_filename_enabled',
+    'bot_inline_buttons_enabled',
+    'bot_user_delete_enabled',
+    'bot_myuploads_enabled',
+    'bot_myuploads_page_size',
+    'bot_reply_link_formats',
+    'bot_reply_template',
+    'bot_reply_show_size',
+    'bot_reply_show_filename',
+  ],
+  tg_auth: [
+    'tg_auth_enabled',
+    'tg_auth_required_for_token',
+    'tg_bind_token_enabled',
+    'tg_max_tokens_per_user',
+    'tg_login_code_expire_minutes',
+    'tg_session_expire_days',
+  ],
+  proxy_and_tokens: ['proxy_url'],
+}
+
+const activeSection = ref<SettingsSectionKey>('domains')
+const sectionSaving = ref<Partial<Record<SettingsSectionKey, boolean>>>({})
+
+const sectionDomId = (key: SettingsSectionKey) => `settings-section-${key}`
 
 const policyOptions = ref({
   guest_upload_policy: [
@@ -1260,8 +1450,80 @@ const saveSettings = async () => {
 const resetSettings = () => {
   if (originalSettings.value) {
     settings.value = { ...originalSettings.value }
+    try {
+      const policy = JSON.parse(domainPolicySnapshot.value || '{}')
+      domainPolicy.value = {
+        guest: policy.guest || '',
+        token: policy.token || '',
+        group: policy.group || '',
+        admin_default: policy.admin_default || '',
+      }
+      const gallery = JSON.parse(gallerySettingsSnapshot.value || '{}')
+      gallerySiteSettings.value = {
+        name: gallery.name || '',
+        description: gallery.description || '',
+        enabled: gallery.enabled !== false,
+      }
+    } catch {
+      // ignore parse errors and keep in-memory values
+    }
     notification.info('已重置', '设置已恢复到上次保存的状态')
   }
+}
+
+const saveSection = async (sectionKey: SettingsSectionKey) => {
+  sectionSaving.value[sectionKey] = true
+  try {
+    if (sectionKey === 'domains') {
+      await saveSettings()
+      if (activeImageDomains.value.length >= 2) {
+        await saveDomainPolicy()
+      }
+      if (!activeGalleryDomain.value) {
+        await saveGallerySiteSettings()
+      }
+      return
+    }
+    await saveSettings()
+  } finally {
+    sectionSaving.value[sectionKey] = false
+  }
+}
+
+const saveAllSettings = async () => {
+  await saveSettings()
+  if (activeImageDomains.value.length >= 2 && domainPolicySnapshot.value !== buildDomainPolicySnapshot()) {
+    await saveDomainPolicy()
+  }
+  if (!activeGalleryDomain.value && gallerySettingsSnapshot.value !== buildGallerySettingsSnapshot()) {
+    await saveGallerySiteSettings()
+  }
+}
+
+const confirmModalOpen = ref(false)
+const confirmModalTitle = ref('')
+const confirmModalMessage = ref('')
+const confirmModalResolve = ref<((value: boolean) => void) | null>(null)
+
+const askConfirm = (title: string, message: string): Promise<boolean> => {
+  confirmModalTitle.value = title
+  confirmModalMessage.value = message
+  confirmModalOpen.value = true
+  return new Promise((resolve) => {
+    confirmModalResolve.value = resolve
+  })
+}
+
+const onConfirmOk = () => {
+  confirmModalOpen.value = false
+  confirmModalResolve.value?.(true)
+  confirmModalResolve.value = null
+}
+
+const onConfirmCancel = () => {
+  confirmModalOpen.value = false
+  confirmModalResolve.value?.(false)
+  confirmModalResolve.value = null
 }
 
 const revokeTokens = async (type: 'guest' | 'all') => {
@@ -1269,7 +1531,8 @@ const revokeTokens = async (type: 'guest' | 'all') => {
     ? '确定要禁用所有 Token 吗？此操作不可撤销。'
     : '确定要禁用所有游客 Token 吗？此操作不可撤销。'
 
-  if (!confirm(confirmMessage)) {
+  const confirmed = await askConfirm('确认批量禁用', confirmMessage)
+  if (!confirmed) {
     return
   }
 
@@ -1307,7 +1570,6 @@ watch(() => settings.value.bot_token_configured, (configured) => {
 })
 
 // ---- 域名管理 ----
-import type { DomainItem } from '~/composables/useDomainsApi'
 
 const domains = ref<DomainItem[]>([])
 const domainsLoading = ref(false)
@@ -1392,6 +1654,7 @@ const loadGallerySiteSettings = async () => {
       gallerySiteSettings.value.name = res.data.gallery_site_name || ''
       gallerySiteSettings.value.description = res.data.gallery_site_description || ''
       gallerySiteSettings.value.enabled = String(res.data.gallery_site_enabled) !== '0'
+      syncGallerySettingsSnapshot()
     }
   } catch {
     // 静默失败
@@ -1410,6 +1673,7 @@ const saveGallerySiteSettings = async () => {
         gallery_site_enabled: gallerySiteSettings.value.enabled ? '1' : '0',
       }
     })
+    syncGallerySettingsSnapshot()
     notification.success('保存成功', '画集站点设置已更新')
   } catch (e: any) {
     notification.error('保存失败', e.message || '无法保存画集站点设置')
@@ -1423,6 +1687,7 @@ const loadDomains = async () => {
   domainsLoading.value = true
   try {
     domains.value = await domainsApi.getDomains()
+    syncDomainsSnapshot()
   } catch (e: any) {
     console.error('加载域名列表失败:', e)
   } finally {
@@ -1540,13 +1805,76 @@ const handleDeleteDomain = async () => {
 }
 
 // ---- 域名场景路由 ----
-const domainPolicy = ref({
+const domainPolicy = ref<DomainPolicyForm>({
   guest: '',
   token: '',
   group: '',
   admin_default: '',
 })
 const policySaving = ref(false)
+
+const domainsSnapshot = ref('')
+const domainPolicySnapshot = ref('')
+const gallerySettingsSnapshot = ref('')
+
+const serializeValue = (value: any) => JSON.stringify(value)
+
+const buildDomainsSnapshot = () => {
+  const normalized = domains.value
+    .map((d) => ({
+      id: d.id,
+      domain: d.domain,
+      port: d.port || null,
+      domain_type: d.domain_type,
+      use_https: Boolean(d.use_https),
+      is_active: Boolean(d.is_active),
+      remark: d.remark || '',
+    }))
+    .sort((a, b) => a.id - b.id)
+  return serializeValue(normalized)
+}
+
+const buildDomainPolicySnapshot = () => serializeValue({
+  guest: domainPolicy.value.guest || '',
+  token: domainPolicy.value.token || '',
+  group: domainPolicy.value.group || '',
+  admin_default: domainPolicy.value.admin_default || '',
+})
+
+const buildGallerySettingsSnapshot = () => serializeValue({
+  name: gallerySiteSettings.value.name || '',
+  description: gallerySiteSettings.value.description || '',
+  enabled: Boolean(gallerySiteSettings.value.enabled),
+})
+
+const syncDomainsSnapshot = () => {
+  domainsSnapshot.value = buildDomainsSnapshot()
+}
+
+const syncDomainPolicySnapshot = () => {
+  domainPolicySnapshot.value = buildDomainPolicySnapshot()
+}
+
+const syncGallerySettingsSnapshot = () => {
+  gallerySettingsSnapshot.value = buildGallerySettingsSnapshot()
+}
+
+const { dirtyMap, dirtyCount, isAnyDirty } = useSettingsDirtyState({
+  current: settings,
+  original: originalSettings,
+  groups: sectionFieldGroups,
+  extras: {
+    domains: () => (
+      domainsSnapshot.value !== buildDomainsSnapshot()
+      || domainPolicySnapshot.value !== buildDomainPolicySnapshot()
+      || gallerySettingsSnapshot.value !== buildGallerySettingsSnapshot()
+    ),
+  },
+})
+
+syncDomainsSnapshot()
+syncDomainPolicySnapshot()
+syncGallerySettingsSnapshot()
 
 // 活跃图片域名（用于场景路由选项）
 const activeImageDomains = computed(() => imageDomains.value.filter(d => d.is_active))
@@ -1573,6 +1901,7 @@ const loadDomainPolicy = async () => {
         group: res.data.group || '',
         admin_default: res.data.admin_default || '',
       }
+      syncDomainPolicySnapshot()
     }
   } catch (e: any) {
     console.error('加载域名策略失败:', e)
@@ -1589,6 +1918,7 @@ const saveDomainPolicy = async () => {
       body: domainPolicy.value
     })
     if (res.success) {
+      syncDomainPolicySnapshot()
       notification.success('保存成功', '域名场景路由策略已更新')
     }
   } catch (e: any) {
@@ -1598,10 +1928,54 @@ const saveDomainPolicy = async () => {
   }
 }
 
-onMounted(() => {
-  loadSettings()
-  loadDomains()
-  loadDomainPolicy()
-  loadGallerySiteSettings()
+const scrollToSection = (key: SettingsSectionKey) => {
+  activeSection.value = key
+  if (!import.meta.client) return
+  const target = document.getElementById(sectionDomId(key))
+  if (!target) return
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+let sectionObserver: IntersectionObserver | null = null
+
+const initSectionObserver = () => {
+  if (!import.meta.client) return
+  sectionObserver?.disconnect()
+  sectionObserver = new IntersectionObserver((entries) => {
+    const visible = entries
+      .filter((entry) => entry.isIntersecting)
+      .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+    if (!visible) return
+    const id = visible.target.id
+    const matched = sectionItems.find((item) => sectionDomId(item.key) === id)
+    if (matched) {
+      activeSection.value = matched.key
+    }
+  }, {
+    root: null,
+    rootMargin: '-15% 0px -65% 0px',
+    threshold: [0.2, 0.4, 0.7],
+  })
+
+  for (const item of sectionItems) {
+    const el = document.getElementById(sectionDomId(item.key))
+    if (el) sectionObserver.observe(el)
+  }
+}
+
+onMounted(async () => {
+  await Promise.all([
+    loadSettings(),
+    loadDomains(),
+    loadDomainPolicy(),
+    loadGallerySiteSettings(),
+  ])
+  await nextTick()
+  initSectionObserver()
+})
+
+onBeforeUnmount(() => {
+  sectionObserver?.disconnect()
+  sectionObserver = null
 })
 </script>

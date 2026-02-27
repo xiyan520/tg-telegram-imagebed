@@ -1,519 +1,255 @@
 <template>
-  <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-stone-900 dark:text-white">存储设置</h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">查看存储状态、切换默认存储、配置上传场景路由</p>
-      </div>
-      <UButton
-        icon="heroicons:arrow-path"
-        color="gray"
-        variant="outline"
-        :loading="loading"
-        @click="loadAll"
-      >
-        刷新
-      </UButton>
-    </div>
+  <div class="relative space-y-6 pb-10">
+    <div class="pointer-events-none absolute -top-20 right-0 h-44 w-44 rounded-full bg-amber-200/30 blur-3xl dark:bg-amber-700/15" />
+    <div class="pointer-events-none absolute top-56 -left-10 h-40 w-40 rounded-full bg-orange-200/25 blur-3xl dark:bg-orange-700/10" />
 
-    <!-- 加载状态 -->
-    <div v-if="loading && backendNames.length === 0" class="flex justify-center py-12">
-      <div class="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+    <AdminPageHeader
+      title="存储设置"
+      eyebrow="Config"
+      icon="heroicons:server-stack"
+      description="管理后端、路由策略与上传验证"
+    >
+      <template #actions>
+        <UButton icon="heroicons:arrow-path" color="gray" variant="outline" :loading="loading" @click="loadAll">
+          刷新
+        </UButton>
+        <UButton icon="heroicons:arrow-uturn-left" color="gray" variant="outline" :disabled="!isAnyDirty" @click="resetUnsaved">
+          重置未保存
+        </UButton>
+        <UButton icon="heroicons:check" color="primary" :loading="savingAll" @click="saveAllChanges">
+          保存全部
+          <UBadge v-if="dirtyCount > 0" color="amber" variant="solid" size="xs" class="ml-1.5">{{ dirtyCount }}</UBadge>
+        </UButton>
+      </template>
+    </AdminPageHeader>
+
+    <div v-if="loading && !initialLoaded" class="flex justify-center py-12">
+      <div class="h-12 w-12 animate-spin rounded-full border-4 border-amber-500 border-t-transparent" />
     </div>
 
     <template v-else>
-      <!-- 环境变量覆盖提示 -->
-      <div v-if="envOverride" class="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl">
-        <div class="flex items-center gap-2">
-          <UIcon name="heroicons:exclamation-triangle" class="w-5 h-5 text-amber-600 dark:text-amber-400" />
-          <p class="text-sm text-amber-800 dark:text-amber-200">
-            存储配置由环境变量 <code class="px-1 py-0.5 bg-amber-100 dark:bg-amber-800 rounded">STORAGE_CONFIG_JSON</code> 控制，无法通过界面修改。
-          </p>
-        </div>
-      </div>
+      <div class="space-y-4">
+        <AdminStorageTopNav
+          class="hidden lg:block"
+          :items="sectionItems"
+          :active-key="activeSection"
+          :dirty-map="dirtyMap"
+          @select="scrollToSection"
+        />
+        <AdminStorageMobileNavDrawer
+          class="lg:hidden"
+          :items="sectionItems"
+          :active-key="activeSection"
+          :dirty-map="dirtyMap"
+          @select="scrollToSection"
+        />
 
-      <!-- 存储列表 -->
-      <UCard>
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:server-stack" class="w-5 h-5 text-white" />
+        <AdminStorageSectionCard
+          :id="sectionDomId('overview')"
+          title="概览与状态"
+          description="总体状态和环境覆盖信息"
+          icon="heroicons:signal"
+          :show-save="false"
+        >
+          <div class="space-y-4">
+            <div
+              v-if="envOverride"
+              class="rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-sm text-amber-800 dark:border-amber-800/80 dark:bg-amber-900/20 dark:text-amber-200"
+            >
+              配置由 <code class="rounded bg-amber-100 px-1 py-0.5 text-xs dark:bg-amber-800/60">STORAGE_CONFIG_JSON</code>
+              接管，后端新增/编辑/删除会受限。
+            </div>
+            <div class="grid grid-cols-2 gap-2 sm:grid-cols-2 sm:gap-3 xl:grid-cols-4">
+              <div class="rounded-xl border border-stone-200/70 bg-white/80 p-2.5 dark:border-neutral-700/70 dark:bg-neutral-900/70 sm:rounded-2xl sm:p-3">
+                <p class="text-[10px] uppercase tracking-[0.12em] text-stone-500 dark:text-stone-400 sm:text-xs sm:tracking-[0.16em]">后端总数</p>
+                <p class="mt-1 text-lg font-semibold text-stone-900 dark:text-white sm:text-2xl">{{ backendNames.length }}</p>
               </div>
-              <div>
-                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">存储列表</h3>
-                <p class="text-xs text-stone-500 dark:text-stone-400">已配置存储与健康状态</p>
+              <div class="rounded-xl border border-emerald-200/70 bg-emerald-50/80 p-2.5 dark:border-emerald-800/70 dark:bg-emerald-900/20 sm:rounded-2xl sm:p-3">
+                <p class="text-[10px] uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300 sm:text-xs sm:tracking-[0.16em]">健康后端</p>
+                <p class="mt-1 text-lg font-semibold text-emerald-800 dark:text-emerald-200 sm:text-2xl">{{ healthyCount }}</p>
+              </div>
+              <div class="rounded-xl border border-rose-200/70 bg-rose-50/80 p-2.5 dark:border-rose-800/70 dark:bg-rose-900/20 sm:rounded-2xl sm:p-3">
+                <p class="text-[10px] uppercase tracking-[0.12em] text-rose-700 dark:text-rose-300 sm:text-xs sm:tracking-[0.16em]">异常后端</p>
+                <p class="mt-1 text-lg font-semibold text-rose-800 dark:text-rose-200 sm:text-2xl">{{ unhealthyCount }}</p>
+              </div>
+              <div class="col-span-2 rounded-xl border border-stone-200/70 bg-white/80 p-2.5 dark:border-neutral-700/70 dark:bg-neutral-900/70 sm:col-span-1 sm:rounded-2xl sm:p-3">
+                <p class="text-[10px] uppercase tracking-[0.12em] text-stone-500 dark:text-stone-400 sm:text-xs sm:tracking-[0.16em]">默认存储</p>
+                <p class="mt-1 truncate text-base font-semibold text-stone-900 dark:text-white sm:text-xl">{{ activeBackend || '--' }}</p>
+                <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">驱动：{{ activeDriver }}</p>
               </div>
             </div>
-            <UButton
-              v-if="!envOverride"
-              icon="heroicons:plus"
-              color="primary"
-              @click="openAddModal"
-            >
+          </div>
+        </AdminStorageSectionCard>
+
+        <AdminStorageSectionCard
+          :id="sectionDomId('backends')"
+          title="存储管理"
+          description="新增、编辑、删除后端"
+          icon="heroicons:circle-stack"
+          :show-save="false"
+        >
+          <template #actions>
+            <UButton icon="heroicons:plus" color="primary" :disabled="envOverride" @click="openAddModal">
               添加存储
             </UButton>
-          </div>
-        </template>
+          </template>
 
-        <div class="space-y-3">
-          <div v-if="backendNames.length === 0" class="text-sm text-stone-500 dark:text-stone-400">
-            未发现已配置的存储（请检查 storage_config_json / STORAGE_CONFIG_JSON）。
-          </div>
-          <div
-            v-for="name in backendNames"
-            :key="name"
-            class="flex items-center justify-between p-3 rounded-xl border border-stone-200 dark:border-neutral-700"
-          >
-            <div class="flex items-center gap-3">
-              <div class="font-medium text-stone-900 dark:text-white">{{ name }}</div>
-              <UBadge color="gray" variant="subtle">{{ backends[name]?.driver }}</UBadge>
-              <UBadge v-if="name === activeBackend" color="amber" variant="solid">Active</UBadge>
+          <div class="space-y-3">
+            <div
+              v-if="backendNames.length === 0"
+              class="rounded-xl border border-dashed border-stone-300/80 bg-stone-50/80 p-4 text-sm text-stone-500 dark:border-neutral-700/80 dark:bg-neutral-800/60 dark:text-stone-400"
+            >
+              未发现已配置存储后端。
             </div>
-            <div class="flex items-center gap-2">
-              <UBadge v-if="health[name] === true" color="green" variant="subtle">Healthy</UBadge>
-              <UBadge v-else-if="health[name] === false" color="red" variant="subtle">Unhealthy</UBadge>
-              <UBadge v-else color="gray" variant="subtle">Unknown</UBadge>
-              <template v-if="!envOverride">
-                <UButton
-                  icon="heroicons:pencil-square"
-                  color="gray"
-                  variant="ghost"
-                  size="xs"
-                  @click="openEditModal(name)"
-                />
-                <UButton
-                  icon="heroicons:trash"
-                  color="red"
-                  variant="ghost"
-                  size="xs"
-                  :disabled="name === activeBackend"
-                  @click="confirmDelete(name)"
-                />
-              </template>
-            </div>
-          </div>
-        </div>
-      </UCard>
-
-      <!-- 默认存储 -->
-      <UCard>
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:check-circle" class="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">默认存储</h3>
-                <p class="text-xs text-stone-500 dark:text-stone-400">所有未指定场景规则的上传会跟随默认存储</p>
+            <div
+              v-for="name in backendNames"
+              :key="name"
+              class="rounded-2xl border border-stone-200/80 bg-white/90 p-4 shadow-sm dark:border-neutral-700/70 dark:bg-neutral-900/70"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="min-w-0 space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <p class="truncate text-base font-semibold text-stone-900 dark:text-white">{{ name }}</p>
+                    <UBadge color="gray" variant="subtle">{{ backends[name]?.driver || 'unknown' }}</UBadge>
+                    <UBadge v-if="name === activeBackend" color="amber" variant="solid">Active</UBadge>
+                  </div>
+                  <p class="text-xs text-stone-500 dark:text-stone-400">
+                    {{ health[name] === true ? 'Healthy' : health[name] === false ? 'Unhealthy' : 'Unknown' }}
+                  </p>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <UButton icon="heroicons:pencil-square" color="gray" variant="ghost" size="xs" :disabled="envOverride" @click="openEditModal(name)" />
+                  <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" :disabled="envOverride || name === activeBackend" @click="confirmDelete(name)" />
+                </div>
               </div>
             </div>
-            <UButton color="primary" :loading="savingActive" @click="saveActive">保存</UButton>
           </div>
-        </template>
+        </AdminStorageSectionCard>
 
-        <USelect
-          v-model="activeBackendDraft"
-          :options="backendOptions"
-          option-attribute="label"
-          value-attribute="value"
-        />
-      </UCard>
+        <AdminStorageSectionCard
+          :id="sectionDomId('policy')"
+          title="默认存储与路由策略"
+          description="控制场景路由和管理员可用后端"
+          icon="heroicons:arrows-right-left"
+          :dirty="Boolean(dirtyMap.policy)"
+          :saving="Boolean(sectionSaving.policy)"
+          @save="saveSection('policy')"
+        >
+          <div class="space-y-6">
+            <UFormGroup label="默认存储（Active）">
+              <USelect v-model="activeBackendDraft" :options="backendOptions" option-attribute="label" value-attribute="value" />
+            </UFormGroup>
 
-      <!-- 上传场景路由 -->
-      <UCard>
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:arrows-right-left" class="w-5 h-5 text-white" />
+            <div class="grid gap-4 md:grid-cols-2">
+              <UFormGroup label="游客上传">
+                <USelect v-model="policy.guest" :options="sceneBackendOptions" option-attribute="label" value-attribute="value" />
+              </UFormGroup>
+              <UFormGroup label="Token 上传">
+                <USelect v-model="policy.token" :options="sceneBackendOptions" option-attribute="label" value-attribute="value" />
+              </UFormGroup>
+              <UFormGroup label="群组上传">
+                <USelect v-model="policy.group" :options="sceneBackendOptions" option-attribute="label" value-attribute="value" />
+              </UFormGroup>
+              <UFormGroup label="管理员默认上传">
+                <USelect v-model="policy.admin_default" :options="sceneBackendOptions" option-attribute="label" value-attribute="value" />
+              </UFormGroup>
+            </div>
+
+            <div>
+              <p class="text-sm font-medium text-stone-700 dark:text-stone-300">管理员可用存储</p>
+              <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">不勾选表示允许全部后端</p>
+              <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <label
+                  v-for="name in backendNames"
+                  :key="name"
+                  class="flex cursor-pointer items-center gap-2 rounded-lg border border-stone-200/80 bg-white/80 p-2.5 hover:bg-stone-50 dark:border-neutral-700/80 dark:bg-neutral-900/70 dark:hover:bg-neutral-800/80"
+                >
+                  <input type="checkbox" class="h-4 w-4 accent-amber-500" :checked="policy.admin_allowed.includes(name)" @change="toggleAllowed(name)">
+                  <span class="text-sm text-stone-800 dark:text-stone-200">{{ name }}</span>
+                  <UBadge color="gray" variant="subtle" size="xs">{{ backends[name]?.driver }}</UBadge>
+                </label>
               </div>
-              <div>
-                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">上传场景路由</h3>
-                <p class="text-xs text-stone-500 dark:text-stone-400">为不同权限场景指定上传存储；选择"跟随默认"表示使用 Active</p>
+            </div>
+          </div>
+        </AdminStorageSectionCard>
+
+        <AdminStorageSectionCard
+          :id="sectionDomId('danger_upload')"
+          title="删除与上传测试"
+          description="删除联动和管理员上传验证"
+          icon="heroicons:cloud-arrow-up"
+          :dirty="Boolean(dirtyMap.danger_upload)"
+          :saving="Boolean(sectionSaving.danger_upload)"
+          @save="saveSection('danger_upload')"
+        >
+          <div class="space-y-4">
+            <div class="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-3 dark:border-neutral-700/80 dark:bg-neutral-800/70">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium text-stone-800 dark:text-stone-200">同步删除 TG 消息</p>
+                  <p class="text-xs text-stone-500 dark:text-stone-400">后台删除图片时同步删除 Telegram 消息</p>
+                </div>
+                <UToggle v-model="syncDeleteEnabled" />
               </div>
             </div>
-            <UButton color="primary" variant="outline" :loading="savingPolicy" @click="savePolicy">保存</UButton>
-          </div>
-        </template>
 
-        <div class="space-y-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">游客上传</label>
-              <USelect
-                v-model="policy.guest"
-                :options="sceneBackendOptions"
-                option-attribute="label"
-                value-attribute="value"
-              />
-              <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">匿名用户上传使用的存储</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Token 上传</label>
-              <USelect
-                v-model="policy.token"
-                :options="sceneBackendOptions"
-                option-attribute="label"
-                value-attribute="value"
-              />
-              <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">使用 Token 上传使用的存储</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">群组上传</label>
-              <USelect
-                v-model="policy.group"
-                :options="sceneBackendOptions"
-                option-attribute="label"
-                value-attribute="value"
-              />
-              <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">Telegram 群组上传使用的存储</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">管理员默认存储</label>
-              <USelect
-                v-model="policy.admin_default"
-                :options="sceneBackendOptions"
-                option-attribute="label"
-                value-attribute="value"
-              />
-              <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">管理员上传时的默认存储</p>
-            </div>
-          </div>
+            <div class="rounded-2xl border border-stone-200/80 bg-white/90 p-3 dark:border-neutral-700/80 dark:bg-neutral-900/70">
+              <p class="text-sm font-medium text-stone-900 dark:text-white">管理员上传测试</p>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <UFormGroup label="上传到指定存储">
+                  <USelect v-model="uploadBackend" :options="adminUploadBackendOptions" option-attribute="label" value-attribute="value" />
+                </UFormGroup>
+                <UFormGroup label="选择图片文件">
+                  <input
+                    ref="fileInput"
+                    type="file"
+                    accept="image/*"
+                    class="block w-full text-sm text-stone-500 file:mr-3 file:rounded-lg file:border-0 file:bg-amber-50 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-amber-700 hover:file:bg-amber-100 dark:file:bg-amber-900/20 dark:file:text-amber-300"
+                    @change="handleFileSelect"
+                  >
+                </UFormGroup>
+              </div>
 
-          <div>
-            <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">管理员可用存储</label>
-            <p class="text-xs text-stone-500 dark:text-stone-400 mb-3">不勾选任何项表示允许所有已配置存储</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              <label
-                v-for="name in backendNames"
-                :key="name"
-                class="flex items-center gap-2 p-2 rounded-lg border border-stone-200 dark:border-neutral-700 cursor-pointer hover:bg-stone-50 dark:hover:bg-neutral-800"
+              <div v-if="selectedFile" class="mt-3 rounded-lg border border-stone-200/80 bg-stone-50/80 p-2.5 text-sm text-stone-700 dark:border-neutral-700/80 dark:bg-neutral-800/70 dark:text-stone-200">
+                已选择：{{ selectedFile.name }}（{{ formatSize(selectedFile.size) }}）
+              </div>
+
+              <div class="mt-3">
+                <UButton color="primary" :loading="uploading" :disabled="!selectedFile" class="w-full sm:w-auto" @click="uploadFile">
+                  <template #leading><UIcon name="heroicons:cloud-arrow-up" /></template>
+                  立即上传
+                </UButton>
+              </div>
+
+              <div
+                v-if="uploadResult"
+                class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 text-sm text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-900/20 dark:text-emerald-200"
               >
-                <input
-                  type="checkbox"
-                  class="accent-amber-500 w-4 h-4"
-                  :checked="policy.admin_allowed.includes(name)"
-                  @change="toggleAllowed(name)"
-                />
-                <span class="text-sm text-stone-800 dark:text-stone-200">{{ name }}</span>
-                <UBadge color="gray" variant="subtle" size="xs">{{ backends[name]?.driver }}</UBadge>
-              </label>
-            </div>
-          </div>
-        </div>
-      </UCard>
-
-      <!-- 删除设置 -->
-      <UCard>
-        <template #header>
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:trash" class="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 class="text-lg font-semibold text-stone-900 dark:text-white">删除设置</h3>
-                <p class="text-xs text-stone-500 dark:text-stone-400">配置图片删除时的关联操作</p>
+                <p class="font-medium">上传成功</p>
+                <p class="mt-1 break-all">URL: <a :href="uploadResult.url" target="_blank" class="underline">{{ uploadResult.url }}</a></p>
               </div>
             </div>
-            <UButton color="primary" variant="outline" :loading="savingSyncDelete" @click="saveSyncDelete">保存</UButton>
           </div>
-        </template>
-
-        <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-          <div>
-            <p class="text-sm font-medium text-stone-700 dark:text-stone-300">同步删除 TG 消息</p>
-            <p class="text-xs text-stone-500 dark:text-stone-400">后台删除图片时同步删除 Telegram 中对应的消息</p>
-          </div>
-          <UToggle v-model="syncDeleteEnabled" />
-        </div>
-      </UCard>
-
-      <!-- 管理员上传测试 -->
-      <UCard>
-        <template #header>
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-600 rounded-lg flex items-center justify-center">
-              <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h3 class="text-lg font-semibold text-stone-900 dark:text-white">管理员上传</h3>
-              <p class="text-xs text-stone-500 dark:text-stone-400">可选择指定存储上传图片</p>
-            </div>
-          </div>
-        </template>
-
-        <div class="space-y-4">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">选择存储</label>
-              <USelect
-                v-model="uploadBackend"
-                :options="adminUploadBackendOptions"
-                option-attribute="label"
-                value-attribute="value"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">选择文件</label>
-              <input
-                ref="fileInput"
-                type="file"
-                accept="image/*"
-                class="block w-full text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100 dark:file:bg-amber-900/20 dark:file:text-amber-400"
-                @change="handleFileSelect"
-              />
-            </div>
-          </div>
-
-          <div v-if="selectedFile" class="p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-            <p class="text-sm text-stone-700 dark:text-stone-300">
-              已选择: {{ selectedFile.name }} ({{ formatSize(selectedFile.size) }})
-            </p>
-          </div>
-
-          <UButton
-            color="primary"
-            :loading="uploading"
-            :disabled="!selectedFile"
-            @click="uploadFile"
-          >
-            <template #leading>
-              <UIcon name="heroicons:cloud-arrow-up" />
-            </template>
-            上传
-          </UButton>
-
-          <div v-if="uploadResult" class="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
-            <p class="font-medium text-green-800 dark:text-green-200">上传成功</p>
-            <p class="text-sm text-green-600 dark:text-green-300 mt-1 break-all">
-              URL: <a :href="uploadResult.url" target="_blank" class="underline">{{ uploadResult.url }}</a>
-            </p>
-          </div>
-        </div>
-      </UCard>
+        </AdminStorageSectionCard>
+      </div>
     </template>
 
-    <!-- 添加/编辑存储模态框 -->
-    <UModal v-model="showBackendModal" :ui="{ width: 'sm:max-w-lg', height: 'max-h-[90vh]' }">
-      <UCard :ui="{ body: { base: 'overflow-y-auto' }, ring: '', divide: 'divide-y divide-gray-100 dark:divide-gray-800' }" class="flex flex-col max-h-[85vh]">
-        <template #header>
-          <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">
-              {{ editingBackend ? '编辑存储' : '添加存储' }}
-            </h3>
-            <UButton
-              icon="heroicons:x-mark"
-              color="gray"
-              variant="ghost"
-              size="xs"
-              @click="showBackendModal = false"
-            />
-          </div>
-        </template>
+    <AdminStorageBackendWizardModal
+      v-model="showBackendModal"
+      :editing-backend="editingBackend"
+      :form="backendDraftForm"
+      :group-upload="backendDraftGroupUpload"
+      :private-upload="backendDraftPrivateUpload"
+      :saving="savingBackend"
+      @submit="saveBackendFromWizard"
+    />
 
-        <div class="space-y-4">
-          <!-- 存储名称 -->
-          <div>
-            <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">存储名称</label>
-            <UInput
-              v-model="backendForm.name"
-              placeholder="例如: my-s3"
-              :disabled="!!editingBackend"
-            />
-            <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">唯一标识符，创建后不可修改</p>
-          </div>
-
-          <!-- 驱动类型 -->
-          <div>
-            <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">驱动类型</label>
-            <USelect
-              v-model="backendForm.driver"
-              :options="driverOptions"
-              option-attribute="label"
-              value-attribute="value"
-            />
-          </div>
-
-          <!-- Telegram 配置 -->
-          <template v-if="backendForm.driver === 'telegram'">
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Bot Token</label>
-              <UInput v-model="backendForm.bot_token" type="password" :placeholder="editingBackend ? '留空保持不变' : '留空使用环境变量 BOT_TOKEN'" />
-              <p v-if="editingBackend && backendForm.bot_token === '__MASKED__'" class="text-xs text-amber-600 dark:text-amber-400 mt-1">已配置（留空保持不变）</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Chat ID</label>
-              <UInput v-model="backendForm.chat_id" placeholder="留空使用环境变量 STORAGE_CHAT_ID" />
-            </div>
-
-            <!-- 同时用作机器人开关 -->
-            <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg mt-4">
-              <div>
-                <p class="text-sm font-medium text-stone-700 dark:text-stone-300">同时用作机器人</p>
-                <p class="text-xs text-stone-500 dark:text-stone-400">保存时将此 Bot Token 同步到 Telegram 机器人配置</p>
-              </div>
-              <UToggle v-model="backendForm.use_as_bot" />
-            </div>
-
-            <!-- 群组上传配置 -->
-            <div class="pt-4 border-t border-stone-200 dark:border-neutral-700">
-              <p class="font-medium text-stone-900 dark:text-white mb-4">群组上传设置</p>
-              <div class="space-y-4">
-                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-                  <div>
-                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">仅管理员可上传</p>
-                    <p class="text-xs text-stone-500 dark:text-stone-400">限制只有指定管理员才能通过群组上传</p>
-                  </div>
-                  <UToggle v-model="groupUpload.admin_only" />
-                </div>
-
-                <div v-if="groupUpload.admin_only">
-                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">管理员 ID</label>
-                  <UInput v-model="groupUpload.admin_ids" placeholder="多个 ID 用逗号分隔" />
-                  <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">Telegram 用户 ID，多个用逗号分隔</p>
-                </div>
-
-                <!-- 仅 TG 绑定用户可上传（admin_only 关闭时显示） -->
-                <div v-if="!groupUpload.admin_only" class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-                  <div>
-                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">仅 TG 绑定用户可上传</p>
-                    <p class="text-xs text-stone-500 dark:text-stone-400">限制只有绑定了 Token 的 Telegram 用户才能通过群组上传</p>
-                  </div>
-                  <UToggle v-model="groupUpload.tg_bound_only" />
-                </div>
-
-                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-                  <div>
-                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">自动回复链接</p>
-                    <p class="text-xs text-stone-500 dark:text-stone-400">上传成功后自动回复图片链接</p>
-                  </div>
-                  <UToggle v-model="groupUpload.reply" />
-                </div>
-
-                <div v-if="groupUpload.reply">
-                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">回复删除延迟（秒）</label>
-                  <UInput v-model.number="groupUpload.delete_delay" type="number" min="0" placeholder="0 表示不自动删除" />
-                </div>
-
-              </div>
-            </div>
-
-            <!-- 私聊上传配置 -->
-            <div class="pt-4 border-t border-stone-200 dark:border-neutral-700">
-              <p class="font-medium text-stone-900 dark:text-white mb-4">私聊上传设置</p>
-              <div class="space-y-4">
-                <!-- 总开关 -->
-                <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-                  <div>
-                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">允许私聊上传</p>
-                    <p class="text-xs text-stone-500 dark:text-stone-400">关闭后用户无法通过私聊 Bot 上传图片</p>
-                  </div>
-                  <UToggle v-model="privateUpload.enabled" />
-                </div>
-
-                <!-- 上传模式（总开关开启时显示） -->
-                <div v-if="privateUpload.enabled">
-                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">上传权限</label>
-                  <USelect v-model="privateUpload.mode" :options="privateUploadModeOptions" option-attribute="label" value-attribute="value" />
-                </div>
-
-                <!-- 管理员 ID（mode=admin_only 时显示） -->
-                <div v-if="privateUpload.enabled && privateUpload.mode === 'admin_only'">
-                  <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">管理员 ID</label>
-                  <UInput v-model="privateUpload.admin_ids" placeholder="多个 ID 用逗号分隔" />
-                  <p class="text-xs text-stone-500 dark:text-stone-400 mt-1">Telegram 用户 ID，多个用逗号分隔</p>
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <!-- Local 配置 -->
-          <template v-if="backendForm.driver === 'local'">
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">存储目录</label>
-              <UInput v-model="backendForm.root_dir" placeholder="例如: /data/uploads" />
-            </div>
-          </template>
-
-          <!-- S3 配置 -->
-          <template v-if="backendForm.driver === 's3'">
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Endpoint</label>
-              <UInput v-model="backendForm.endpoint" placeholder="例如: https://s3.amazonaws.com" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Bucket</label>
-              <UInput v-model="backendForm.bucket" placeholder="存储桶名称" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Access Key</label>
-              <UInput v-model="backendForm.access_key" type="password" :placeholder="editingBackend ? '留空保持不变' : '访问密钥'" />
-              <p v-if="editingBackend && backendForm.access_key === '__MASKED__'" class="text-xs text-amber-600 dark:text-amber-400 mt-1">已配置（留空保持不变）</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Secret Key</label>
-              <UInput v-model="backendForm.secret_key" type="password" :placeholder="editingBackend ? '留空保持不变' : '密钥'" />
-              <p v-if="editingBackend && backendForm.secret_key === '__MASKED__'" class="text-xs text-amber-600 dark:text-amber-400 mt-1">已配置（留空保持不变）</p>
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Region</label>
-              <UInput v-model="backendForm.region" placeholder="例如: us-east-1" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">公开 URL 前缀</label>
-              <UInput v-model="backendForm.public_url_prefix" placeholder="例如: https://cdn.example.com" />
-            </div>
-            <div class="flex items-center gap-2">
-              <input type="checkbox" v-model="backendForm.path_style" class="accent-amber-500 w-4 h-4" />
-              <label class="text-sm text-stone-700 dark:text-stone-300">使用 Path Style</label>
-            </div>
-          </template>
-
-          <!-- Rclone 配置 -->
-          <template v-if="backendForm.driver === 'rclone'">
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">Remote 名称</label>
-              <UInput v-model="backendForm.remote" placeholder="rclone 配置中的 remote 名称" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">基础路径</label>
-              <UInput v-model="backendForm.base_path" placeholder="remote 下的基础路径" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">rclone 可执行文件</label>
-              <UInput v-model="backendForm.rclone_bin" placeholder="默认: rclone" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">配置文件路径</label>
-              <UInput v-model="backendForm.config_path" placeholder="留空使用默认配置" />
-            </div>
-          </template>
-        </div>
-
-        <template #footer>
-          <div class="flex justify-end gap-2">
-            <UButton color="gray" variant="outline" @click="showBackendModal = false">取消</UButton>
-            <UButton color="primary" :loading="savingBackend" @click="saveBackend">
-              {{ editingBackend ? '保存' : '添加' }}
-            </UButton>
-          </div>
-        </template>
-      </UCard>
-    </UModal>
-
-    <!-- 删除确认模态框 -->
     <UModal v-model="showDeleteModal">
       <UCard>
         <template #header>
           <h3 class="text-lg font-semibold text-stone-900 dark:text-white">确认删除</h3>
         </template>
-        <p class="text-stone-700 dark:text-stone-300">
-          确定要删除存储 <strong>{{ deletingBackend }}</strong> 吗？此操作不可撤销。
-        </p>
+        <p class="text-stone-700 dark:text-stone-300">确定要删除存储 <strong>{{ deletingBackend }}</strong> 吗？</p>
         <template #footer>
           <div class="flex justify-end gap-2">
             <UButton color="gray" variant="outline" @click="showDeleteModal = false">取消</UButton>
@@ -526,171 +262,110 @@
 </template>
 
 <script setup lang="ts">
-definePageMeta({
-  layout: 'admin',
-  middleware: 'auth'
-})
+import { nextTick } from 'vue'
+import type {
+  StorageBackendForm,
+  StorageDirtyMap,
+  StorageGroupUploadForm,
+  StoragePrivateUploadForm,
+  StorageSectionItem,
+  StorageSectionKey,
+} from '~/types/admin-storage'
+
+definePageMeta({ layout: 'admin', middleware: 'auth' })
+
+interface BackendInfo { driver: string; active?: boolean }
+interface UploadResult { url: string; encrypted_id?: string; filename: string; size: string }
+interface StoragePolicy { guest: string; token: string; group: string; admin_default: string; admin_allowed: string[] }
 
 const runtimeConfig = useRuntimeConfig()
 const notification = useNotification()
 
-// 状态
-const loading = ref(false)
-const savingActive = ref(false)
-const savingPolicy = ref(false)
-const uploading = ref(false)
-const savingBackend = ref(false)
-const deleting = ref(false)
-const savingGroupUpload = ref(false)
-const savingSyncDelete = ref(false)
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+const stableStringify = (value: any): string => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const keys = Object.keys(value).sort()
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+}
 
-// 环境变量覆盖标志
-const envOverride = ref(false)
-
-// 存储数据
-const backends = ref<Record<string, { driver: string; active: boolean }>>({})
-const health = ref<Record<string, boolean>>({})
-const activeBackend = ref<string>('')
-const activeBackendDraft = ref<string>('')
-
-// 策略数据
-const policy = ref<{
-  guest: string
-  token: string
-  group: string
-  admin_default: string
-  admin_allowed: string[]
-}>({
-  guest: '',
-  token: '',
-  group: '',
-  admin_default: '',
-  admin_allowed: []
+const createDefaultPolicy = (): StoragePolicy => ({ guest: '', token: '', group: '', admin_default: '', admin_allowed: [] })
+const createDefaultGroupUpload = (): StorageGroupUploadForm => ({ admin_only: false, admin_ids: '', tg_bound_only: false, reply: true, delete_delay: 0 })
+const createDefaultPrivateUpload = (): StoragePrivateUploadForm => ({ enabled: true, mode: 'open', admin_ids: '' })
+const createDefaultBackendForm = (): StorageBackendForm => ({
+  name: '', driver: 'telegram', bot_token: '', chat_id: '', root_dir: '', endpoint: '', bucket: '',
+  access_key: '', secret_key: '', region: '', public_url_prefix: '', path_style: false,
+  remote: '', base_path: '', rclone_bin: '', config_path: '', use_as_bot: false,
 })
 
-// 群组上传配置
-const groupUpload = ref({
-  admin_only: false,
-  admin_ids: '',
-  tg_bound_only: false,
-  reply: true,
-  delete_delay: 0
-})
-
-// 同步删除 TG 消息（独立设置）
-const syncDeleteEnabled = ref(true)
-
-// 私聊上传配置
-const privateUpload = ref({
-  enabled: true,
-  mode: 'open',
-  admin_ids: ''
-})
-
-const privateUploadModeOptions = [
-  { label: '所有人可上传', value: 'open' },
-  { label: '仅 TG 绑定用户', value: 'tg_bound' },
-  { label: '仅指定管理员', value: 'admin_only' },
+const sectionItems: StorageSectionItem[] = [
+  { key: 'overview', label: '概览', description: '总体状态', icon: 'heroicons:signal' },
+  { key: 'backends', label: '存储管理', description: '后端列表', icon: 'heroicons:circle-stack' },
+  { key: 'policy', label: '路由策略', description: '默认与场景规则', icon: 'heroicons:arrows-right-left' },
+  { key: 'danger_upload', label: '删除与上传', description: '联动与测试', icon: 'heroicons:cloud-arrow-up' },
 ]
 
-// 上传相关
-const uploadBackend = ref<string>('')
-const selectedFile = ref<File | null>(null)
-const fileInput = ref<HTMLInputElement | null>(null)
-const uploadResult = ref<{ url: string; filename: string; size: string } | null>(null)
+const loading = ref(false)
+const initialLoaded = ref(false)
+const savingAll = ref(false)
+const sectionSaving = ref<Partial<Record<StorageSectionKey, boolean>>>({})
+const savingBackend = ref(false)
+const deleting = ref(false)
+const uploading = ref(false)
 
-// 存储管理模态框
+const envOverride = ref(false)
+const backends = ref<Record<string, BackendInfo>>({})
+const backendConfigs = ref<Record<string, any>>({})
+const health = ref<Record<string, boolean>>({})
+const activeBackend = ref('')
+const activeBackendDraft = ref('')
+const policy = ref<StoragePolicy>(createDefaultPolicy())
+const originalPolicy = ref<StoragePolicy>(createDefaultPolicy())
+const syncDeleteEnabled = ref(true)
+const originalSyncDeleteEnabled = ref(true)
+const groupUpload = ref<StorageGroupUploadForm>(createDefaultGroupUpload())
+const privateUpload = ref<StoragePrivateUploadForm>(createDefaultPrivateUpload())
+
 const showBackendModal = ref(false)
 const showDeleteModal = ref(false)
 const editingBackend = ref<string | null>(null)
-const deletingBackend = ref<string>('')
+const deletingBackend = ref('')
+const backendDraftForm = ref<StorageBackendForm>(createDefaultBackendForm())
+const backendDraftGroupUpload = ref<StorageGroupUploadForm>(createDefaultGroupUpload())
+const backendDraftPrivateUpload = ref<StoragePrivateUploadForm>(createDefaultPrivateUpload())
 
-// 存储表单
-const backendForm = ref<{
-  name: string
-  driver: string
-  // telegram
-  bot_token: string
-  chat_id: string
-  // local
-  root_dir: string
-  // s3
-  endpoint: string
-  bucket: string
-  access_key: string
-  secret_key: string
-  region: string
-  public_url_prefix: string
-  path_style: boolean
-  // rclone
-  remote: string
-  base_path: string
-  rclone_bin: string
-  config_path: string
-  // 联动标志
-  use_as_bot: boolean
-}>({
-  name: '',
-  driver: 'telegram',
-  bot_token: '',
-  chat_id: '',
-  root_dir: '',
-  endpoint: '',
-  bucket: '',
-  access_key: '',
-  secret_key: '',
-  region: '',
-  public_url_prefix: '',
-  path_style: false,
-  remote: '',
-  base_path: '',
-  rclone_bin: '',
-  config_path: '',
-  use_as_bot: false
-})
+const uploadBackend = ref('')
+const selectedFile = ref<File | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const uploadResult = ref<UploadResult | null>(null)
 
-// 驱动选项
-const driverOptions = [
-  { value: 'telegram', label: 'Telegram' },
-  { value: 'local', label: '本地存储' },
-  { value: 's3', label: 'S3 兼容存储' },
-  { value: 'rclone', label: 'Rclone' }
-]
+const activeSection = ref<StorageSectionKey>('overview')
+let sectionObserver: IntersectionObserver | null = null
 
-// 存储配置详情（用于编辑）
-const backendConfigs = ref<Record<string, any>>({})
-
-// 计算属性
 const backendNames = computed(() => Object.keys(backends.value || {}))
-const backendOptions = computed(() =>
-  backendNames.value.map((name) => ({
-    value: name,
-    label: `${name} (${backends.value[name]?.driver || 'unknown'})`
-  }))
-)
-const sceneBackendOptions = computed(() => [
-  { value: '', label: '跟随默认 (Active)' },
-  ...backendOptions.value
-])
+const backendOptions = computed(() => backendNames.value.map((name) => ({ value: name, label: `${name} (${backends.value[name]?.driver || 'unknown'})` })))
+const sceneBackendOptions = computed(() => [{ value: '', label: '跟随默认 (Active)' }, ...backendOptions.value])
 const adminUploadBackendOptions = computed(() => {
   const allowed = policy.value.admin_allowed
-  if (allowed.length === 0) {
-    return [{ value: '', label: '使用管理员默认存储' }, ...backendOptions.value]
-  }
-  return [
-    { value: '', label: '使用管理员默认存储' },
-    ...backendOptions.value.filter((opt) => allowed.includes(opt.value))
-  ]
+  if (allowed.length === 0) return [{ value: '', label: '使用管理员默认存储' }, ...backendOptions.value]
+  return [{ value: '', label: '使用管理员默认存储' }, ...backendOptions.value.filter((opt) => allowed.includes(opt.value))]
 })
+const healthyCount = computed(() => backendNames.value.filter((name) => health.value[name] === true).length)
+const unhealthyCount = computed(() => backendNames.value.filter((name) => health.value[name] === false).length)
+const activeDriver = computed(() => (activeBackend.value ? backends.value[activeBackend.value]?.driver || '--' : '--'))
 
-// 格式化文件大小
-const formatSize = (bytes: number): string => {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
-}
+const dirtyMap = computed<StorageDirtyMap>(() => ({
+  overview: false,
+  backends: false,
+  policy: activeBackendDraft.value !== activeBackend.value || stableStringify(policy.value) !== stableStringify(originalPolicy.value),
+  danger_upload: syncDeleteEnabled.value !== originalSyncDeleteEnabled.value,
+}))
+const dirtyCount = computed(() => Object.values(dirtyMap.value).filter(Boolean).length)
+const isAnyDirty = computed(() => dirtyCount.value > 0)
+const sectionDomId = (key: StorageSectionKey) => `storage-section-${key}`
 
-// 加载所有数据
+const formatSize = (bytes: number): string => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+
 const loadAll = async () => {
   loading.value = true
   try {
@@ -699,46 +374,31 @@ const loadAll = async () => {
       $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/health`, { credentials: 'include' }),
       $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/policy`, { credentials: 'include' }),
       $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/config`, { credentials: 'include' }),
-      $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, { credentials: 'include' })
+      $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, { credentials: 'include' }),
     ])
 
     backends.value = storageResp?.data?.backends || {}
     activeBackend.value = storageResp?.data?.active || ''
     activeBackendDraft.value = activeBackend.value
     health.value = healthResp?.data || {}
-
-    if (policyResp?.data?.policy) {
-      policy.value = {
-        guest: policyResp.data.policy.guest || '',
-        token: policyResp.data.policy.token || '',
-        group: policyResp.data.policy.group || '',
-        admin_default: policyResp.data.policy.admin_default || '',
-        admin_allowed: policyResp.data.policy.admin_allowed || []
-      }
-    }
-
-    // 加载配置详情
-    envOverride.value = configResp?.data?.env_override || false
+    envOverride.value = Boolean(configResp?.data?.env_override)
     backendConfigs.value = configResp?.data?.backends || {}
 
-    // 加载群组上传配置
-    if (settingsResp?.data) {
-      const d = settingsResp.data
-      groupUpload.value = {
-        admin_only: d.group_upload_admin_only ?? false,
-        admin_ids: d.group_admin_ids ?? '',
-        tg_bound_only: d.group_upload_tg_bound_only ?? false,
-        reply: d.group_upload_reply ?? true,
-        delete_delay: d.group_upload_delete_delay ?? 0
-      }
-      privateUpload.value = {
-        enabled: d.bot_private_upload_enabled ?? true,
-        mode: d.bot_private_upload_mode ?? 'open',
-        admin_ids: d.bot_private_admin_ids ?? ''
-      }
-      // 独立加载同步删除设置
-      syncDeleteEnabled.value = d.tg_sync_delete_enabled ?? true
+    policy.value = {
+      guest: policyResp?.data?.policy?.guest || '',
+      token: policyResp?.data?.policy?.token || '',
+      group: policyResp?.data?.policy?.group || '',
+      admin_default: policyResp?.data?.policy?.admin_default || '',
+      admin_allowed: policyResp?.data?.policy?.admin_allowed || [],
     }
+    originalPolicy.value = clone(policy.value)
+
+    const d = settingsResp?.data || {}
+    groupUpload.value = { admin_only: d.group_upload_admin_only ?? false, admin_ids: d.group_admin_ids ?? '', tg_bound_only: d.group_upload_tg_bound_only ?? false, reply: d.group_upload_reply ?? true, delete_delay: d.group_upload_delete_delay ?? 0 }
+    privateUpload.value = { enabled: d.bot_private_upload_enabled ?? true, mode: d.bot_private_upload_mode ?? 'open', admin_ids: d.bot_private_admin_ids ?? '' }
+    syncDeleteEnabled.value = d.tg_sync_delete_enabled ?? true
+    originalSyncDeleteEnabled.value = syncDeleteEnabled.value
+    initialLoaded.value = true
   } catch (e: any) {
     console.error('加载存储配置失败:', e)
     notification.error('加载失败', e?.data?.error || '无法获取存储配置')
@@ -747,302 +407,210 @@ const loadAll = async () => {
   }
 }
 
-// 保存默认存储
-const saveActive = async () => {
-  if (!activeBackendDraft.value) return
-  savingActive.value = true
+const saveActiveIfNeeded = async (): Promise<boolean> => {
+  if (activeBackendDraft.value === activeBackend.value) return false
+  if (!activeBackendDraft.value) throw new Error('请选择默认存储')
+  const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/active`, { method: 'POST', body: { backend: activeBackendDraft.value }, credentials: 'include' })
+  if (!resp?.success) throw new Error(resp?.error || '默认存储保存失败')
+  activeBackend.value = activeBackendDraft.value
+  return true
+}
+
+const savePolicyIfNeeded = async (): Promise<boolean> => {
+  if (stableStringify(policy.value) === stableStringify(originalPolicy.value)) return false
+  const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/policy`, { method: 'PUT', body: { policy: policy.value }, credentials: 'include' })
+  if (!resp?.success) throw new Error(resp?.error || '路由策略保存失败')
+  originalPolicy.value = clone(policy.value)
+  return true
+}
+
+const saveSyncDeleteIfNeeded = async (): Promise<boolean> => {
+  if (syncDeleteEnabled.value === originalSyncDeleteEnabled.value) return false
+  const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, { method: 'PUT', body: { tg_sync_delete_enabled: syncDeleteEnabled.value }, credentials: 'include' })
+  if (!resp?.success) throw new Error(resp?.error || '删除联动保存失败')
+  originalSyncDeleteEnabled.value = syncDeleteEnabled.value
+  return true
+}
+
+const saveSection = async (key: StorageSectionKey) => {
+  sectionSaving.value[key] = true
   try {
-    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/active`, {
-      method: 'POST',
-      body: { backend: activeBackendDraft.value },
-      credentials: 'include'
-    })
-    if (!resp?.success) throw new Error(resp?.error || '切换失败')
-    notification.success('已保存', `默认存储已切换到 ${activeBackendDraft.value}`)
+    if (key === 'policy') {
+      const a = await saveActiveIfNeeded()
+      const p = await savePolicyIfNeeded()
+      if (!a && !p) notification.info('无变更', '默认存储和路由策略没有变化')
+      else { notification.success('已保存', '默认存储与路由策略已更新'); await loadAll() }
+    }
+    if (key === 'danger_upload') {
+      const changed = await saveSyncDeleteIfNeeded()
+      if (!changed) notification.info('无变更', '删除联动设置没有变化')
+      else notification.success('已保存', '删除联动设置已更新')
+    }
+  } catch (e: any) {
+    console.error(`保存分组失败 [${key}]:`, e)
+    notification.error('保存失败', e?.data?.error || e?.message || '分组保存失败')
+  } finally {
+    sectionSaving.value[key] = false
+  }
+}
+
+const saveAllChanges = async () => {
+  savingAll.value = true
+  try {
+    const a = await saveActiveIfNeeded()
+    const p = await savePolicyIfNeeded()
+    const s = await saveSyncDeleteIfNeeded()
+    if (!a && !p && !s) { notification.info('无变更', '当前没有需要保存的内容'); return }
+    notification.success('已保存', '存储设置已全部更新')
     await loadAll()
   } catch (e: any) {
-    console.error('切换默认存储失败:', e)
-    notification.error('保存失败', e?.data?.error || e?.message || '无法切换默认存储')
+    console.error('保存全部失败:', e)
+    notification.error('保存失败', e?.data?.error || e?.message || '无法保存全部设置')
   } finally {
-    savingActive.value = false
+    savingAll.value = false
   }
 }
 
-// 保存策略
-const savePolicy = async () => {
-  savingPolicy.value = true
-  try {
-    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/policy`, {
-      method: 'PUT',
-      body: { policy: policy.value },
-      credentials: 'include'
-    })
-    if (!resp?.success) throw new Error(resp?.error || '保存失败')
-    notification.success('已保存', '上传场景路由已更新')
-    await loadAll()
-  } catch (e: any) {
-    console.error('保存策略失败:', e)
-    notification.error('保存失败', e?.data?.error || e?.message || '无法保存路由策略')
-  } finally {
-    savingPolicy.value = false
-  }
+const resetUnsaved = () => {
+  activeBackendDraft.value = activeBackend.value
+  policy.value = clone(originalPolicy.value)
+  syncDeleteEnabled.value = originalSyncDeleteEnabled.value
+  notification.info('已重置', '未保存修改已恢复')
 }
 
-// 保存群组上传配置
-const saveGroupUpload = async (silent = false) => {
-  savingGroupUpload.value = true
-  try {
-    const payload = {
-      group_upload_admin_only: groupUpload.value.admin_only,
-      group_admin_ids: groupUpload.value.admin_ids,
-      group_upload_tg_bound_only: groupUpload.value.tg_bound_only,
-      group_upload_reply: groupUpload.value.reply,
-      group_upload_delete_delay: groupUpload.value.delete_delay,
-      bot_private_upload_enabled: privateUpload.value.enabled,
-      bot_private_upload_mode: privateUpload.value.mode,
-      bot_private_admin_ids: privateUpload.value.admin_ids,
-    }
-    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
-      method: 'PUT',
-      body: payload,
-      credentials: 'include'
-    })
-    if (!resp?.success) throw new Error(resp?.error || '保存失败')
-  } catch (e: any) {
-    console.error('保存群组上传配置失败:', e)
-    if (!silent) {
-      notification.error('保存失败', e?.data?.error || e?.message || '无法保存群组上传配置')
-    }
-    throw e
-  } finally {
-    savingGroupUpload.value = false
-  }
-}
-
-// 保存同步删除设置
-const saveSyncDelete = async () => {
-  savingSyncDelete.value = true
-  try {
-    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
-      method: 'PUT',
-      body: { tg_sync_delete_enabled: syncDeleteEnabled.value },
-      credentials: 'include'
-    })
-    if (!resp?.success) throw new Error(resp?.error || '保存失败')
-    notification.success('已保存', '删除设置已更新')
-  } catch (e: any) {
-    console.error('保存同步删除设置失败:', e)
-    notification.error('保存失败', e?.data?.error || e?.message || '无法保存删除设置')
-  } finally {
-    savingSyncDelete.value = false
-  }
-}
-
-// 切换管理员可用存储
 const toggleAllowed = (name: string) => {
-  const arr = policy.value.admin_allowed
-  const idx = arr.indexOf(name)
-  if (idx >= 0) {
-    arr.splice(idx, 1)
-  } else {
-    arr.push(name)
-  }
+  const next = new Set(policy.value.admin_allowed)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  policy.value.admin_allowed = Array.from(next)
 }
 
-// 处理文件选择
 const handleFileSelect = (event: Event) => {
   const target = event.target as HTMLInputElement
-  if (target.files && target.files.length > 0) {
-    selectedFile.value = target.files[0]
-    uploadResult.value = null
-  }
+  if (target.files?.length) { selectedFile.value = target.files[0]; uploadResult.value = null }
 }
 
-// 上传文件
 const uploadFile = async () => {
   if (!selectedFile.value) return
-
   uploading.value = true
   uploadResult.value = null
-
   try {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
-    if (uploadBackend.value) {
-      formData.append('backend', uploadBackend.value)
-    }
-
-    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/upload`, {
-      method: 'POST',
-      body: formData,
-      credentials: 'include'
-    })
-
+    if (uploadBackend.value) formData.append('backend', uploadBackend.value)
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/upload`, { method: 'POST', body: formData, credentials: 'include' })
     if (!resp?.success) throw new Error(resp?.error || '上传失败')
-
     uploadResult.value = resp.data
-    notification.success('上传成功', `文件已上传到 ${uploadBackend.value || '默认存储'}`)
-
-    // 清空文件选择
+    notification.success('上传成功', `文件已上传到 ${uploadBackend.value || '管理员默认存储'}`)
     selectedFile.value = null
-    if (fileInput.value) {
-      fileInput.value.value = ''
-    }
+    if (fileInput.value) fileInput.value.value = ''
   } catch (e: any) {
     console.error('上传失败:', e)
     notification.error('上传失败', e?.data?.error || e?.message || '无法上传文件')
-  } finally {
-    uploading.value = false
-  }
+  } finally { uploading.value = false }
 }
 
-// 重置表单
-const resetBackendForm = () => {
-  backendForm.value = {
-    name: '',
-    driver: 'telegram',
-    bot_token: '',
-    chat_id: '',
-    root_dir: '',
-    endpoint: '',
-    bucket: '',
-    access_key: '',
-    secret_key: '',
-    region: '',
-    public_url_prefix: '',
-    path_style: false,
-    remote: '',
-    base_path: '',
-    rclone_bin: '',
-    config_path: '',
-    use_as_bot: false
-  }
-}
-
-// 打开添加模态框
 const openAddModal = () => {
   editingBackend.value = null
-  resetBackendForm()
+  backendDraftForm.value = createDefaultBackendForm()
+  backendDraftGroupUpload.value = clone(groupUpload.value)
+  backendDraftPrivateUpload.value = clone(privateUpload.value)
   showBackendModal.value = true
 }
 
-// 打开编辑模态框
 const openEditModal = (name: string) => {
-  editingBackend.value = name
   const cfg = backendConfigs.value[name] || {}
-  backendForm.value = {
-    name,
-    driver: cfg.driver || 'telegram',
-    bot_token: cfg.bot_token || '',
-    chat_id: cfg.chat_id || '',
-    root_dir: cfg.root_dir || '',
-    endpoint: cfg.endpoint || '',
-    bucket: cfg.bucket || '',
-    access_key: cfg.access_key || '',
-    secret_key: cfg.secret_key || '',
-    region: cfg.region || '',
-    public_url_prefix: cfg.public_url_prefix || '',
-    path_style: cfg.path_style || false,
-    remote: cfg.remote || '',
-    base_path: cfg.base_path || '',
-    rclone_bin: cfg.rclone_bin || '',
-    config_path: cfg.config_path || '',
-    use_as_bot: cfg.is_bot || false
+  editingBackend.value = name
+  backendDraftForm.value = {
+    name, driver: cfg.driver || 'telegram', bot_token: cfg.bot_token || '', chat_id: cfg.chat_id || '',
+    root_dir: cfg.root_dir || '', endpoint: cfg.endpoint || '', bucket: cfg.bucket || '', access_key: cfg.access_key || '',
+    secret_key: cfg.secret_key || '', region: cfg.region || '', public_url_prefix: cfg.public_url_prefix || '',
+    path_style: cfg.path_style || false, remote: cfg.remote || '', base_path: cfg.base_path || '', rclone_bin: cfg.rclone_bin || '',
+    config_path: cfg.config_path || '', use_as_bot: cfg.is_bot || false,
   }
+  backendDraftGroupUpload.value = clone(groupUpload.value)
+  backendDraftPrivateUpload.value = clone(privateUpload.value)
   showBackendModal.value = true
 }
 
-// 构建存储配置对象
-const buildBackendConfig = () => {
-  const form = backendForm.value
+const buildBackendConfig = (form: StorageBackendForm) => {
   const config: Record<string, any> = { driver: form.driver }
-
-  if (form.driver === 'telegram') {
-    if (form.bot_token) config.bot_token = form.bot_token
-    if (form.chat_id) config.chat_id = form.chat_id
-  } else if (form.driver === 'local') {
-    if (form.root_dir) config.root_dir = form.root_dir
-  } else if (form.driver === 's3') {
+  if (form.driver === 'telegram') { if (form.bot_token) config.bot_token = form.bot_token; if (form.chat_id) config.chat_id = form.chat_id }
+  if (form.driver === 'local') { if (form.root_dir) config.root_dir = form.root_dir }
+  if (form.driver === 's3') {
     if (form.endpoint) config.endpoint = form.endpoint
     if (form.bucket) config.bucket = form.bucket
     if (form.access_key) config.access_key = form.access_key
     if (form.secret_key) config.secret_key = form.secret_key
     if (form.region) config.region = form.region
     if (form.public_url_prefix) config.public_url_prefix = form.public_url_prefix
-    config.path_style = form.path_style
-  } else if (form.driver === 'rclone') {
+    config.path_style = Boolean(form.path_style)
+  }
+  if (form.driver === 'rclone') {
     if (form.remote) config.remote = form.remote
     if (form.base_path) config.base_path = form.base_path
     if (form.rclone_bin) config.rclone_bin = form.rclone_bin
     if (form.config_path) config.config_path = form.config_path
   }
-
   return config
 }
 
-// 保存存储
-const saveBackend = async () => {
-  const form = backendForm.value
-  if (!form.name && !editingBackend.value) {
-    notification.error('错误', '请输入存储名称')
-    return
+const saveGroupUpload = async (nextGroupUpload: StorageGroupUploadForm, nextPrivateUpload: StoragePrivateUploadForm, silent = false) => {
+  try {
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/system/settings`, {
+      method: 'PUT',
+      body: {
+        group_upload_admin_only: nextGroupUpload.admin_only,
+        group_admin_ids: nextGroupUpload.admin_ids,
+        group_upload_tg_bound_only: nextGroupUpload.tg_bound_only,
+        group_upload_reply: nextGroupUpload.reply,
+        group_upload_delete_delay: nextGroupUpload.delete_delay,
+        bot_private_upload_enabled: nextPrivateUpload.enabled,
+        bot_private_upload_mode: nextPrivateUpload.mode,
+        bot_private_admin_ids: nextPrivateUpload.admin_ids,
+      },
+      credentials: 'include',
+    })
+    if (!resp?.success) throw new Error(resp?.error || '保存失败')
+    groupUpload.value = clone(nextGroupUpload)
+    privateUpload.value = clone(nextPrivateUpload)
+  } catch (e: any) {
+    console.error('保存 Telegram 上传设置失败:', e)
+    if (!silent) notification.error('保存失败', e?.data?.error || e?.message || '无法保存 Telegram 上传设置')
+    throw e
   }
+}
 
+const saveBackendFromWizard = async (payload: { form: StorageBackendForm; groupUpload: StorageGroupUploadForm; privateUpload: StoragePrivateUploadForm }) => {
+  const form = clone(payload.form)
+  const name = (editingBackend.value || form.name || '').trim()
+  if (!name) { notification.error('错误', '请输入存储名称'); return }
   savingBackend.value = true
   try {
-    const config = buildBackendConfig()
-    const name = editingBackend.value || form.name
-
+    const config = buildBackendConfig(form)
     if (editingBackend.value) {
-      // 编辑
-      const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends/${encodeURIComponent(name)}`, {
-        method: 'PUT',
-        body: { config, use_as_bot: form.use_as_bot },
-        credentials: 'include'
-      })
+      const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends/${encodeURIComponent(name)}`, { method: 'PUT', body: { config, use_as_bot: form.use_as_bot }, credentials: 'include' })
       if (!resp?.success) throw new Error(resp?.error || '更新失败')
     } else {
-      // 添加
-      const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends`, {
-        method: 'POST',
-        body: { name, config, use_as_bot: form.use_as_bot },
-        credentials: 'include'
-      })
+      const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends`, { method: 'POST', body: { name, config, use_as_bot: form.use_as_bot }, credentials: 'include' })
       if (!resp?.success) throw new Error(resp?.error || '添加失败')
     }
-
-    // 如果是 Telegram 驱动，同时保存群组上传配置
-    if (form.driver === 'telegram') {
-      await saveGroupUpload(true)
-    }
-
+    if (form.driver === 'telegram') await saveGroupUpload(payload.groupUpload, payload.privateUpload, true)
     notification.success('已保存', `存储 ${name} ${editingBackend.value ? '更新' : '添加'}成功`)
     showBackendModal.value = false
     await loadAll()
   } catch (e: any) {
     console.error('保存存储失败:', e)
     notification.error('保存失败', e?.data?.error || e?.message || '无法保存存储配置')
-  } finally {
-    savingBackend.value = false
-  }
+  } finally { savingBackend.value = false }
 }
 
-// 确认删除
-const confirmDelete = (name: string) => {
-  deletingBackend.value = name
-  showDeleteModal.value = true
-}
-
-// 删除存储
+const confirmDelete = (name: string) => { deletingBackend.value = name; showDeleteModal.value = true }
 const deleteBackend = async () => {
   if (!deletingBackend.value) return
-
   deleting.value = true
   try {
-    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends/${encodeURIComponent(deletingBackend.value)}`, {
-      method: 'DELETE',
-      credentials: 'include'
-    })
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/storage/backends/${encodeURIComponent(deletingBackend.value)}`, { method: 'DELETE', credentials: 'include' })
     if (!resp?.success) throw new Error(resp?.error || '删除失败')
     notification.success('已删除', `存储 ${deletingBackend.value} 已删除`)
     showDeleteModal.value = false
@@ -1050,13 +618,39 @@ const deleteBackend = async () => {
   } catch (e: any) {
     console.error('删除存储失败:', e)
     notification.error('删除失败', e?.data?.error || e?.message || '无法删除存储')
-  } finally {
-    deleting.value = false
+  } finally { deleting.value = false }
+}
+
+const scrollToSection = (key: StorageSectionKey) => {
+  activeSection.value = key
+  if (!import.meta.client) return
+  const target = document.getElementById(sectionDomId(key))
+  if (!target) return
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+const initSectionObserver = () => {
+  if (!import.meta.client) return
+  sectionObserver?.disconnect()
+  sectionObserver = new IntersectionObserver((entries) => {
+    const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+    if (!visible) return
+    const matched = sectionItems.find((item) => sectionDomId(item.key) === visible.target.id)
+    if (matched) activeSection.value = matched.key
+  }, { root: null, rootMargin: '-15% 0px -65% 0px', threshold: [0.2, 0.4, 0.7] })
+  for (const item of sectionItems) {
+    const el = document.getElementById(sectionDomId(item.key))
+    if (el) sectionObserver.observe(el)
   }
 }
 
-// 页面加载
-onMounted(() => {
-  loadAll()
+onMounted(async () => {
+  await loadAll()
+  await nextTick()
+  initSectionObserver()
+})
+onBeforeUnmount(() => {
+  sectionObserver?.disconnect()
+  sectionObserver = null
 })
 </script>

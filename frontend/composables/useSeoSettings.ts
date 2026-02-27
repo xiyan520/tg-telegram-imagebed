@@ -17,7 +17,7 @@ function _readCache() {
 }
 
 /** 写入 localStorage 缓存 */
-function _writeCache(data: Record<string, string>) {
+function _writeCache(data: Record<string, any>) {
   if (typeof window === 'undefined') return
   try {
     localStorage.setItem(SEO_CACHE_KEY, JSON.stringify(data))
@@ -40,6 +40,17 @@ export const useSeoSettings = () => {
       ogTitle: cached?.ogTitle || '',
       ogDescription: cached?.ogDescription || '',
       ogImage: cached?.ogImage || '',
+      ogSiteName: cached?.ogSiteName || '',
+      ogType: (cached?.ogType || 'website') as 'website' | 'article' | 'profile',
+      canonicalUrl: cached?.canonicalUrl || '',
+      robotsIndex: cached?.robotsIndex !== false,
+      robotsFollow: cached?.robotsFollow !== false,
+      twitterCardType: (cached?.twitterCardType || 'summary_large_image') as 'summary' | 'summary_large_image',
+      twitterSite: cached?.twitterSite || '',
+      twitterCreator: cached?.twitterCreator || '',
+      author: cached?.author || '',
+      themeColor: cached?.themeColor || '',
+      defaultLocale: cached?.defaultLocale || 'zh_CN',
       footerText: cached?.footerText || '',
       loaded: false,
     }
@@ -73,6 +84,17 @@ export const useSeoSettings = () => {
         seoSettings.value.ogTitle = res.data.seo_og_title || ''
         seoSettings.value.ogDescription = res.data.seo_og_description || ''
         seoSettings.value.ogImage = res.data.seo_og_image || ''
+        seoSettings.value.ogSiteName = res.data.seo_og_site_name || ''
+        seoSettings.value.ogType = res.data.seo_og_type || 'website'
+        seoSettings.value.canonicalUrl = res.data.seo_canonical_url || ''
+        seoSettings.value.robotsIndex = res.data.seo_robots_index !== false
+        seoSettings.value.robotsFollow = res.data.seo_robots_follow !== false
+        seoSettings.value.twitterCardType = res.data.seo_twitter_card_type || 'summary_large_image'
+        seoSettings.value.twitterSite = res.data.seo_twitter_site || ''
+        seoSettings.value.twitterCreator = res.data.seo_twitter_creator || ''
+        seoSettings.value.author = res.data.seo_author || ''
+        seoSettings.value.themeColor = res.data.seo_theme_color || ''
+        seoSettings.value.defaultLocale = res.data.seo_default_locale || 'zh_CN'
         seoSettings.value.footerText = res.data.seo_footer_text || ''
         seoSettings.value.loaded = true
         // 缓存到 localStorage，下次刷新可立即使用
@@ -86,6 +108,17 @@ export const useSeoSettings = () => {
           ogTitle: seoSettings.value.ogTitle,
           ogDescription: seoSettings.value.ogDescription,
           ogImage: seoSettings.value.ogImage,
+          ogSiteName: seoSettings.value.ogSiteName,
+          ogType: seoSettings.value.ogType,
+          canonicalUrl: seoSettings.value.canonicalUrl,
+          robotsIndex: seoSettings.value.robotsIndex,
+          robotsFollow: seoSettings.value.robotsFollow,
+          twitterCardType: seoSettings.value.twitterCardType,
+          twitterSite: seoSettings.value.twitterSite,
+          twitterCreator: seoSettings.value.twitterCreator,
+          author: seoSettings.value.author,
+          themeColor: seoSettings.value.themeColor,
+          defaultLocale: seoSettings.value.defaultLocale,
           footerText: seoSettings.value.footerText,
         })
       }

@@ -26,7 +26,8 @@ from .tokens import (
     update_token_usage, get_token_info, get_token_uploads,
     admin_list_tokens, admin_create_token,
     admin_update_token_status, admin_update_token, admin_delete_token,
-    admin_get_token_detail, admin_get_token_uploads, admin_get_token_galleries,
+    admin_get_token_detail, admin_get_token_overview, admin_get_token_uploads, admin_get_token_galleries,
+    admin_get_token_metrics,
     delete_token_by_string, count_tokens_by_ip,
 )
 
@@ -110,7 +111,8 @@ __all__ = [
     # Token 管理（管理员后台）
     'admin_list_tokens', 'admin_create_token',
     'admin_update_token_status', 'admin_update_token', 'admin_delete_token',
-    'admin_get_token_detail', 'admin_get_token_uploads', 'admin_get_token_galleries',
+    'admin_get_token_detail', 'admin_get_token_overview', 'admin_get_token_uploads', 'admin_get_token_galleries',
+    'admin_get_token_metrics',
     'delete_token_by_string',
     # 公告
     'get_announcement', 'update_announcement',

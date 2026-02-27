@@ -13,7 +13,8 @@ from ..database import (
     get_system_setting, get_system_setting_int,
     admin_list_tokens, admin_create_token,
     admin_update_token_status, admin_update_token, admin_delete_token,
-    admin_get_token_detail, admin_get_token_uploads, admin_get_token_galleries,
+    admin_get_token_detail, admin_get_token_overview, admin_get_token_uploads, admin_get_token_galleries,
+    admin_get_token_metrics,
 )
 from ..services.token_service import TokenService
 from .. import admin_module
@@ -36,6 +37,8 @@ def admin_tokens_api():
             search = (request.args.get('search') or '').strip() or None
             tg_user_id = request.args.get('tg_user_id', type=int)
             tg_bind = (request.args.get('tg_bind') or '').strip().lower() or None
+            sort_by = (request.args.get('sort_by') or 'created_at').strip().lower()
+            sort_order = (request.args.get('sort_order') or 'desc').strip().lower()
             try:
                 page = int(request.args.get('page', 1))
             except (TypeError, ValueError):
@@ -47,7 +50,8 @@ def admin_tokens_api():
 
             data = admin_list_tokens(
                 status=status, page=page, page_size=page_size,
-                search=search, tg_user_id=tg_user_id, tg_bind=tg_bind
+                search=search, tg_user_id=tg_user_id, tg_bind=tg_bind,
+                sort_by=sort_by, sort_order=sort_order,
             )
             return _admin_json({'success': True, 'data': data})
 
@@ -82,6 +86,21 @@ def admin_tokens_api():
     except Exception as e:
         logger.error(f"Token 管理 API 失败: {e}")
         return _admin_json({'success': False, 'error': '操作失败，请稍后重试'}, 500)
+
+
+@admin_bp.route('/api/admin/tokens/metrics', methods=['GET', 'OPTIONS'])
+@admin_module.login_required
+def admin_tokens_metrics_api():
+    """Token 管理概览指标。"""
+    if request.method == 'OPTIONS':
+        return _admin_options('GET, OPTIONS')
+
+    try:
+        data = admin_get_token_metrics()
+        return _admin_json({'success': True, 'data': data})
+    except Exception as e:
+        logger.error(f"Token 指标 API 失败: {e}")
+        return _admin_json({'success': False, 'error': '获取 Token 指标失败'}, 500)
 
 
 @admin_bp.route('/api/admin/tokens/<int:token_id>', methods=['GET', 'PATCH', 'DELETE', 'OPTIONS'])
@@ -143,6 +162,23 @@ def admin_token_detail_api(token_id: int):
     except Exception as e:
         logger.error(f"Token 详情 API 失败: {e}")
         return _admin_json({'success': False, 'error': '操作失败，请稍后重试'}, 500)
+
+
+@admin_bp.route('/api/admin/tokens/<int:token_id>/overview', methods=['GET', 'OPTIONS'])
+@admin_module.login_required
+def admin_token_overview_api(token_id: int):
+    """获取 Token 概览（详情 + 关联统计）。"""
+    if request.method == 'OPTIONS':
+        return _admin_options('GET, OPTIONS')
+
+    try:
+        detail = admin_get_token_overview(token_id)
+        if not detail:
+            return _admin_json({'success': False, 'error': 'Token 不存在'}, 404)
+        return _admin_json({'success': True, 'data': detail})
+    except Exception as e:
+        logger.error(f"Token 概览 API 失败: {e}")
+        return _admin_json({'success': False, 'error': '获取 Token 概览失败'}, 500)
 
 
 @admin_bp.route('/api/admin/tokens/<int:token_id>/uploads', methods=['GET', 'OPTIONS'])

@@ -1,190 +1,188 @@
 <template>
-  <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="flex items-center gap-3">
-        <UButton
-          icon="heroicons:arrow-left"
-          color="gray"
-          variant="ghost"
-          to="/admin/tokens"
-        />
-        <div>
-          <h1 class="text-2xl font-bold text-stone-900 dark:text-white">Token 详情</h1>
-          <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
-            ID: {{ tokenDetail?.id || route.params.id }}
-          </p>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <UButton
-          icon="heroicons:pencil"
-          color="gray"
-          variant="outline"
-          @click="openEditModal"
-        >
+  <div class="space-y-4 pb-10">
+    <AdminPageHeader
+      title="Token 详情"
+      eyebrow="Resources"
+      icon="heroicons:key"
+      :description="`ID: ${tokenDetail?.id || route.params.id}`"
+    >
+      <template #actions>
+        <UButton icon="heroicons:arrow-left" color="gray" variant="ghost" to="/admin/tokens">
+          返回列表
+        </UButton>
+        <UButton icon="heroicons:pencil-square" color="gray" variant="outline" @click="openEditModal">
           编辑
         </UButton>
-        <UButton
-          icon="heroicons:arrow-path"
-          color="gray"
-          variant="outline"
-          :loading="loading"
-          @click="loadDetail"
-        >
+        <UButton icon="heroicons:arrow-path" color="gray" variant="outline" :loading="loading" @click="refreshAll">
           刷新
         </UButton>
-      </div>
-    </div>
+      </template>
+    </AdminPageHeader>
 
-    <!-- 加载中 -->
-    <div v-if="loading && !tokenDetail" class="flex flex-col justify-center items-center py-16">
-      <div class="w-14 h-14 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-      <p class="text-stone-600 dark:text-stone-400">加载中...</p>
+    <div v-if="loading && !tokenDetail" class="flex flex-col items-center justify-center py-20">
+      <div class="h-14 w-14 animate-spin rounded-full border-4 border-amber-500 border-t-transparent" />
+      <p class="mt-3 text-sm text-stone-500 dark:text-stone-400">加载 Token 详情中...</p>
     </div>
 
     <template v-else-if="tokenDetail">
-      <!-- Token 信息卡片 -->
-      <UCard>
-        <!-- Token 值 -->
-        <div class="flex items-center gap-2 mb-5">
-          <code class="flex-1 font-mono text-xs p-2.5 rounded-lg bg-stone-100 dark:bg-neutral-800 break-all select-all truncate">
-            {{ tokenDetail.token }}
-          </code>
-          <UButton
-            icon="heroicons:clipboard-document"
-            color="primary"
-            variant="soft"
-            size="sm"
-            @click="copyToken"
-          >
-            复制
-          </UButton>
-        </div>
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <section class="space-y-4">
+          <UCard>
+            <div class="space-y-3">
+              <div class="flex items-center gap-2">
+                <code class="flex-1 break-all rounded-lg bg-stone-100 px-3 py-2 font-mono text-xs dark:bg-neutral-800">
+                  {{ tokenDetail.token }}
+                </code>
+                <UButton color="primary" variant="soft" icon="heroicons:clipboard-document" @click="copyToken">
+                  复制
+                </UButton>
+              </div>
 
-        <!-- 核心指标卡片 -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
-            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">状态</div>
-            <div class="flex items-center gap-2">
-              <UBadge
-                v-if="tokenDetail.is_expired"
-                color="amber" variant="subtle" size="xs"
-              >已过期</UBadge>
-              <UBadge
-                v-else
-                :color="tokenDetail.is_active ? 'green' : 'gray'" variant="subtle" size="xs"
-              >{{ tokenDetail.is_active ? '启用' : '禁用' }}</UBadge>
-              <UToggle
-                :model-value="tokenDetail.is_active"
-                size="sm"
-                :disabled="tokenDetail.is_expired || updatingStatus"
-                @update:model-value="toggleStatus"
-              />
-            </div>
-          </div>
-          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
-            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">上传用量</div>
-            <div class="text-sm font-semibold text-stone-800 dark:text-stone-200">
-              {{ tokenDetail.upload_count }} / {{ tokenDetail.upload_limit ?? '∞' }}
-            </div>
-            <div v-if="tokenDetail.upload_limit" class="mt-1.5">
-              <div class="w-full bg-stone-200 dark:bg-neutral-700 rounded-full h-1.5">
-                <div
-                  class="h-1.5 rounded-full transition-all"
-                  :class="uploadPercent >= 90 ? 'bg-red-500' : uploadPercent >= 70 ? 'bg-amber-500' : 'bg-green-500'"
-                  :style="{ width: `${Math.min(100, uploadPercent)}%` }"
-                />
+              <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+                <div class="rounded-lg bg-stone-100/80 px-3 py-2 dark:bg-neutral-800/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">状态</p>
+                  <div class="mt-1 flex items-center gap-2">
+                    <UBadge v-if="tokenDetail.is_expired" color="amber" variant="subtle" size="xs">已过期</UBadge>
+                    <UBadge v-else :color="tokenDetail.is_active ? 'green' : 'gray'" variant="subtle" size="xs">
+                      {{ tokenDetail.is_active ? '启用' : '禁用' }}
+                    </UBadge>
+                    <UToggle
+                      :model-value="tokenDetail.is_active"
+                      :disabled="tokenDetail.is_expired || updatingStatus"
+                      size="sm"
+                      @update:model-value="toggleStatus"
+                    />
+                  </div>
+                </div>
+                <div class="rounded-lg bg-stone-100/80 px-3 py-2 dark:bg-neutral-800/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">上传用量</p>
+                  <p class="mt-1 text-sm font-semibold text-stone-900 dark:text-white">
+                    {{ tokenDetail.upload_count }} / {{ tokenDetail.upload_limit ?? '∞' }}
+                  </p>
+                </div>
+                <div class="rounded-lg bg-stone-100/80 px-3 py-2 dark:bg-neutral-800/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">上传图片</p>
+                  <p class="mt-1 text-sm font-semibold text-stone-900 dark:text-white">{{ summary.upload_total }}</p>
+                </div>
+                <div class="rounded-lg bg-stone-100/80 px-3 py-2 dark:bg-neutral-800/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">关联画集</p>
+                  <p class="mt-1 text-sm font-semibold text-stone-900 dark:text-white">{{ summary.gallery_total }}</p>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
-            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">创建时间</div>
-            <div class="text-sm font-medium text-stone-800 dark:text-stone-200">{{ formatDate(tokenDetail.created_at) }}</div>
-          </div>
-          <div class="p-3 rounded-lg bg-stone-50 dark:bg-neutral-800/60 border border-stone-100 dark:border-neutral-700/50">
-            <div class="text-[11px] text-stone-400 dark:text-stone-500 mb-1">过期时间</div>
-            <div class="text-sm font-medium text-stone-800 dark:text-stone-200">{{ tokenDetail.expires_at ? formatDate(tokenDetail.expires_at) : '永不过期' }}</div>
-          </div>
-        </div>
+          </UCard>
 
-        <!-- 详细信息 -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
-          <div>
-            <span class="text-[11px] text-stone-400 dark:text-stone-500">描述</span>
-            <p class="text-stone-800 dark:text-stone-200">{{ tokenDetail.description?.trim() || '--' }}</p>
-          </div>
-          <div>
-            <span class="text-[11px] text-stone-400 dark:text-stone-500">最后使用</span>
-            <p class="text-stone-800 dark:text-stone-200">{{ tokenDetail.last_used ? formatDate(tokenDetail.last_used) : '从未使用' }}</p>
-          </div>
-          <div>
-            <span class="text-[11px] text-stone-400 dark:text-stone-500">IP 地址</span>
-            <p class="text-stone-800 dark:text-stone-200 font-mono text-xs">{{ tokenDetail.ip_address || '--' }}</p>
-          </div>
-          <div>
-            <span class="text-[11px] text-stone-400 dark:text-stone-500">User-Agent</span>
-            <p class="text-stone-800 dark:text-stone-200 text-xs break-all line-clamp-2" :title="tokenDetail.user_agent">{{ tokenDetail.user_agent || '--' }}</p>
-          </div>
-        </div>
-      </UCard>
+          <UCard>
+            <div class="space-y-3">
+              <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">描述</p>
+                  <p class="mt-1 text-sm text-stone-800 dark:text-stone-200">{{ tokenDetail.description?.trim() || '--' }}</p>
+                </div>
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">最后使用</p>
+                  <p class="mt-1 text-sm text-stone-800 dark:text-stone-200">{{ tokenDetail.last_used ? formatDate(tokenDetail.last_used) : '从未使用' }}</p>
+                </div>
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">创建时间</p>
+                  <p class="mt-1 text-sm text-stone-800 dark:text-stone-200">{{ formatDate(tokenDetail.created_at) }}</p>
+                </div>
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">过期时间</p>
+                  <p class="mt-1 text-sm text-stone-800 dark:text-stone-200">{{ tokenDetail.expires_at ? formatDate(tokenDetail.expires_at) : '永不过期' }}</p>
+                </div>
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">IP 地址</p>
+                  <p class="mt-1 break-all font-mono text-xs text-stone-800 dark:text-stone-200">{{ tokenDetail.ip_address || '--' }}</p>
+                </div>
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">User-Agent</p>
+                  <p class="mt-1 line-clamp-2 break-all text-xs text-stone-800 dark:text-stone-200" :title="tokenDetail.user_agent || ''">
+                    {{ tokenDetail.user_agent || '--' }}
+                  </p>
+                </div>
+              </div>
 
-      <!-- TG 用户关联卡片 -->
-      <UCard v-if="tokenDetail.tg_user_id">
-        <div class="flex items-start gap-4">
-          <div class="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0">
-            <UIcon name="heroicons:chat-bubble-left-right" class="w-6 h-6 text-blue-600 dark:text-blue-400" />
-          </div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="text-sm font-semibold text-stone-900 dark:text-white">Telegram 用户</span>
-              <UBadge color="blue" variant="subtle" size="xs">已绑定</UBadge>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
-              <div>
-                <span class="text-[11px] text-stone-400 dark:text-stone-500">用户名</span>
-                <p class="text-stone-800 dark:text-stone-200">{{ tokenDetail.tg_username ? `@${tokenDetail.tg_username}` : '--' }}</p>
-              </div>
-              <div>
-                <span class="text-[11px] text-stone-400 dark:text-stone-500">名称</span>
-                <p class="text-stone-800 dark:text-stone-200">{{ [tokenDetail.tg_first_name, tokenDetail.tg_last_name].filter(Boolean).join(' ') || '--' }}</p>
-              </div>
-              <div>
-                <span class="text-[11px] text-stone-400 dark:text-stone-500">TG User ID</span>
-                <p class="text-stone-800 dark:text-stone-200 font-mono text-xs">{{ tokenDetail.tg_user_id }}</p>
+              <div v-if="tokenDetail.tg_user_id" class="rounded-lg border border-blue-200/80 bg-blue-50/70 p-3 dark:border-blue-900/50 dark:bg-blue-900/20">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p class="text-xs text-blue-700/80 dark:text-blue-300/80">Telegram 绑定</p>
+                    <p class="mt-1 text-sm font-medium text-blue-700 dark:text-blue-300">
+                      {{ [tokenDetail.tg_first_name, tokenDetail.tg_last_name].filter(Boolean).join(' ') || '--' }}
+                      <span v-if="tokenDetail.tg_username">{{ ` @${tokenDetail.tg_username}` }}</span>
+                    </p>
+                    <p class="mt-0.5 text-xs text-blue-600/90 dark:text-blue-300/90">TG ID: {{ tokenDetail.tg_user_id }}</p>
+                  </div>
+                  <UButton
+                    size="xs"
+                    color="blue"
+                    variant="soft"
+                    icon="heroicons:funnel"
+                    @click="navigateTo(`/admin/tokens?tg_user_id=${tokenDetail.tg_user_id}`)"
+                  >
+                    查看该用户 Token
+                  </UButton>
+                </div>
               </div>
             </div>
-          </div>
-          <UButton
-            size="xs"
-            color="blue"
-            variant="soft"
-            icon="heroicons:funnel"
-            @click="navigateTo(`/admin/tokens?tg_user_id=${tokenDetail.tg_user_id}`)"
-          >
-            该用户所有Token
-          </UButton>
-        </div>
-      </UCard>
+          </UCard>
+        </section>
 
-      <!-- Tab 切换 -->
+        <section class="space-y-4">
+          <UCard>
+            <div class="space-y-3">
+              <h3 class="text-sm font-semibold text-stone-900 dark:text-white">容量与关联概览</h3>
+              <div class="rounded-lg bg-stone-100/80 px-3 py-2 dark:bg-neutral-800/80">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs text-stone-500 dark:text-stone-400">上传占用</span>
+                  <span class="text-sm font-semibold text-stone-900 dark:text-white">{{ Math.round(uploadPercent) }}%</span>
+                </div>
+                <div class="mt-2 h-2 rounded-full bg-stone-200 dark:bg-neutral-700">
+                  <div
+                    class="h-2 rounded-full transition-all"
+                    :class="uploadPercent >= 90 ? 'bg-red-500' : uploadPercent >= 70 ? 'bg-amber-500' : 'bg-green-500'"
+                    :style="{ width: `${Math.min(100, uploadPercent)}%` }"
+                  />
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">画集授权</p>
+                  <p class="mt-1 text-sm font-semibold text-stone-900 dark:text-white">{{ summary.access_total }}</p>
+                </div>
+                <div class="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-neutral-700/80">
+                  <p class="text-xs text-stone-500 dark:text-stone-400">最近上传</p>
+                  <p class="mt-1 text-sm text-stone-900 dark:text-white">{{ summary.last_upload_at ? formatDate(summary.last_upload_at) : '--' }}</p>
+                </div>
+              </div>
+            </div>
+          </UCard>
+
+          <UCard>
+            <div class="space-y-2">
+              <h3 class="text-sm font-semibold text-stone-900 dark:text-white">风险操作</h3>
+              <p class="text-xs text-stone-500 dark:text-stone-400">删除后不可恢复，可选择是否连同关联图片一起删除。</p>
+              <UButton color="red" variant="soft" icon="heroicons:trash" block :loading="deleting" @click="deleteToken">
+                删除 Token
+              </UButton>
+            </div>
+          </UCard>
+        </section>
+      </div>
+
       <UCard>
         <template #header>
-          <div class="flex items-center gap-1 border-b border-stone-200 dark:border-neutral-700 -mb-px">
+          <div class="flex items-center gap-2">
             <button
-              class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors"
-              :class="activeTab === 'uploads'
-                ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-                : 'border-transparent text-stone-500 hover:text-stone-700 dark:hover:text-stone-300'"
+              class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+              :class="activeTab === 'uploads' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200'"
               @click="switchTab('uploads')"
             >
               上传图片 ({{ uploadsTotal }})
             </button>
             <button
-              class="px-4 py-2.5 text-sm font-medium border-b-2 transition-colors"
-              :class="activeTab === 'galleries'
-                ? 'border-amber-500 text-amber-600 dark:text-amber-400'
-                : 'border-transparent text-stone-500 hover:text-stone-700 dark:hover:text-stone-300'"
+              class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+              :class="activeTab === 'galleries' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200'"
               @click="switchTab('galleries')"
             >
               画集 ({{ galleriesTotal }})
@@ -192,104 +190,56 @@
           </div>
         </template>
 
-        <!-- 上传图片 Tab -->
         <div v-if="activeTab === 'uploads'">
-          <div v-if="loadingUploads" class="flex justify-center py-12">
-            <div class="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-          </div>
-
-          <div v-else-if="uploads.length === 0" class="text-center py-12">
-            <div class="w-16 h-16 bg-stone-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-3">
-              <UIcon name="heroicons:photo" class="w-8 h-8 text-stone-400" />
-            </div>
-            <p class="text-stone-600 dark:text-stone-400">暂无上传图片</p>
-          </div>
-
-          <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div v-if="loadingUploads" class="py-12 text-center text-sm text-stone-500 dark:text-stone-400">加载中...</div>
+          <div v-else-if="uploads.length === 0" class="py-12 text-center text-sm text-stone-500 dark:text-stone-400">暂无上传图片</div>
+          <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             <div
-              v-for="(img, idx) in uploads"
-              :key="img.encrypted_id"
-              class="group relative aspect-square rounded-xl overflow-hidden border border-stone-200 dark:border-neutral-700 hover:shadow-lg transition-all cursor-pointer"
-              @click="openLightbox(idx)"
+              v-for="(item, index) in uploads"
+              :key="item.encrypted_id"
+              class="group relative aspect-square cursor-pointer overflow-hidden rounded-xl border border-stone-200 dark:border-neutral-700"
+              @click="openLightbox(index)"
             >
-              <img
-                :src="getImageSrc(img)"
-                :alt="img.original_filename"
-                loading="lazy"
-                class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-300"
-              />
-              <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                <p class="text-white text-xs truncate">{{ img.original_filename }}</p>
-                <p class="text-white/70 text-xs">{{ formatFileSize(img.file_size) }}</p>
+              <img :src="item.cdn_url || item.image_url" :alt="item.original_filename" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110" loading="lazy">
+              <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                <p class="truncate text-xs text-white">{{ item.original_filename }}</p>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 画集 Tab -->
         <div v-if="activeTab === 'galleries'">
-          <div v-if="loadingGalleries" class="flex justify-center py-12">
-            <div class="w-10 h-10 border-3 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-          </div>
-
-          <div v-else-if="galleries.length === 0" class="text-center py-12">
-            <div class="w-16 h-16 bg-stone-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-3">
-              <UIcon name="heroicons:rectangle-stack" class="w-8 h-8 text-stone-400" />
-            </div>
-            <p class="text-stone-600 dark:text-stone-400">暂无关联画集</p>
-          </div>
-
-          <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div v-if="loadingGalleries" class="py-12 text-center text-sm text-stone-500 dark:text-stone-400">加载中...</div>
+          <div v-else-if="galleries.length === 0" class="py-12 text-center text-sm text-stone-500 dark:text-stone-400">暂无关联画集</div>
+          <div v-else class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
             <NuxtLink
-              v-for="g in galleries"
-              :key="g.id"
-              :to="`/admin/galleries/${g.id}`"
-              class="block p-4 rounded-xl border border-stone-200 dark:border-neutral-700 hover:border-amber-400 hover:shadow-md transition-all"
+              v-for="item in galleries"
+              :key="item.id"
+              :to="`/admin/galleries/${item.id}`"
+              class="flex items-center gap-3 rounded-xl border border-stone-200/80 p-3 transition hover:border-amber-300 dark:border-neutral-700/80 dark:hover:border-amber-700/60"
             >
-              <div class="flex items-start gap-3">
-                <div class="w-14 h-14 rounded-lg overflow-hidden bg-stone-100 dark:bg-neutral-800 flex-shrink-0">
-                  <img
-                    v-if="g.cover_url"
-                    :src="g.cover_url"
-                    class="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                  <div v-else class="w-full h-full flex items-center justify-center">
-                    <UIcon name="heroicons:photo" class="w-6 h-6 text-stone-400" />
-                  </div>
+              <div class="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg bg-stone-100 dark:bg-neutral-800">
+                <img v-if="item.cover_url" :src="item.cover_url" class="h-full w-full object-cover" loading="lazy">
+                <div v-else class="flex h-full w-full items-center justify-center">
+                  <UIcon name="heroicons:photo" class="h-6 w-6 text-stone-400" />
                 </div>
-                <div class="min-w-0 flex-1">
-                  <p class="font-medium text-stone-900 dark:text-white truncate">{{ g.name }}</p>
-                  <p class="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-                    {{ g.image_count || 0 }} 张图片
-                  </p>
-                  <div class="flex items-center gap-2 mt-1">
-                    <UBadge
-                      v-if="g.share_enabled"
-                      color="green"
-                      variant="subtle"
-                      size="xs"
-                    >
-                      已分享
-                    </UBadge>
-                    <span class="text-xs text-stone-400">{{ formatDate(g.created_at) }}</span>
-                  </div>
-                </div>
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-stone-900 dark:text-white">{{ item.name }}</p>
+                <p class="mt-0.5 text-xs text-stone-500 dark:text-stone-400">{{ item.image_count || 0 }} 张图片</p>
               </div>
             </NuxtLink>
           </div>
         </div>
 
-        <!-- 分页 -->
         <template #footer>
-          <div v-if="currentTotalPages > 1" class="flex justify-center pt-2">
+          <div v-if="currentTotalPages > 1" class="flex justify-center">
             <UPagination v-model="currentPage" :total="currentTotal" :page-count="currentPageSize" />
           </div>
         </template>
       </UCard>
     </template>
 
-    <!-- 图片灯箱 -->
     <GalleryLightbox
       :open="lightboxOpen"
       :index="lightboxIndex"
@@ -299,7 +249,6 @@
       @copy-link="handleCopyLink"
     />
 
-    <!-- 编辑 Token 模态框 -->
     <UModal v-model="editModalOpen">
       <UCard>
         <template #header>
@@ -308,40 +257,29 @@
             <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="editModalOpen = false" />
           </div>
         </template>
+
         <div class="space-y-4">
           <UFormGroup label="描述" hint="可选，用于备注Token用途">
-            <UInput
-              v-model="editForm.description"
-              placeholder="例如：前端站点 / 服务器脚本"
-              :maxlength="200"
-            />
+            <UInput v-model="editForm.description" placeholder="例如：前端站点 / 服务器脚本" :maxlength="200" />
           </UFormGroup>
 
           <UFormGroup label="过期时间" hint="留空表示永不过期">
-            <UInput
-              v-model="editForm.expires_at"
-              type="datetime-local"
-            />
+            <UInput v-model="editForm.expires_at" type="datetime-local" />
           </UFormGroup>
 
           <UFormGroup label="上传限制" hint="留空表示不限制">
-            <UInput
-              v-model.number="editForm.upload_limit"
-              type="number"
-              min="0"
-              max="1000000"
-              placeholder="不限制"
-            />
+            <UInput v-model.number="editForm.upload_limit" type="number" min="0" max="1000000" placeholder="不限制" />
           </UFormGroup>
 
-          <div class="flex items-center justify-between p-3 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+          <div class="flex items-center justify-between rounded-lg bg-stone-50 p-3 dark:bg-neutral-800">
             <div>
               <p class="text-sm font-medium text-stone-900 dark:text-white">启用状态</p>
-              <p class="text-xs text-stone-500 dark:text-stone-400">禁用后该 Token 将无法使用</p>
+              <p class="text-xs text-stone-500 dark:text-stone-400">禁用后该 Token 将无法上传</p>
             </div>
             <UToggle v-model="editForm.is_active" size="lg" />
           </div>
         </div>
+
         <template #footer>
           <div class="flex justify-end gap-2">
             <UButton color="gray" variant="ghost" @click="editModalOpen = false">取消</UButton>
@@ -350,10 +288,30 @@
         </template>
       </UCard>
     </UModal>
+
+    <UModal v-model="confirmModalOpen" :ui="{ width: 'sm:max-w-md' }">
+      <UCard>
+        <template #header>
+          <div class="flex items-center gap-2">
+            <UIcon name="heroicons:exclamation-triangle" class="h-5 w-5 text-amber-500" />
+            <span class="font-semibold">{{ confirmModalTitle }}</span>
+          </div>
+        </template>
+        <p class="text-sm text-stone-600 dark:text-stone-400">{{ confirmModalDesc }}</p>
+        <template #footer>
+          <div class="flex justify-end gap-2">
+            <UButton color="gray" variant="ghost" @click="onConfirmCancel">取消</UButton>
+            <UButton color="primary" @click="onConfirmOk">确认</UButton>
+          </div>
+        </template>
+      </UCard>
+    </UModal>
   </div>
 </template>
 
 <script setup lang="ts">
+import type { AdminTokenOverview, AdminTokenOverviewSummary } from '~/types/admin'
+
 definePageMeta({ layout: 'admin', middleware: 'auth' })
 
 const route = useRoute()
@@ -363,12 +321,27 @@ const { copy: clipboardCopy } = useClipboardCopy()
 
 const tokenId = computed(() => Number(route.params.id))
 
-// 详情
 const loading = ref(false)
-const tokenDetail = ref<any>(null)
+const deleting = ref(false)
+const tokenDetail = ref<AdminTokenOverview | null>(null)
 const updatingStatus = ref(false)
 
-// 编辑
+const activeTab = ref<'uploads' | 'galleries'>('uploads')
+const uploads = ref<any[]>([])
+const uploadsTotal = ref(0)
+const uploadsPage = ref(1)
+const uploadsPageSize = ref(50)
+const loadingUploads = ref(false)
+
+const galleries = ref<any[]>([])
+const galleriesTotal = ref(0)
+const galleriesPage = ref(1)
+const galleriesPageSize = ref(30)
+const loadingGalleries = ref(false)
+
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+
 const editModalOpen = ref(false)
 const saving = ref(false)
 const editForm = ref({
@@ -378,108 +351,178 @@ const editForm = ref({
   is_active: true,
 })
 
-// Tab
-const activeTab = ref<'uploads' | 'galleries'>('uploads')
+const confirmModalOpen = ref(false)
+const confirmModalTitle = ref('')
+const confirmModalDesc = ref('')
+const confirmModalResolve = ref<((v: boolean) => void) | null>(null)
 
-// 上传图片
-const uploads = ref<any[]>([])
-const uploadsTotal = ref(0)
-const uploadsPage = ref(1)
-const uploadsPageSize = ref(50)
-const loadingUploads = ref(false)
-
-// 画集
-const galleries = ref<any[]>([])
-const galleriesTotal = ref(0)
-const galleriesPage = ref(1)
-const galleriesPageSize = ref(50)
-const loadingGalleries = ref(false)
-
-// 灯箱
-const lightboxOpen = ref(false)
-const lightboxIndex = ref(0)
-
-const lightboxImages = computed(() =>
-  uploads.value.map(img => ({
-    ...img,
-    image_url: getImageSrc(img),
-  }))
-)
-
-const openLightbox = (idx: number) => {
-  lightboxIndex.value = idx
-  lightboxOpen.value = true
+const showConfirm = (title: string, desc: string): Promise<boolean> => {
+  return new Promise((resolve) => {
+    confirmModalTitle.value = title
+    confirmModalDesc.value = desc
+    confirmModalResolve.value = resolve
+    confirmModalOpen.value = true
+  })
 }
 
-const handleCopyLink = (image: any) => {
-  const url = image.image_url || image.cdn_url
-  if (url && import.meta.client) {
-    navigator.clipboard.writeText(url).catch(() => {})
-  }
+const onConfirmOk = () => {
+  confirmModalOpen.value = false
+  confirmModalResolve.value?.(true)
+  confirmModalResolve.value = null
 }
+
+const onConfirmCancel = () => {
+  confirmModalOpen.value = false
+  confirmModalResolve.value?.(false)
+  confirmModalResolve.value = null
+}
+
+const summary = computed<AdminTokenOverviewSummary>(() => tokenDetail.value?.summary || {
+  upload_total: uploadsTotal.value,
+  gallery_total: galleriesTotal.value,
+  access_total: 0,
+  last_upload_at: null,
+  last_gallery_at: null,
+})
 
 const uploadPercent = computed(() => {
   if (!tokenDetail.value?.upload_limit) return 0
   return (tokenDetail.value.upload_count / tokenDetail.value.upload_limit) * 100
 })
 
-// 当前 Tab 的分页状态
 const currentPage = computed({
-  get: () => activeTab.value === 'uploads' ? uploadsPage.value : galleriesPage.value,
-  set: (v) => {
-    if (activeTab.value === 'uploads') uploadsPage.value = v
-    else galleriesPage.value = v
-  }
+  get: () => (activeTab.value === 'uploads' ? uploadsPage.value : galleriesPage.value),
+  set: (value) => {
+    if (activeTab.value === 'uploads') uploadsPage.value = value
+    else galleriesPage.value = value
+  },
 })
-const currentTotal = computed(() => activeTab.value === 'uploads' ? uploadsTotal.value : galleriesTotal.value)
-const currentPageSize = computed(() => activeTab.value === 'uploads' ? uploadsPageSize.value : galleriesPageSize.value)
+
+const currentTotal = computed(() => (activeTab.value === 'uploads' ? uploadsTotal.value : galleriesTotal.value))
+const currentPageSize = computed(() => (activeTab.value === 'uploads' ? uploadsPageSize.value : galleriesPageSize.value))
 const currentTotalPages = computed(() => Math.max(1, Math.ceil(currentTotal.value / currentPageSize.value)))
+
+const lightboxImages = computed(() => uploads.value.map((item) => ({
+  ...item,
+  image_url: item.cdn_url || item.image_url,
+})))
 
 const formatDate = (dateStr?: string | null) => {
   if (!dateStr) return '--'
   return new Date(dateStr).toLocaleString('zh-CN', {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit'
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 
-const formatFileSize = (bytes?: number) => {
-  if (!bytes) return '--'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
-}
-
-const joinUrl = (base: string, path: string) => `${String(base || '').replace(/\/$/, '')}${path}`
-
-const normalizeImageSrc = (raw: string) => {
-  if (!raw || !import.meta.client) return raw
+const loadDetail = async () => {
+  if (!tokenId.value) return
+  loading.value = true
+  let overviewErr: any = null
   try {
-    const u = new URL(raw, window.location.origin)
-    const loc = window.location
-    if (loc.protocol === 'https:' && u.protocol === 'http:' && u.host === loc.host) u.protocol = loc.protocol
-    return u.toString()
-  } catch { return raw }
+    let resp: any = null
+    try {
+      resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}/overview`, {
+        credentials: 'include',
+      })
+    } catch (err: any) {
+      overviewErr = err
+    }
+    if (!resp?.success) {
+      resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}`, {
+        credentials: 'include',
+      })
+    }
+    if (!resp?.success) throw new Error(resp?.error || '加载失败')
+    tokenDetail.value = resp.data
+  } catch (error: any) {
+    const fallbackErr = error?.data?.error || error?.message
+    const rootErr = overviewErr?.data?.error || overviewErr?.message
+    notification.error('加载失败', fallbackErr || rootErr || '无法获取 Token 详情')
+  } finally {
+    loading.value = false
+  }
 }
 
-const getImageSrc = (img: any) =>
-  normalizeImageSrc(img.cdn_url || joinUrl(config.public.apiBase, `/image/${img.encrypted_id}`) || img.image_url)
+const loadUploads = async () => {
+  if (!tokenId.value) return
+  loadingUploads.value = true
+  try {
+    const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}/uploads`, {
+      credentials: 'include',
+      params: { page: uploadsPage.value, page_size: uploadsPageSize.value },
+    })
+    if (!resp?.success) throw new Error(resp?.error || '加载失败')
+    uploads.value = resp.data.items || []
+    uploadsTotal.value = resp.data.total || 0
+  } catch (error: any) {
+    notification.error('加载上传记录失败', error?.data?.error || error?.message || '获取上传记录失败')
+  } finally {
+    loadingUploads.value = false
+  }
+}
+
+const loadGalleries = async () => {
+  if (!tokenId.value) return
+  loadingGalleries.value = true
+  try {
+    const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}/galleries`, {
+      credentials: 'include',
+      params: { page: galleriesPage.value, page_size: galleriesPageSize.value },
+    })
+    if (!resp?.success) throw new Error(resp?.error || '加载失败')
+    galleries.value = resp.data.items || []
+    galleriesTotal.value = resp.data.total || 0
+  } catch (error: any) {
+    notification.error('加载画集失败', error?.data?.error || error?.message || '获取画集失败')
+  } finally {
+    loadingGalleries.value = false
+  }
+}
+
+const refreshAll = async () => {
+  await Promise.all([
+    loadDetail(),
+    loadUploads(),
+    loadGalleries(),
+  ])
+}
+
+const switchTab = (tab: 'uploads' | 'galleries') => {
+  if (activeTab.value === tab) return
+  activeTab.value = tab
+}
+
+const openLightbox = (index: number) => {
+  lightboxIndex.value = index
+  lightboxOpen.value = true
+}
+
+const handleCopyLink = (image: any) => {
+  const url = image.image_url || image.cdn_url
+  if (!url) return
+  navigator.clipboard.writeText(url).catch(() => {})
+}
 
 const copyToken = () => {
-  if (tokenDetail.value?.token) {
-    clipboardCopy(tokenDetail.value.token, 'Token 已复制')
-  }
+  const token = tokenDetail.value?.token
+  if (!token) return
+  clipboardCopy(token, 'Token 已复制')
 }
 
 const toLocalDatetimeValue = (dateStr?: string | null) => {
   if (!dateStr) return ''
   try {
     const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return ''
-    // 转为 datetime-local 格式: YYYY-MM-DDTHH:mm
+    if (Number.isNaN(d.getTime())) return ''
     const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-  } catch { return '' }
+  } catch {
+    return ''
+  }
 }
 
 const openEditModal = () => {
@@ -494,63 +537,36 @@ const openEditModal = () => {
 }
 
 const saveEdit = async () => {
-  // 保存前二次确认
-  if (!window.confirm('确定要保存对该 Token 的修改吗？')) {
-    return
-  }
-
+  const ok = await showConfirm('保存 Token 修改', '确定要保存对该 Token 的修改吗？')
+  if (!ok || !tokenId.value) return
   saving.value = true
   try {
-    const body: Record<string, any> = {
-      description: editForm.value.description.trim() || null,
-      expires_at: editForm.value.expires_at || null,
-      upload_limit: editForm.value.upload_limit,
-      is_active: editForm.value.is_active,
-    }
-
     const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}`, {
       method: 'PATCH',
       credentials: 'include',
-      body,
+      body: {
+        description: editForm.value.description.trim() || null,
+        expires_at: editForm.value.expires_at || null,
+        upload_limit: editForm.value.upload_limit,
+        is_active: editForm.value.is_active,
+      },
     })
     if (!resp?.success) throw new Error(resp?.error || '保存失败')
-
-    // 用返回数据更新本地（保留完整 token 字段）
-    const fullToken = tokenDetail.value?.token
-    tokenDetail.value = { ...resp.data, token: fullToken }
-
     notification.success('保存成功', 'Token 信息已更新')
     editModalOpen.value = false
+    await refreshAll()
   } catch (error: any) {
-    notification.error('保存失败', error.data?.error || error.message)
+    notification.error('保存失败', error?.data?.error || error?.message || '无法保存 Token')
   } finally {
     saving.value = false
   }
 }
 
-const loadDetail = async () => {
-  loading.value = true
-  try {
-    const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}`, {
-      credentials: 'include'
-    })
-    if (!resp?.success) throw new Error(resp?.error || '加载失败')
-    tokenDetail.value = resp.data
-  } catch (error: any) {
-    notification.error('加载失败', error.data?.error || error.message)
-  } finally {
-    loading.value = false
-  }
-}
-
 const toggleStatus = async (next: boolean) => {
-  if (!tokenDetail.value || tokenDetail.value.is_expired) return
-
-  // 禁用时二次确认
+  if (!tokenDetail.value || !tokenId.value || tokenDetail.value.is_expired) return
   if (!next) {
-    if (!window.confirm('确定要禁用该 Token 吗？禁用后该 Token 将无法使用。')) {
-      return
-    }
+    const ok = await showConfirm('禁用 Token', '确定要禁用该 Token 吗？禁用后将无法继续上传。')
+    if (!ok) return
   }
 
   const prev = tokenDetail.value.is_active
@@ -560,65 +576,58 @@ const toggleStatus = async (next: boolean) => {
     const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}`, {
       method: 'PATCH',
       credentials: 'include',
-      body: { is_active: next }
+      body: { is_active: next },
     })
     if (!resp?.success) throw new Error(resp?.error || '更新失败')
     notification.success('更新成功', next ? 'Token 已启用' : 'Token 已禁用')
   } catch (error: any) {
     tokenDetail.value.is_active = prev
-    notification.error('更新失败', error.data?.error || error.message)
+    notification.error('更新失败', error?.data?.error || error?.message || '无法更新 Token 状态')
   } finally {
     updatingStatus.value = false
   }
 }
 
-const loadUploads = async () => {
-  loadingUploads.value = true
+const deleteToken = async () => {
+  if (!tokenId.value) return
+  const ok = await showConfirm('删除 Token', '确定要删除该 Token 吗？此操作不可恢复。')
+  if (!ok) return
+
+  deleting.value = true
   try {
-    const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}/uploads`, {
-      params: { page: uploadsPage.value, page_size: uploadsPageSize.value },
-      credentials: 'include'
+    const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}`, {
+      method: 'DELETE',
+      credentials: 'include',
     })
-    if (!resp?.success) throw new Error(resp?.error || '加载失败')
-    uploads.value = resp.data.items || []
-    uploadsTotal.value = resp.data.total || 0
+    if (resp && resp.success === false) throw new Error(resp?.error || '删除失败')
+    notification.success('删除成功', 'Token 已删除')
+    navigateTo('/admin/tokens')
   } catch (error: any) {
-    notification.error('加载上传记录失败', error.data?.error || error.message)
+    notification.error('删除失败', error?.data?.error || error?.message || '无法删除 Token')
   } finally {
-    loadingUploads.value = false
+    deleting.value = false
   }
 }
 
-const loadGalleries = async () => {
-  loadingGalleries.value = true
-  try {
-    const resp = await $fetch<any>(`${config.public.apiBase}/api/admin/tokens/${tokenId.value}/galleries`, {
-      params: { page: galleriesPage.value, page_size: galleriesPageSize.value },
-      credentials: 'include'
-    })
-    if (!resp?.success) throw new Error(resp?.error || '加载失败')
-    galleries.value = resp.data.items || []
-    galleriesTotal.value = resp.data.total || 0
-  } catch (error: any) {
-    notification.error('加载画集失败', error.data?.error || error.message)
-  } finally {
-    loadingGalleries.value = false
-  }
-}
+watch(uploadsPage, () => {
+  if (activeTab.value === 'uploads') loadUploads()
+})
 
-const switchTab = (tab: 'uploads' | 'galleries') => {
-  if (activeTab.value === tab) return
-  activeTab.value = tab
-  if (tab === 'uploads' && uploads.value.length === 0) loadUploads()
-  if (tab === 'galleries' && galleries.value.length === 0) loadGalleries()
-}
+watch(galleriesPage, () => {
+  if (activeTab.value === 'galleries') loadGalleries()
+})
 
-watch(uploadsPage, () => { if (activeTab.value === 'uploads') loadUploads() })
-watch(galleriesPage, () => { if (activeTab.value === 'galleries') loadGalleries() })
+watch(
+  () => route.params.id,
+  async () => {
+    activeTab.value = 'uploads'
+    uploadsPage.value = 1
+    galleriesPage.value = 1
+    await refreshAll()
+  },
+)
 
 onMounted(async () => {
-  await loadDetail()
-  // 并行加载两个 tab 的数据，确保计数立即可用
-  await Promise.all([loadUploads(), loadGalleries()])
+  await refreshAll()
 })
 </script>

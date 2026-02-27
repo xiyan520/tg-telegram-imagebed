@@ -1,176 +1,133 @@
 <template>
-  <!-- 桌面端侧边栏 -->
   <aside
-    class="hidden lg:flex flex-col fixed left-0 top-0 h-screen z-40 transition-all duration-300 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-xl border-r border-stone-200/50 dark:border-neutral-700/50"
-    :class="{
-      'w-16': adminUiStore.sidebarCollapsed,
-      'w-64': !adminUiStore.sidebarCollapsed
-    }"
+    class="fixed left-0 top-0 z-40 hidden h-screen flex-col border-r border-stone-200/70 bg-white/94 backdrop-blur-xl transition-all duration-300 dark:border-neutral-700/80 dark:bg-neutral-900/90 lg:flex"
+    :class="adminUiStore.sidebarCollapsed ? 'w-16' : 'w-64'"
   >
-    <!-- Logo 区域 -->
-    <div class="h-16 flex items-center px-4 border-b border-stone-200/50 dark:border-neutral-700/50">
-      <NuxtLink to="/" class="flex items-center gap-2.5 overflow-hidden">
+    <div class="flex h-16 items-center border-b border-stone-200/70 px-3 dark:border-neutral-700/80">
+      <NuxtLink to="/" class="flex min-w-0 items-center gap-2.5">
         <template v-if="seoSettings.logoMode === 'custom' && seoSettings.logoUrl">
-          <img :src="seoSettings.logoUrl" :alt="displayName" class="w-9 h-9 flex-shrink-0 rounded-lg object-contain" />
+          <img :src="seoSettings.logoUrl" :alt="displayName" class="h-9 w-9 rounded-lg object-contain" />
         </template>
         <template v-else>
-          <div class="w-9 h-9 flex-shrink-0 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
-            <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
+          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 shadow-sm shadow-amber-500/25">
+            <UIcon name="heroicons:cloud-arrow-up" class="h-5 w-5 text-white" />
           </div>
         </template>
         <Transition name="fade">
-          <div v-if="!adminUiStore.sidebarCollapsed" class="flex items-center gap-2">
-            <span class="text-lg font-semibold text-stone-800 dark:text-stone-100 whitespace-nowrap">{{ displayName }}</span>
-            <UBadge color="red" variant="subtle" size="xs">管理</UBadge>
+          <div v-if="!adminUiStore.sidebarCollapsed" class="min-w-0">
+            <p class="truncate text-sm font-semibold text-stone-900 dark:text-stone-100">{{ displayName }}</p>
+            <p class="text-[11px] text-stone-500 dark:text-stone-400">Admin Console</p>
           </div>
         </Transition>
       </NuxtLink>
     </div>
 
-    <!-- 导航菜单 -->
-    <nav class="flex-1 py-4 overflow-y-auto">
-      <ul class="space-y-1 px-3">
-        <li v-for="item in menu" :key="item.key">
-          <NuxtLink
-            :to="item.to"
-            class="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all group"
-            :class="[
-              isActive(item)
-                ? 'bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-amber-600 dark:text-amber-400'
-                : 'text-stone-600 dark:text-stone-400 hover:bg-stone-100/50 dark:hover:bg-neutral-800/50'
-            ]"
-          >
-            <UIcon
-              :name="item.icon"
-              class="w-5 h-5 flex-shrink-0 transition-colors"
-              :class="[
-                isActive(item)
-                  ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-stone-500 dark:text-stone-400 group-hover:text-stone-700 dark:group-hover:text-stone-300'
-              ]"
-            />
-            <Transition name="fade">
-              <span
-                v-if="!adminUiStore.sidebarCollapsed"
-                class="font-medium whitespace-nowrap"
-              >
-                {{ item.label }}
-              </span>
-            </Transition>
-            <!-- 徽章 -->
-            <Transition name="fade">
-              <UBadge
-                v-if="!adminUiStore.sidebarCollapsed && item.badge"
-                color="red"
-                variant="solid"
-                size="xs"
-                class="ml-auto"
-              >
-                {{ item.badge }}
-              </UBadge>
-            </Transition>
-          </NuxtLink>
-        </li>
-      </ul>
+    <nav class="flex-1 overflow-y-auto py-3">
+      <div v-for="group in groupedMenu" :key="group.key" class="mb-4 px-2">
+        <p v-if="!adminUiStore.sidebarCollapsed" class="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-400 dark:text-stone-500">
+          {{ group.label }}
+        </p>
+        <ul class="space-y-1">
+          <li v-for="item in group.items" :key="item.key">
+            <NuxtLink
+              :to="item.to"
+              class="group flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-sm transition-all"
+              :class="isActive(item)
+                ? 'bg-amber-100/80 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                : 'text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-neutral-800/80'"
+              :title="item.label"
+            >
+              <UIcon
+                :name="item.icon"
+                class="h-4.5 w-4.5 shrink-0"
+                :class="isActive(item) ? 'text-amber-600 dark:text-amber-300' : 'text-stone-500 dark:text-stone-400'"
+              />
+              <Transition name="fade">
+                <span v-if="!adminUiStore.sidebarCollapsed" class="truncate font-medium">{{ item.label }}</span>
+              </Transition>
+            </NuxtLink>
+          </li>
+        </ul>
+      </div>
     </nav>
 
-    <!-- 折叠按钮 -->
-    <div class="p-3 border-t border-stone-200/50 dark:border-neutral-700/50">
+    <div class="border-t border-stone-200/70 p-2.5 dark:border-neutral-700/80">
       <button
+        type="button"
+        class="flex w-full items-center justify-center gap-2 rounded-xl px-2 py-2 text-sm text-stone-500 transition-colors hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-neutral-800"
         @click="adminUiStore.toggleSidebar()"
-        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-stone-500 dark:text-stone-400 hover:bg-stone-100/50 dark:hover:bg-neutral-800/50 transition-colors"
       >
-        <UIcon
-          :name="adminUiStore.sidebarCollapsed ? 'heroicons:chevron-double-right' : 'heroicons:chevron-double-left'"
-          class="w-5 h-5"
-        />
+        <UIcon :name="adminUiStore.sidebarCollapsed ? 'heroicons:chevron-double-right' : 'heroicons:chevron-double-left'" class="h-4.5 w-4.5" />
         <Transition name="fade">
-          <span v-if="!adminUiStore.sidebarCollapsed" class="text-sm">收起菜单</span>
+          <span v-if="!adminUiStore.sidebarCollapsed">收起菜单</span>
         </Transition>
       </button>
     </div>
   </aside>
 
-  <!-- 移动端侧边栏（抽屉） -->
   <USlideover v-model="adminUiStore.mobileSidebarOpen" side="left">
-    <div class="flex flex-col h-full bg-white dark:bg-neutral-900">
-      <!-- Logo 区域 -->
-      <div class="h-16 flex items-center justify-between px-4 border-b border-stone-200 dark:border-neutral-700">
+    <div class="flex h-full flex-col bg-white dark:bg-neutral-900">
+      <div class="flex h-16 items-center justify-between border-b border-stone-200 px-4 dark:border-neutral-700">
         <NuxtLink to="/" class="flex items-center gap-2.5" @click="adminUiStore.closeMobileSidebar()">
           <template v-if="seoSettings.logoMode === 'custom' && seoSettings.logoUrl">
-            <img :src="seoSettings.logoUrl" :alt="displayName" class="w-9 h-9 rounded-lg object-contain" />
+            <img :src="seoSettings.logoUrl" :alt="displayName" class="h-9 w-9 rounded-lg object-contain" />
           </template>
           <template v-else>
-            <div class="w-9 h-9 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
-              <UIcon name="heroicons:cloud-arrow-up" class="w-5 h-5 text-white" />
+            <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 shadow-sm shadow-amber-500/25">
+              <UIcon name="heroicons:cloud-arrow-up" class="h-5 w-5 text-white" />
             </div>
           </template>
-          <div class="flex items-center gap-2">
-            <span class="text-lg font-semibold text-stone-800 dark:text-stone-100">{{ displayName }}</span>
-            <UBadge color="red" variant="subtle" size="xs">管理</UBadge>
+          <div>
+            <p class="text-sm font-semibold text-stone-900 dark:text-stone-100">{{ displayName }}</p>
+            <p class="text-[11px] text-stone-500 dark:text-stone-400">Admin Console</p>
           </div>
         </NuxtLink>
-        <UButton
-          icon="heroicons:x-mark"
-          color="gray"
-          variant="ghost"
-          @click="adminUiStore.closeMobileSidebar()"
-        />
+        <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="adminUiStore.closeMobileSidebar()" />
       </div>
 
-      <!-- 导航菜单 -->
-      <nav class="flex-1 py-4 overflow-y-auto">
-        <ul class="space-y-1 px-3">
-          <li v-for="item in menu" :key="item.key">
-            <NuxtLink
-              :to="item.to"
-              class="flex items-center gap-3 px-3 py-3 rounded-lg transition-all"
-              :class="[
-                isActive(item)
-                  ? 'bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-amber-600 dark:text-amber-400'
-                  : 'text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-neutral-800'
-              ]"
-              @click="adminUiStore.closeMobileSidebar()"
-            >
-              <UIcon
-                :name="item.icon"
-                class="w-5 h-5"
-                :class="[
-                  isActive(item)
-                    ? 'text-amber-600 dark:text-amber-400'
-                    : 'text-stone-500 dark:text-stone-400'
-                ]"
-              />
-              <span class="font-medium">{{ item.label }}</span>
-              <UBadge
-                v-if="item.badge"
-                color="red"
-                variant="solid"
-                size="xs"
-                class="ml-auto"
+      <nav class="flex-1 overflow-y-auto px-3 py-3">
+        <section v-for="group in groupedMenu" :key="group.key" class="mb-4">
+          <p class="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-stone-400 dark:text-stone-500">
+            {{ group.label }}
+          </p>
+          <ul class="space-y-1">
+            <li v-for="item in group.items" :key="item.key">
+              <NuxtLink
+                :to="item.to"
+                class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-all"
+                :class="isActive(item)
+                  ? 'bg-amber-100/80 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
+                  : 'text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-neutral-800/80'"
+                @click="adminUiStore.closeMobileSidebar()"
               >
-                {{ item.badge }}
-              </UBadge>
-            </NuxtLink>
-          </li>
-        </ul>
+                <UIcon :name="item.icon" class="h-4.5 w-4.5 shrink-0" />
+                <span class="font-medium">{{ item.label }}</span>
+              </NuxtLink>
+            </li>
+          </ul>
+        </section>
       </nav>
     </div>
   </USlideover>
 </template>
 
 <script setup lang="ts">
+const route = useRoute()
 const adminUiStore = useAdminUiStore()
-const { menu, isActive } = useAdminMenu()
+const { groupedMenu, isActive, activeKey } = useAdminMenu()
 const { seoSettings, displayName } = useSeoSettings()
 
-// 路由变化时关闭移动端侧边栏
-const route = useRoute()
-watch(() => route.path, () => {
-  adminUiStore.closeMobileSidebar()
-})
+watch(
+  () => route.path,
+  () => {
+    adminUiStore.closeMobileSidebar()
+  }
+)
 
-// 恢复侧边栏状态
+watch(activeKey, (key) => {
+  if (key) adminUiStore.setMobilePrimaryTab(key)
+}, { immediate: true })
+
 onMounted(() => {
   adminUiStore.restore()
 })

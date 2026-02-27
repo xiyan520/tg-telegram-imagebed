@@ -43,7 +43,7 @@
             :class="[
               selectedIds.includes(t.id) ? 'bg-amber-50/50 dark:bg-amber-900/10' : 'hover:bg-stone-50 dark:hover:bg-neutral-800/50'
             ]"
-            @click="emit('selectToken', t.id)"
+            @click="emit('previewToken', t.id)"
           >
             <td class="py-3 pr-2" @click.stop>
               <input
@@ -89,8 +89,16 @@
                   color="gray"
                   variant="ghost"
                   size="sm"
-                  title="查看详情"
-                  @click="navigateTo(`/admin/tokens/${t.id}`)"
+                  title="快速预览"
+                  @click="emit('previewToken', t.id)"
+                />
+                <UButton
+                  icon="heroicons:arrow-top-right-on-square"
+                  color="gray"
+                  variant="ghost"
+                  size="sm"
+                  title="打开完整详情"
+                  @click="emit('openToken', t.id)"
                 />
                 <UToggle
                   :model-value="t.is_active"
@@ -148,7 +156,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'toggleSelectAll': []
   'toggleSelect': [id: number]
-  'selectToken': [id: number]
+  'previewToken': [id: number]
+  'openToken': [id: number]
   'updateStatus': [token: AdminTokenItem, value: boolean]
   'askDelete': [token: AdminTokenItem]
   'update:page': [page: number]

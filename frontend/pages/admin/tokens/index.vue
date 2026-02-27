@@ -1,26 +1,33 @@
 <template>
   <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-stone-900 dark:text-white">Token管理</h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">共 {{ total }} 个 Token</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <UButton icon="heroicons:arrow-path" color="gray" variant="outline" :loading="loading" @click="loadTokens">
+    <AdminPageHeader
+      title="Token 管理"
+      eyebrow="Resources"
+      icon="heroicons:key"
+      :description="`共 ${metrics.total || total} 个 Token`"
+    >
+      <template #actions>
+        <UButton icon="heroicons:arrow-path" color="gray" variant="outline" :loading="loading || metricsLoading" @click="refreshAll">
           刷新
         </UButton>
         <UButton icon="heroicons:plus" color="primary" @click="openCreateModal">
-          创建Token
+          创建 Token
         </UButton>
-      </div>
-    </div>
+      </template>
+    </AdminPageHeader>
+
+    <AdminTokensTokenStatsBar
+      :loading="metricsLoading"
+      :metrics="metrics"
+    />
 
     <!-- 筛选栏 -->
     <AdminTokensTokenFilters
       v-model:search-query="searchQuery"
       v-model:status="status"
       v-model:tg-bind="tgBind"
+      v-model:sort-by="sortBy"
+      v-model:sort-order="sortOrder"
       :selected-count="selectedIds.length"
       @batch="batchAction"
       @clear-selection="clearSelection"
@@ -40,7 +47,8 @@
       :total-pages="totalPages"
       @toggle-select-all="toggleSelectAll"
       @toggle-select="toggleSelect"
-      @select-token="selectToken"
+      @preview-token="openQuickDetail"
+      @open-token="openFullDetail"
       @update-status="updateStatus"
       @ask-delete="askDelete"
       @update:page="page = $event"
@@ -75,6 +83,14 @@
       @confirm-batch="confirmBatch"
     />
 
+    <AdminTokensTokenQuickDetailSlideover
+      v-model:open="quickDetailOpen"
+      :token-id="quickDetailTokenId"
+      @updated="handleQuickDetailUpdated"
+      @deleted="handleQuickDetailDeleted"
+      @open-full="openFullDetailFromQuick"
+    />
+
     <!-- 通用确认弹窗（替代 window.confirm） -->
     <UModal v-model="confirmModalOpen" :ui="{ width: 'sm:max-w-md' }">
       <UCard>
@@ -97,7 +113,13 @@
 </template>
 
 <script setup lang="ts">
-import type { AdminTokenItem, TokenListData } from '~/types/admin'
+import type {
+  AdminTokenItem,
+  AdminTokenMetrics,
+  TokenListData,
+  TokenSortBy,
+  TokenSortOrder,
+} from '~/types/admin'
 import type { ImpactData } from '~/components/admin/tokens/TokenBatchActions.vue'
 import type { CreateTokenForm } from '~/components/admin/tokens/TokenCreateModal.vue'
 
@@ -110,20 +132,44 @@ type TokenStatus = 'all' | 'active' | 'disabled' | 'expired'
 
 const runtimeConfig = useRuntimeConfig()
 const notification = useNotification()
+const route = useRoute()
 
 // 列表状态
 const status = ref<TokenStatus>('all')
 const tgBind = ref('all')
+const sortBy = ref<TokenSortBy>('created_at')
+const sortOrder = ref<TokenSortOrder>('desc')
 const page = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const tokens = ref<AdminTokenItem[]>([])
 const loading = ref(false)
+const metricsLoading = ref(false)
 const updatingId = ref<number | null>(null)
 const searchQuery = ref('')
+const metrics = ref<AdminTokenMetrics>({
+  total: 0,
+  active: 0,
+  expired: 0,
+  disabled: 0,
+  tg_bound: 0,
+})
 
-const selectToken = (id: number) => {
+const quickDetailOpen = ref(false)
+const quickDetailTokenId = ref<number | null>(null)
+
+const openQuickDetail = (id: number) => {
+  quickDetailTokenId.value = id
+  quickDetailOpen.value = true
+}
+
+const openFullDetail = (id: number) => {
   navigateTo(`/admin/tokens/${id}`)
+}
+
+const openFullDetailFromQuick = () => {
+  if (!quickDetailTokenId.value) return
+  navigateTo(`/admin/tokens/${quickDetailTokenId.value}`)
 }
 
 const totalPages = computed(() => {
@@ -229,10 +275,12 @@ const loadTokens = async () => {
       status: status.value,
       page: String(page.value),
       page_size: String(pageSize.value),
+      sort_by: sortBy.value,
+      sort_order: sortOrder.value,
     })
     if (searchQuery.value.trim()) qs.set('search', searchQuery.value.trim())
     if (tgBind.value && tgBind.value !== 'all') qs.set('tg_bind', tgBind.value)
-    const routeTgUserId = useRoute().query.tg_user_id
+    const routeTgUserId = route.query.tg_user_id
     if (routeTgUserId) qs.set('tg_user_id', String(routeTgUserId))
 
     const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens?${qs.toString()}`, {
@@ -261,8 +309,38 @@ const loadTokens = async () => {
   }
 }
 
+const loadMetrics = async () => {
+  metricsLoading.value = true
+  try {
+    const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens/metrics`, {
+      credentials: 'include'
+    })
+    if (!resp?.success) throw new Error(resp?.error || '加载失败')
+    metrics.value = {
+      total: Number(resp.data?.total || 0),
+      active: Number(resp.data?.active || 0),
+      expired: Number(resp.data?.expired || 0),
+      disabled: Number(resp.data?.disabled || 0),
+      tg_bound: Number(resp.data?.tg_bound || 0),
+    }
+  } catch (error: any) {
+    console.error('加载Token指标失败:', error)
+  } finally {
+    metricsLoading.value = false
+  }
+}
+
+const refreshAll = async () => {
+  await Promise.all([
+    loadTokens(),
+    loadMetrics(),
+  ])
+}
+
 watch(status, async () => { page.value = 1; await loadTokens() })
 watch(tgBind, async () => { page.value = 1; await loadTokens() })
+watch(sortBy, async () => { page.value = 1; await loadTokens() })
+watch(sortOrder, async () => { page.value = 1; await loadTokens() })
 watch(page, async () => { await loadTokens() })
 
 const handleSearch = useDebounceFn(() => {
@@ -325,7 +403,7 @@ const createToken = async (form: CreateTokenForm) => {
     createdToken.value = resp.data?.token || null
     tokenCopied.value = false
     notification.success('创建成功', 'Token 已生成，请及时复制保存')
-    await loadTokens()
+    await refreshAll()
   } catch (error: any) {
     console.error('创建Token失败:', error)
     notification.error('创建失败', error.data?.error || error.message || '无法创建Token')
@@ -365,7 +443,7 @@ const updateStatus = async (t: AdminTokenItem, next: boolean) => {
     })
     if (!resp?.success) throw new Error(resp?.error || '更新失败')
     notification.success('更新成功', next ? 'Token 已启用' : 'Token 已禁用')
-    if (status.value !== 'all') await loadTokens()
+    await refreshAll()
   } catch (error: any) {
     t.is_active = prev
     console.error('更新Token状态失败:', error)
@@ -403,7 +481,7 @@ const confirmDelete = async (withImages: boolean) => {
     deleteModalOpen.value = false
     deletingToken.value = null
     deleteImpact.value = null
-    await loadTokens()
+    await refreshAll()
   } catch (error: any) {
     console.error('删除Token失败:', error)
     notification.error('删除失败', error.data?.error || error.message || '无法删除Token')
@@ -450,7 +528,7 @@ const confirmBatch = async (withImages: boolean) => {
     notification.success(`${actionText}完成`, detail)
     batchModalOpen.value = false
     selectedIds.value = []
-    await loadTokens()
+    await refreshAll()
   } catch (error: any) {
     console.error('批量操作失败:', error)
     notification.error('操作失败', error.data?.error || error.message || '批量操作失败')
@@ -459,8 +537,18 @@ const confirmBatch = async (withImages: boolean) => {
   }
 }
 
+const handleQuickDetailUpdated = async () => {
+  await refreshAll()
+}
+
+const handleQuickDetailDeleted = async () => {
+  quickDetailOpen.value = false
+  quickDetailTokenId.value = null
+  await refreshAll()
+}
+
 onMounted(() => {
-  loadTokens()
+  refreshAll()
   loadTokenDefaults()
 })
 </script>

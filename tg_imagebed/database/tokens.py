@@ -294,7 +294,9 @@ def admin_list_tokens(
     page_size: int = 20,
     search: str = None,
     tg_user_id: int = None,
-    tg_bind: str = None
+    tg_bind: str = None,
+    sort_by: str = 'created_at',
+    sort_order: str = 'desc',
 ) -> Dict[str, Any]:
     """
     管理员获取 Token 列表（分页）。
@@ -310,6 +312,8 @@ def admin_list_tokens(
         search: 搜索关键词（匹配 token / description / tg_username / tg_first_name）
         tg_user_id: 按 TG 用户 ID 筛选
         tg_bind: TG 绑定筛选（'bound'=已绑定, 'unbound'=未绑定, None/其他=全部）
+        sort_by: 排序字段（created_at / upload_count / expires_at / last_used）
+        sort_order: 排序方向（asc / desc）
 
     Returns:
         包含 page, page_size, total, items 的字典
@@ -319,6 +323,10 @@ def admin_list_tokens(
     page = max(1, int(page) if isinstance(page, (int, str)) and str(page).isdigit() else 1)
     page_size = max(1, min(100, int(page_size) if isinstance(page_size, (int, str)) and str(page_size).isdigit() else 20))
     offset = (page - 1) * page_size
+    sort_by = (sort_by or 'created_at').strip().lower()
+    sort_order = (sort_order or 'desc').strip().lower()
+    if sort_order not in ('asc', 'desc'):
+        sort_order = 'desc'
 
     # 搜索或 tg_bind 筛选需要 JOIN tg_users
     need_join = bool(
@@ -364,6 +372,15 @@ def admin_list_tokens(
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
     where_params = tuple(where_params_list)
 
+    if sort_by == 'upload_count':
+        order_sql = f"a.upload_count {sort_order}, a.rowid DESC"
+    elif sort_by == 'expires_at':
+        order_sql = f"(a.expires_at IS NULL) ASC, a.expires_at {sort_order}, a.rowid DESC"
+    elif sort_by == 'last_used':
+        order_sql = f"(a.last_used IS NULL) ASC, a.last_used {sort_order}, a.rowid DESC"
+    else:
+        order_sql = f"a.created_at {sort_order}, a.rowid DESC"
+
     # COUNT 查询需要与主查询保持一致的 JOIN
     join_sql = "LEFT JOIN tg_users u ON a.tg_user_id = u.tg_user_id" if need_join else ""
 
@@ -396,7 +413,7 @@ def admin_list_tokens(
                 FROM auth_tokens a
                 LEFT JOIN tg_users u ON a.tg_user_id = u.tg_user_id
                 {where_sql}
-                ORDER BY a.created_at DESC, a.rowid DESC
+                ORDER BY {order_sql}
                 LIMIT ? OFFSET ?
             """, (*where_params, page_size, offset))
 
@@ -411,6 +428,50 @@ def admin_list_tokens(
 
     except Exception as e:
         logger.error(f"管理员获取 Token 列表失败: {e}")
+        raise
+
+
+def admin_get_token_metrics() -> Dict[str, int]:
+    """管理员 Token 聚合统计。"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT COUNT(1) FROM auth_tokens")
+            total = int(cursor.fetchone()[0] or 0)
+
+            cursor.execute(f"""
+                SELECT COUNT(1)
+                FROM auth_tokens
+                WHERE is_active = 1
+                AND NOT {_EXPIRED_EXPR}
+            """)
+            active = int(cursor.fetchone()[0] or 0)
+
+            cursor.execute(f"""
+                SELECT COUNT(1)
+                FROM auth_tokens
+                WHERE {_EXPIRED_EXPR}
+            """)
+            expired = int(cursor.fetchone()[0] or 0)
+
+            cursor.execute("""
+                SELECT COUNT(1)
+                FROM auth_tokens
+                WHERE tg_user_id IS NOT NULL
+            """)
+            tg_bound = int(cursor.fetchone()[0] or 0)
+
+        return {
+            'total': total,
+            'active': active,
+            'expired': expired,
+            'disabled': max(0, total - active - expired),
+            'tg_bound': tg_bound,
+        }
+
+    except Exception as e:
+        logger.error(f"管理员获取 Token 统计失败: {e}")
         raise
 
 def admin_create_token(
@@ -763,6 +824,55 @@ def admin_get_token_detail(token_id: int) -> Optional[Dict[str, Any]]:
 
     except Exception as e:
         logger.error(f"管理员获取 Token 详情失败: {e}")
+        raise
+
+
+def admin_get_token_overview(token_id: int) -> Optional[Dict[str, Any]]:
+    """
+    按 rowid 获取 Token 概览信息（详情 + 关联统计）。
+    用于列表侧滑详情快速展示，减少前端多次请求。
+    """
+    detail = admin_get_token_detail(token_id)
+    if not detail:
+        return None
+
+    token_str = detail.get('token')
+    if not token_str:
+        return detail
+
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT COUNT(1), MAX(created_at) FROM file_storage WHERE auth_token = ?",
+                (token_str,),
+            )
+            upload_row = cursor.fetchone() or (0, None)
+
+            cursor.execute(
+                "SELECT COUNT(1), MAX(created_at) FROM galleries WHERE owner_token = ?",
+                (token_str,),
+            )
+            gallery_row = cursor.fetchone() or (0, None)
+
+            cursor.execute(
+                "SELECT COUNT(1) FROM gallery_token_access WHERE token = ?",
+                (token_str,),
+            )
+            access_count = int((cursor.fetchone() or (0,))[0] or 0)
+
+        detail['summary'] = {
+            'upload_total': int(upload_row[0] or 0),
+            'gallery_total': int(gallery_row[0] or 0),
+            'access_total': access_count,
+            'last_upload_at': upload_row[1],
+            'last_gallery_at': gallery_row[1],
+        }
+        return detail
+
+    except Exception as e:
+        logger.error(f"管理员获取 Token 概览失败: {e}")
         raise
 
 

@@ -1,40 +1,37 @@
 <template>
   <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="flex items-center gap-3">
+    <AdminPageHeader
+      :title="gallery?.name || '画集详情'"
+      eyebrow="Resources"
+      icon="heroicons:rectangle-stack"
+      :description="`${gallery?.image_count || 0} 张图片 · 创建于 ${formatDate(gallery?.created_at)}`"
+    >
+      <template #meta>
+        <div
+          v-if="gallery?.theme_color"
+          class="h-4 w-4 rounded-full border border-white/60 shadow-sm dark:border-neutral-800/70"
+          :style="{ backgroundColor: gallery.theme_color }"
+          :title="`主题色：${gallery.theme_color}`"
+        />
+        <UBadge
+          v-if="gallery?.layout_mode && gallery.layout_mode !== 'masonry'"
+          color="gray"
+          variant="soft"
+          size="xs"
+        >
+          {{ gallery.layout_mode === 'grid' ? '网格' : '自适应' }}
+        </UBadge>
+      </template>
+
+      <template #actions>
         <UButton
           icon="heroicons:arrow-left"
           color="gray"
           variant="ghost"
           to="/admin/galleries"
-        />
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-2xl font-bold text-stone-900 dark:text-white">{{ gallery?.name || '画集详情' }}</h1>
-            <!-- 主题色标记 -->
-            <div
-              v-if="gallery?.theme_color"
-              class="w-4 h-4 rounded-full border-2 border-white dark:border-neutral-800 shadow-sm flex-shrink-0"
-              :style="{ backgroundColor: gallery.theme_color }"
-              :title="`主题色：${gallery.theme_color}`"
-            />
-            <!-- 布局模式标记 -->
-            <UBadge
-              v-if="gallery?.layout_mode && gallery.layout_mode !== 'masonry'"
-              color="gray"
-              variant="soft"
-              size="xs"
-            >
-              {{ gallery.layout_mode === 'grid' ? '网格' : '自适应' }}
-            </UBadge>
-          </div>
-          <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
-            {{ gallery?.image_count || 0 }} 张图片 · 创建于 {{ formatDate(gallery?.created_at) }}
-          </p>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
+        >
+          返回列表
+        </UButton>
         <UButton
           icon="heroicons:share"
           :color="gallery?.share_enabled ? 'green' : 'gray'"
@@ -49,8 +46,8 @@
         <UButton icon="heroicons:trash" color="red" variant="outline" @click="askDelete">
           删除
         </UButton>
-      </div>
-    </div>
+      </template>
+    </AdminPageHeader>
 
     <!-- 操作栏 -->
     <UCard>

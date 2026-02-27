@@ -5,6 +5,7 @@
 import { defineStore } from 'pinia'
 
 const STORAGE_KEY = 'admin_sidebar_collapsed'
+const DENSITY_STORAGE_KEY = 'admin_density_mode'
 
 export const useAdminUiStore = defineStore('adminUi', {
   state: () => ({
@@ -12,6 +13,10 @@ export const useAdminUiStore = defineStore('adminUi', {
     sidebarCollapsed: false,
     // 移动端侧边栏抽屉开关
     mobileSidebarOpen: false,
+    // 后台信息密度
+    densityMode: 'comfortable' as 'comfortable' | 'compact',
+    // 移动端底部主导航当前项
+    mobilePrimaryTab: 'dashboard',
   }),
 
   actions: {
@@ -42,12 +47,26 @@ export const useAdminUiStore = defineStore('adminUi', {
       this.mobileSidebarOpen = !this.mobileSidebarOpen
     },
 
+    // 设置信息密度
+    setDensityMode(mode: 'comfortable' | 'compact') {
+      this.densityMode = mode
+      this.persistDensity()
+    },
+
+    setMobilePrimaryTab(tab: string) {
+      this.mobilePrimaryTab = tab
+    },
+
     // 从 localStorage 恢复状态
     restore() {
       if (import.meta.client) {
         const stored = localStorage.getItem(STORAGE_KEY)
         if (stored !== null) {
           this.sidebarCollapsed = stored === 'true'
+        }
+        const density = localStorage.getItem(DENSITY_STORAGE_KEY)
+        if (density === 'comfortable' || density === 'compact') {
+          this.densityMode = density
         }
       }
     },
@@ -58,5 +77,11 @@ export const useAdminUiStore = defineStore('adminUi', {
         localStorage.setItem(STORAGE_KEY, String(this.sidebarCollapsed))
       }
     },
+
+    persistDensity() {
+      if (import.meta.client) {
+        localStorage.setItem(DENSITY_STORAGE_KEY, this.densityMode)
+      }
+    }
   },
 })

@@ -118,6 +118,17 @@ def _format_settings_for_response(settings: dict) -> dict:
         'seo_og_title': settings.get('seo_og_title', ''),
         'seo_og_description': settings.get('seo_og_description', ''),
         'seo_og_image': settings.get('seo_og_image', ''),
+        'seo_og_site_name': settings.get('seo_og_site_name', ''),
+        'seo_og_type': settings.get('seo_og_type', 'website'),
+        'seo_canonical_url': settings.get('seo_canonical_url', ''),
+        'seo_robots_index': settings.get('seo_robots_index', '1') == '1',
+        'seo_robots_follow': settings.get('seo_robots_follow', '1') == '1',
+        'seo_twitter_card_type': settings.get('seo_twitter_card_type', 'summary_large_image'),
+        'seo_twitter_site': settings.get('seo_twitter_site', ''),
+        'seo_twitter_creator': settings.get('seo_twitter_creator', ''),
+        'seo_author': settings.get('seo_author', ''),
+        'seo_theme_color': settings.get('seo_theme_color', ''),
+        'seo_default_locale': settings.get('seo_default_locale', 'zh_CN'),
         'seo_footer_text': settings.get('seo_footer_text', ''),
         # 图片域名限制
         'image_domain_restriction_enabled': settings.get('image_domain_restriction_enabled', '0') == '1',
@@ -489,6 +500,75 @@ def admin_system_settings():
                     errors.append('OG 描述不能超过 500 个字符')
                 else:
                     settings_to_update['seo_og_description'] = val
+
+            if 'seo_og_site_name' in data:
+                val = str(data.get('seo_og_site_name') or '').strip()
+                if len(val) > 100:
+                    errors.append('OG 站点名称不能超过 100 个字符')
+                else:
+                    settings_to_update['seo_og_site_name'] = val
+
+            if 'seo_og_type' in data:
+                val = str(data.get('seo_og_type') or '').strip().lower()
+                if val not in ('website', 'article', 'profile'):
+                    errors.append('OG 类型必须是 website、article 或 profile')
+                else:
+                    settings_to_update['seo_og_type'] = val
+
+            if 'seo_canonical_url' in data:
+                val = str(data.get('seo_canonical_url') or '').strip()
+                if len(val) > 500:
+                    errors.append('Canonical URL 不能超过 500 个字符')
+                else:
+                    settings_to_update['seo_canonical_url'] = val
+
+            if 'seo_robots_index' in data:
+                settings_to_update['seo_robots_index'] = '1' if data.get('seo_robots_index') else '0'
+
+            if 'seo_robots_follow' in data:
+                settings_to_update['seo_robots_follow'] = '1' if data.get('seo_robots_follow') else '0'
+
+            if 'seo_twitter_card_type' in data:
+                val = str(data.get('seo_twitter_card_type') or '').strip().lower()
+                if val not in ('summary', 'summary_large_image'):
+                    errors.append('Twitter Card 类型必须是 summary 或 summary_large_image')
+                else:
+                    settings_to_update['seo_twitter_card_type'] = val
+
+            if 'seo_twitter_site' in data:
+                val = str(data.get('seo_twitter_site') or '').strip()
+                if len(val) > 100:
+                    errors.append('Twitter 站点账号不能超过 100 个字符')
+                else:
+                    settings_to_update['seo_twitter_site'] = val
+
+            if 'seo_twitter_creator' in data:
+                val = str(data.get('seo_twitter_creator') or '').strip()
+                if len(val) > 100:
+                    errors.append('Twitter 作者账号不能超过 100 个字符')
+                else:
+                    settings_to_update['seo_twitter_creator'] = val
+
+            if 'seo_author' in data:
+                val = str(data.get('seo_author') or '').strip()
+                if len(val) > 100:
+                    errors.append('作者名称不能超过 100 个字符')
+                else:
+                    settings_to_update['seo_author'] = val
+
+            if 'seo_theme_color' in data:
+                val = str(data.get('seo_theme_color') or '').strip()
+                if val and not re.match(r'^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$', val):
+                    errors.append('主题色必须是合法的 HEX 颜色值，例如 #f59e0b')
+                else:
+                    settings_to_update['seo_theme_color'] = val
+
+            if 'seo_default_locale' in data:
+                val = str(data.get('seo_default_locale') or '').strip()
+                if len(val) > 20:
+                    errors.append('默认 locale 不能超过 20 个字符')
+                else:
+                    settings_to_update['seo_default_locale'] = val
 
             if 'seo_footer_text' in data:
                 val = str(data.get('seo_footer_text') or '').strip()

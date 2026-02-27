@@ -30,6 +30,7 @@ from . import admin_tokens     # noqa: F401
 from . import admin_telegram   # noqa: F401
 from . import admin_galleries  # noqa: F401
 from . import admin_domains    # noqa: F401
+from . import admin_dashboard  # noqa: F401
 
 # 注意：/api/admin/check 端点已在 admin_module.py 中定义
 # 此处不再重复定义，避免路由冲突

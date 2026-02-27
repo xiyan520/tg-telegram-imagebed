@@ -13,19 +13,25 @@ const { seoSettings, displayName, displayDescription, displayKeywords, loadSeoSe
 
 // 动态 SEO head 配置
 useHead(computed(() => {
+  const robotsContent = `${seoSettings.value.robotsIndex ? 'index' : 'noindex'},${seoSettings.value.robotsFollow ? 'follow' : 'nofollow'}`
+  const locale = (seoSettings.value.defaultLocale || 'zh_CN').replace('_', '-')
+  const canonical = (seoSettings.value.canonicalUrl || '').trim()
   const head: any = {
-    htmlAttrs: { lang: 'zh-CN' },
+    htmlAttrs: { lang: locale || 'zh-CN' },
     bodyAttrs: { class: 'bg-gray-50 dark:bg-neutral-950' },
     title: displayName.value,
     meta: [
       { name: 'description', content: displayDescription.value },
       { name: 'keywords', content: displayKeywords.value },
+      { name: 'robots', content: robotsContent },
       // OG 标签
       { property: 'og:title', content: seoSettings.value.ogTitle || displayName.value },
       { property: 'og:description', content: seoSettings.value.ogDescription || displayDescription.value },
-      { property: 'og:type', content: 'website' },
+      { property: 'og:type', content: seoSettings.value.ogType || 'website' },
+      { property: 'og:locale', content: seoSettings.value.defaultLocale || 'zh_CN' },
+      { property: 'og:site_name', content: seoSettings.value.ogSiteName || displayName.value },
       // Twitter 标签
-      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:card', content: seoSettings.value.twitterCardType || 'summary_large_image' },
       { name: 'twitter:title', content: seoSettings.value.ogTitle || displayName.value },
       { name: 'twitter:description', content: seoSettings.value.ogDescription || displayDescription.value },
     ],
@@ -38,9 +44,30 @@ useHead(computed(() => {
     head.meta.push({ name: 'twitter:image', content: seoSettings.value.ogImage })
   }
 
+  if (seoSettings.value.twitterSite) {
+    head.meta.push({ name: 'twitter:site', content: seoSettings.value.twitterSite })
+  }
+
+  if (seoSettings.value.twitterCreator) {
+    head.meta.push({ name: 'twitter:creator', content: seoSettings.value.twitterCreator })
+  }
+
+  if (seoSettings.value.author) {
+    head.meta.push({ name: 'author', content: seoSettings.value.author })
+  }
+
+  if (seoSettings.value.themeColor) {
+    head.meta.push({ name: 'theme-color', content: seoSettings.value.themeColor })
+  }
+
   // 自定义 Favicon
   if (seoSettings.value.faviconUrl) {
     head.link.push({ rel: 'icon', href: seoSettings.value.faviconUrl })
+  }
+
+  if (canonical) {
+    head.link.push({ rel: 'canonical', href: canonical })
+    head.meta.push({ property: 'og:url', content: canonical })
   }
 
   return head

@@ -1,140 +1,113 @@
 <template>
   <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex items-center justify-between">
-      <div>
-        <h1 class="text-2xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
-          仪表板
-        </h1>
-        <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
-          欢迎回来，管理您的图床系统
-        </p>
+    <AdminPageHeader
+      title="仪表板"
+      eyebrow="Monitor"
+      icon="heroicons:squares-2x2"
+      description="核心指标、风险告警与最近活动一屏掌控"
+    >
+      <template #meta>
+        <UBadge color="gray" variant="subtle" size="xs">
+          {{ formattedLastUpdated }}
+        </UBadge>
+        <UBadge color="amber" variant="subtle" size="xs">
+          CDN 缓存率 {{ cdnCacheRate }}%
+        </UBadge>
+        <UBadge color="blue" variant="subtle" size="xs">
+          活动 {{ activities.length }} 条
+        </UBadge>
+      </template>
+
+      <template #actions>
+        <UButton
+          icon="heroicons:arrow-path"
+          color="gray"
+          variant="outline"
+          :loading="refreshing"
+          @click="refreshDashboard"
+        >
+          刷新仪表板
+        </UButton>
+      </template>
+    </AdminPageHeader>
+
+    <UAlert
+      v-if="statsError"
+      color="red"
+      variant="soft"
+      icon="heroicons:exclamation-triangle"
+      :description="statsError"
+    />
+
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <DashboardStatCard
+        label="总图片数"
+        :value="stats.totalImages"
+        icon="heroicons:photo"
+        tone="indigo"
+        :loading="loadingStats"
+      />
+      <DashboardStatCard
+        label="总存储量"
+        :value="stats.totalSize"
+        icon="heroicons:cube"
+        tone="blue"
+        :loading="loadingStats"
+      />
+      <DashboardStatCard
+        label="今日上传"
+        :value="stats.todayUploads"
+        icon="heroicons:cloud-arrow-up"
+        tone="emerald"
+        :loading="loadingStats"
+      />
+      <DashboardStatCard
+        label="CDN 缓存"
+        :value="stats.cdnCached"
+        :hint="stats.totalImages ? `占比 ${cdnCacheRate}%` : ''"
+        icon="heroicons:bolt"
+        tone="amber"
+        :loading="loadingStats"
+      />
+    </div>
+
+    <div class="grid grid-cols-1 gap-4 xl:grid-cols-3">
+      <div class="xl:col-span-2">
+        <DashboardAlertPanel
+          :stats="stats"
+          :config="systemConfig"
+          :loading="loadingStats"
+        />
       </div>
-      <UButton
-        icon="heroicons:arrow-path"
-        color="gray"
-        variant="outline"
-        :loading="loading"
-        @click="loadStats"
-      >
-        刷新数据
-      </UButton>
+      <DashboardQuickActions />
     </div>
 
-    <!-- 统计卡片 -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <UCard class="hover:shadow-lg transition-shadow">
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-            <UIcon name="heroicons:photo" class="w-6 h-6 text-white" />
-          </div>
-          <div class="flex-1">
-            <p class="text-sm text-stone-500 dark:text-stone-400">总图片数</p>
-            <p class="text-2xl font-bold text-stone-900 dark:text-white">
-              {{ stats.totalImages || '--' }}
-            </p>
-          </div>
-        </div>
-      </UCard>
-
-      <UCard class="hover:shadow-lg transition-shadow">
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-gradient-to-br from-cyan-500 to-cyan-600 rounded-xl flex items-center justify-center shadow-lg">
-            <UIcon name="heroicons:cube" class="w-6 h-6 text-white" />
-          </div>
-          <div class="flex-1">
-            <p class="text-sm text-stone-500 dark:text-stone-400">总存储量</p>
-            <p class="text-2xl font-bold text-stone-900 dark:text-white">
-              {{ stats.totalSize || '--' }}
-            </p>
-          </div>
-        </div>
-      </UCard>
-
-      <UCard class="hover:shadow-lg transition-shadow">
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg">
-            <UIcon name="heroicons:cloud-arrow-up" class="w-6 h-6 text-white" />
-          </div>
-          <div class="flex-1">
-            <p class="text-sm text-stone-500 dark:text-stone-400">今日上传</p>
-            <p class="text-2xl font-bold text-stone-900 dark:text-white">
-              {{ stats.todayUploads || '--' }}
-            </p>
-          </div>
-        </div>
-      </UCard>
-
-      <UCard class="hover:shadow-lg transition-shadow">
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl flex items-center justify-center shadow-lg">
-            <UIcon name="heroicons:bolt" class="w-6 h-6 text-white" />
-          </div>
-          <div class="flex-1">
-            <p class="text-sm text-stone-500 dark:text-stone-400">CDN缓存</p>
-            <p class="text-2xl font-bold text-stone-900 dark:text-white">
-              {{ stats.cdnCached || '--' }}
-            </p>
-          </div>
-        </div>
-      </UCard>
-    </div>
-
-    <!-- 快捷入口 -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      <NuxtLink to="/admin/images">
-        <UCard class="hover:shadow-lg hover:border-amber-400 dark:hover:border-amber-500 transition-all cursor-pointer group">
-          <div class="flex items-center gap-4">
-            <div class="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-              <UIcon name="heroicons:photo" class="w-6 h-6 text-white" />
-            </div>
-            <div class="flex-1">
-              <h3 class="font-semibold text-stone-900 dark:text-white">图片管理</h3>
-              <p class="text-sm text-stone-500 dark:text-stone-400">查看、搜索、删除图片</p>
-            </div>
-            <UIcon name="heroicons:chevron-right" class="w-5 h-5 text-stone-400 group-hover:text-amber-500 transition-colors" />
-          </div>
-        </UCard>
-      </NuxtLink>
-
-      <NuxtLink to="/admin/settings">
-        <UCard class="hover:shadow-lg hover:border-amber-400 dark:hover:border-amber-500 transition-all cursor-pointer group">
-          <div class="flex items-center gap-4">
-            <div class="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-              <UIcon name="heroicons:cog-6-tooth" class="w-6 h-6 text-white" />
-            </div>
-            <div class="flex-1">
-              <h3 class="font-semibold text-stone-900 dark:text-white">系统设置</h3>
-              <p class="text-sm text-stone-500 dark:text-stone-400">游客模式、上传限制</p>
-            </div>
-            <UIcon name="heroicons:chevron-right" class="w-5 h-5 text-stone-400 group-hover:text-amber-500 transition-colors" />
-          </div>
-        </UCard>
-      </NuxtLink>
-
-      <NuxtLink to="/admin/announcements">
-        <UCard class="hover:shadow-lg hover:border-amber-400 dark:hover:border-amber-500 transition-all cursor-pointer group">
-          <div class="flex items-center gap-4">
-            <div class="w-12 h-12 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform">
-              <UIcon name="heroicons:megaphone" class="w-6 h-6 text-white" />
-            </div>
-            <div class="flex-1">
-              <h3 class="font-semibold text-stone-900 dark:text-white">公告管理</h3>
-              <p class="text-sm text-stone-500 dark:text-stone-400">编辑系统公告</p>
-            </div>
-            <UIcon name="heroicons:chevron-right" class="w-5 h-5 text-stone-400 group-hover:text-amber-500 transition-colors" />
-          </div>
-        </UCard>
-      </NuxtLink>
-    </div>
-
-    <!-- 系统状态 -->
-    <AdminSystemStatus :config="systemConfig" />
+    <DashboardActivityTimeline
+      :items="activities"
+      :filter="activityFilter"
+      :loading="loadingActivities"
+      :loading-more="loadingMoreActivities"
+      :has-more="activityHasMore"
+      :error="activityError"
+      @update:filter="activityFilter = $event"
+      @refresh="loadActivities({ reset: true })"
+      @load-more="loadMoreActivities"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import type { AdminStats, AdminConfig } from '~/types/api'
+import AdminPageHeader from '~/components/admin/common/AdminPageHeader.vue'
+import DashboardStatCard from '~/components/admin/dashboard/DashboardStatCard.vue'
+import DashboardAlertPanel from '~/components/admin/dashboard/DashboardAlertPanel.vue'
+import DashboardQuickActions from '~/components/admin/dashboard/DashboardQuickActions.vue'
+import DashboardActivityTimeline from '~/components/admin/dashboard/DashboardActivityTimeline.vue'
+import type {
+  AdminStats,
+  AdminConfig,
+  AdminActivityType,
+  AdminDashboardActivityItem,
+} from '~/types/api'
 
 definePageMeta({
   layout: 'admin',
@@ -142,31 +115,125 @@ definePageMeta({
 })
 
 const notification = useNotification()
-const { getAdminStats } = useImageApi()
+const { getAdminStats, getAdminDashboardActivity } = useImageApi()
 
 // 状态
-const loading = ref(false)
+const loadingStats = ref(false)
+const loadingActivities = ref(false)
+const loadingMoreActivities = ref(false)
+const refreshing = ref(false)
 const stats = ref<Partial<AdminStats>>({})
 const systemConfig = ref<Partial<AdminConfig>>({})
+const activities = ref<AdminDashboardActivityItem[]>([])
+const activityFilter = ref<AdminActivityType>('all')
+const activityPage = ref(1)
+const activityLimit = 20
+const activityHasMore = ref(false)
+const statsError = ref('')
+const activityError = ref('')
+const lastUpdatedAt = ref<Date | null>(null)
 
 // 加载统计信息
-const loadStats = async () => {
-  loading.value = true
+const loadStats = async (opts: { silent?: boolean } = {}) => {
+  loadingStats.value = true
+  statsError.value = ''
   try {
     const data = await getAdminStats()
     stats.value = data.stats
     systemConfig.value = data.config
-    notification.success('已刷新', '数据已更新')
+    lastUpdatedAt.value = new Date()
+    if (!opts.silent) {
+      notification.success('已刷新', '统计数据已更新')
+    }
   } catch (error) {
     console.error('加载统计信息失败:', error)
-    notification.error('加载失败', '无法获取统计信息')
+    statsError.value = '无法获取统计信息，请检查后台服务状态。'
+    if (!opts.silent) {
+      notification.error('加载失败', statsError.value)
+    }
   } finally {
-    loading.value = false
+    loadingStats.value = false
   }
 }
 
+const loadActivities = async (opts: { reset?: boolean; silent?: boolean } = {}) => {
+  const reset = opts.reset ?? false
+  const targetPage = reset ? 1 : activityPage.value + 1
+
+  if (reset) {
+    loadingActivities.value = true
+    activityError.value = ''
+  } else {
+    loadingMoreActivities.value = true
+  }
+
+  try {
+    const data = await getAdminDashboardActivity({
+      type: activityFilter.value,
+      page: targetPage,
+      limit: activityLimit,
+    })
+
+    if (reset) {
+      activities.value = data.items || []
+    } else {
+      activities.value = [...activities.value, ...(data.items || [])]
+    }
+
+    activityPage.value = data.page || targetPage
+    activityHasMore.value = Boolean(data.has_more)
+  } catch (error) {
+    console.error('加载活动流失败:', error)
+    activityError.value = '活动流加载失败，请稍后重试。'
+    if (!opts.silent) {
+      notification.error('加载失败', activityError.value)
+    }
+  } finally {
+    loadingActivities.value = false
+    loadingMoreActivities.value = false
+  }
+}
+
+const loadMoreActivities = () => {
+  if (!activityHasMore.value || loadingMoreActivities.value || loadingActivities.value) return
+  loadActivities({ reset: false, silent: true })
+}
+
+const refreshDashboard = async () => {
+  refreshing.value = true
+  await Promise.all([
+    loadStats({ silent: true }),
+    loadActivities({ reset: true, silent: true }),
+  ])
+  refreshing.value = false
+  notification.success('已刷新', '仪表板数据已更新')
+}
+
+const formattedLastUpdated = computed(() => {
+  if (!lastUpdatedAt.value) return '首次加载中'
+  return `更新于 ${lastUpdatedAt.value.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })}`
+})
+
+const cdnCacheRate = computed(() => {
+  const total = Number(stats.value.totalImages || 0)
+  const cached = Number(stats.value.cdnCached || 0)
+  if (total <= 0) return 0
+  return Math.round((cached / total) * 100)
+})
+
+watch(activityFilter, () => {
+  loadActivities({ reset: true, silent: true })
+})
+
 // 页面加载
-onMounted(() => {
-  loadStats()
+onMounted(async () => {
+  await Promise.all([
+    loadStats({ silent: true }),
+    loadActivities({ reset: true, silent: true }),
+  ])
 })
 </script>

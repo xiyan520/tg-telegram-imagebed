@@ -1,6 +1,7 @@
 import type {
   ApiResponse, PublicStats,
-  AdminStatsData, AdminImagesData, AdminDeleteData
+  AdminStatsData, AdminImagesData, AdminDeleteData,
+  AdminDashboardActivityData, AdminActivityType, AdminImagesQuery
 } from '~/types/api'
 
 export const useImageApi = () => {
@@ -30,13 +31,7 @@ export const useImageApi = () => {
   }
 
   // 获取图片列表
-  const getImages = async (params: {
-    page?: number
-    limit?: number
-    filter?: string
-    search?: string
-    sort?: string
-  }): Promise<AdminImagesData> => {
+  const getImages = async (params: AdminImagesQuery): Promise<AdminImagesData> => {
     try {
       const response = await $fetch<ApiResponse<AdminImagesData>>('/api/admin/images', {
         params,
@@ -82,9 +77,34 @@ export const useImageApi = () => {
     }
   }
 
+  // 获取管理员仪表盘活动流
+  const getAdminDashboardActivity = async (params: {
+    type?: AdminActivityType
+    page?: number
+    limit?: number
+  }): Promise<AdminDashboardActivityData> => {
+    try {
+      const response = await $fetch<ApiResponse<AdminDashboardActivityData>>('/api/admin/dashboard/activity', {
+        params,
+        credentials: 'include'
+      })
+      return response.data || {
+        items: [],
+        page: params.page || 1,
+        limit: params.limit || 20,
+        has_more: false,
+        type: params.type || 'all'
+      }
+    } catch (error) {
+      console.error('获取仪表盘活动流失败:', error)
+      throw error
+    }
+  }
+
   return {
     getStats,
     getAdminStats,
+    getAdminDashboardActivity,
     getImages,
     deleteImages,
     clearCache

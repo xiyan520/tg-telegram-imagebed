@@ -155,6 +155,17 @@ DEFAULT_SYSTEM_SETTINGS = {
     'seo_og_title': '',                     # OG 标题（留空 fallback 到 site_name）
     'seo_og_description': '',               # OG 描述（留空 fallback 到 description）
     'seo_og_image': '',                     # OG 图片 URL
+    'seo_og_site_name': '',                 # OG 站点名称（留空 fallback 到 site_name）
+    'seo_og_type': 'website',               # OG 类型：website / article / profile
+    'seo_canonical_url': '',                # Canonical URL（留空则不输出）
+    'seo_robots_index': '1',                # robots index 开关
+    'seo_robots_follow': '1',               # robots follow 开关
+    'seo_twitter_card_type': 'summary_large_image',  # Twitter Card 类型
+    'seo_twitter_site': '',                 # Twitter 站点账号
+    'seo_twitter_creator': '',              # Twitter 作者账号
+    'seo_author': '',                       # 页面作者
+    'seo_theme_color': '',                  # 主题色（HEX）
+    'seo_default_locale': 'zh_CN',          # 默认 locale
     'seo_footer_text': '',                  # 自定义页脚文字（留空用默认格式）
     # 图片域名限制
     'image_domain_restriction_enabled': '0',  # 图片域名限制开关
@@ -348,6 +359,17 @@ def get_public_settings() -> Dict[str, Any]:
         'seo_og_title': settings.get('seo_og_title', ''),
         'seo_og_description': settings.get('seo_og_description', ''),
         'seo_og_image': settings.get('seo_og_image', ''),
+        'seo_og_site_name': settings.get('seo_og_site_name', ''),
+        'seo_og_type': settings.get('seo_og_type', 'website'),
+        'seo_canonical_url': settings.get('seo_canonical_url', ''),
+        'seo_robots_index': settings.get('seo_robots_index', '1') == '1',
+        'seo_robots_follow': settings.get('seo_robots_follow', '1') == '1',
+        'seo_twitter_card_type': settings.get('seo_twitter_card_type', 'summary_large_image'),
+        'seo_twitter_site': settings.get('seo_twitter_site', ''),
+        'seo_twitter_creator': settings.get('seo_twitter_creator', ''),
+        'seo_author': settings.get('seo_author', ''),
+        'seo_theme_color': settings.get('seo_theme_color', ''),
+        'seo_default_locale': settings.get('seo_default_locale', 'zh_CN'),
         'seo_footer_text': settings.get('seo_footer_text', ''),
     }
 
