@@ -96,8 +96,12 @@ def list_galleries(owner_token: str, page: int = 1, limit: int = 50) -> Dict[str
         return {'items': [], 'total': 0, 'page': page, 'limit': limit}
 
 
-def update_gallery(gallery_id: int, owner_token: str, name: Optional[str] = None, description: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """更新画集信息"""
+def update_gallery(gallery_id: int, owner_token: str, name: Optional[str] = None, description: Optional[str] = None,
+                   layout_mode: Optional[str] = None, theme_color: Optional[str] = None,
+                   show_image_info: Optional[bool] = None, allow_download: Optional[bool] = None,
+                   sort_order: Optional[str] = None, nsfw_warning: Optional[bool] = None,
+                   custom_header_text: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """更新画集信息（含显示设置）"""
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -108,6 +112,30 @@ def update_gallery(gallery_id: int, owner_token: str, name: Optional[str] = None
             if description is not None:
                 updates.append('description = ?')
                 params.append(description.strip() or None)
+            # 显示设置字段
+            _VALID_LAYOUT = ('masonry', 'grid', 'justified')
+            _VALID_SORT = ('newest', 'oldest', 'filename')
+            if layout_mode is not None and layout_mode in _VALID_LAYOUT:
+                updates.append('layout_mode = ?')
+                params.append(layout_mode)
+            if theme_color is not None:
+                updates.append('theme_color = ?')
+                params.append(str(theme_color).strip()[:20])
+            if show_image_info is not None:
+                updates.append('show_image_info = ?')
+                params.append(1 if show_image_info else 0)
+            if allow_download is not None:
+                updates.append('allow_download = ?')
+                params.append(1 if allow_download else 0)
+            if sort_order is not None and sort_order in _VALID_SORT:
+                updates.append('sort_order = ?')
+                params.append(sort_order)
+            if nsfw_warning is not None:
+                updates.append('nsfw_warning = ?')
+                params.append(1 if nsfw_warning else 0)
+            if custom_header_text is not None:
+                updates.append('custom_header_text = ?')
+                params.append(str(custom_header_text).strip()[:200])
             if not updates:
                 return get_gallery(gallery_id, owner_token)
             updates.append('updated_at = CURRENT_TIMESTAMP')
@@ -441,6 +469,8 @@ def get_share_all_gallery(share_token: str, gallery_id: int) -> Optional[Dict[st
             cursor.execute('''
                 SELECT g.id, g.name, g.description, g.access_mode,
                        g.hide_from_share_all, g.created_at, g.updated_at,
+                       g.layout_mode, g.theme_color, g.show_image_info,
+                       g.allow_download, g.sort_order, g.nsfw_warning, g.custom_header_text,
                        (SELECT COUNT(*) FROM gallery_images WHERE gallery_id = g.id) AS image_count
                 FROM galleries g
                 WHERE g.id = ?

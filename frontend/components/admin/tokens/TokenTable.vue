@@ -120,7 +120,8 @@
         </div>
         <UPagination
           :model-value="page"
-          :total="totalPages"
+          :total="total"
+          :page-count="pageSize"
           @update:model-value="emit('update:page', $event)"
         />
       </div>
@@ -139,6 +140,8 @@ const props = defineProps<{
   isPartialSelected: boolean
   updatingId: number | null
   page: number
+  total: number
+  pageSize: number
   totalPages: number
 }>()
 

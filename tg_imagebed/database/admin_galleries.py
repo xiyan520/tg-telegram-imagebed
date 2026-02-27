@@ -108,8 +108,12 @@ def admin_list_galleries(page: int = 1, limit: int = 50, search: Optional[str] =
         return {'items': [], 'total': 0, 'page': page, 'limit': limit}
 
 
-def admin_update_gallery(gallery_id: int, name: Optional[str] = None, description: Optional[str] = None) -> Optional[Dict[str, Any]]:
-    """管理员更新画集（无所有者限制）"""
+def admin_update_gallery(gallery_id: int, name: Optional[str] = None, description: Optional[str] = None,
+                         layout_mode: Optional[str] = None, theme_color: Optional[str] = None,
+                         show_image_info: Optional[bool] = None, allow_download: Optional[bool] = None,
+                         sort_order: Optional[str] = None, nsfw_warning: Optional[bool] = None,
+                         custom_header_text: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """管理员更新画集（无所有者限制，含显示设置）"""
     try:
         with get_connection() as conn:
             cur = conn.cursor()
@@ -120,6 +124,30 @@ def admin_update_gallery(gallery_id: int, name: Optional[str] = None, descriptio
             if description is not None:
                 updates.append('description = ?')
                 params.append(str(description).strip()[:500] or None)
+            # 显示设置字段
+            _VALID_LAYOUT = ('masonry', 'grid', 'justified')
+            _VALID_SORT = ('newest', 'oldest', 'filename')
+            if layout_mode is not None and layout_mode in _VALID_LAYOUT:
+                updates.append('layout_mode = ?')
+                params.append(layout_mode)
+            if theme_color is not None:
+                updates.append('theme_color = ?')
+                params.append(str(theme_color).strip()[:20])
+            if show_image_info is not None:
+                updates.append('show_image_info = ?')
+                params.append(1 if show_image_info else 0)
+            if allow_download is not None:
+                updates.append('allow_download = ?')
+                params.append(1 if allow_download else 0)
+            if sort_order is not None and sort_order in _VALID_SORT:
+                updates.append('sort_order = ?')
+                params.append(sort_order)
+            if nsfw_warning is not None:
+                updates.append('nsfw_warning = ?')
+                params.append(1 if nsfw_warning else 0)
+            if custom_header_text is not None:
+                updates.append('custom_header_text = ?')
+                params.append(str(custom_header_text).strip()[:200])
             if not updates:
                 return admin_get_gallery(gallery_id)
             updates.append('updated_at = CURRENT_TIMESTAMP')

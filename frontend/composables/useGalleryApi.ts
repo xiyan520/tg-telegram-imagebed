@@ -20,6 +20,14 @@ export interface Gallery {
   hide_from_share_all?: boolean
   created_at: string
   updated_at: string
+  // 显示设置字段
+  layout_mode?: 'masonry' | 'grid' | 'justified'
+  theme_color?: string
+  show_image_info?: boolean
+  allow_download?: boolean
+  sort_order?: 'newest' | 'oldest' | 'filename'
+  nsfw_warning?: boolean
+  custom_header_text?: string
 }
 
 export interface GalleryImage {

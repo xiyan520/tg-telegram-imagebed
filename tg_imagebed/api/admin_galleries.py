@@ -86,7 +86,21 @@ def admin_gallery_detail(gallery_id: int):
                 return _admin_json({'success': False, 'error': '画集名称不能超过100字符'}, 400)
         if description is not None:
             description = str(description).strip()[:500]
-        gallery = admin_update_gallery(gallery_id, name=name, description=description)
+        # 显示设置字段
+        layout_mode = data.get('layout_mode')
+        theme_color = data.get('theme_color')
+        show_image_info = data.get('show_image_info')
+        allow_download = data.get('allow_download')
+        sort_order = data.get('sort_order')
+        nsfw_warning = data.get('nsfw_warning')
+        custom_header_text = data.get('custom_header_text')
+        gallery = admin_update_gallery(
+            gallery_id, name=name, description=description,
+            layout_mode=layout_mode, theme_color=theme_color,
+            show_image_info=show_image_info, allow_download=allow_download,
+            sort_order=sort_order, nsfw_warning=nsfw_warning,
+            custom_header_text=custom_header_text
+        )
         if not gallery:
             return _admin_json({'success': False, 'error': '画集不存在'}, 404)
         return _admin_json({'success': True, 'data': {'gallery': gallery}})

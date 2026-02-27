@@ -450,12 +450,20 @@ def _migrate_galleries_table(cursor, conn) -> list:
             finally:
                 cursor.execute('PRAGMA foreign_keys = ON')
 
-    # 新增访问控制列
+    # 新增访问控制列 + 显示设置列
     gallery_new_columns = [
         ('access_mode', "TEXT DEFAULT 'public'"),
         ('password_hash', 'TEXT'),
         ('hide_from_share_all', 'INTEGER DEFAULT 0'),
         ('cover_image', 'TEXT'),
+        # 显示设置字段
+        ('layout_mode', "TEXT DEFAULT 'masonry'"),
+        ('theme_color', "TEXT DEFAULT ''"),
+        ('show_image_info', 'INTEGER DEFAULT 1'),
+        ('allow_download', 'INTEGER DEFAULT 1'),
+        ('sort_order', "TEXT DEFAULT 'newest'"),
+        ('nsfw_warning', 'INTEGER DEFAULT 0'),
+        ('custom_header_text', "TEXT DEFAULT ''"),
     ]
     for col_name, col_type in gallery_new_columns:
         if col_name not in gallery_columns:

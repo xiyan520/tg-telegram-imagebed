@@ -105,7 +105,21 @@ def gallery_detail(gallery_id: int):
                 return _json_response({'success': False, 'error': '画集名称不能超过100字符'}, 400)
         if description is not None:
             description = str(description).strip()[:500]
-        gallery = update_gallery(gallery_id, token, name, description)
+        # 显示设置字段
+        layout_mode = data.get('layout_mode')
+        theme_color = data.get('theme_color')
+        show_image_info = data.get('show_image_info')
+        allow_download = data.get('allow_download')
+        sort_order = data.get('sort_order')
+        nsfw_warning = data.get('nsfw_warning')
+        custom_header_text = data.get('custom_header_text')
+        gallery = update_gallery(
+            gallery_id, token, name, description,
+            layout_mode=layout_mode, theme_color=theme_color,
+            show_image_info=show_image_info, allow_download=allow_download,
+            sort_order=sort_order, nsfw_warning=nsfw_warning,
+            custom_header_text=custom_header_text
+        )
         if not gallery:
             return _json_response({'success': False, 'error': '画集不存在或无权限'}, 404)
         return _json_response({'success': True, 'data': {'gallery': gallery}})
@@ -337,7 +351,16 @@ def shared_gallery_api(share_token: str):
                 'name': gallery['name'],
                 'description': gallery.get('description'),
                 'image_count': gallery['image_count'],
-                'access_mode': access_mode
+                'access_mode': access_mode,
+                'layout_mode': gallery.get('layout_mode', 'masonry'),
+                'theme_color': gallery.get('theme_color', ''),
+                'show_image_info': bool(gallery.get('show_image_info', 1)),
+                'allow_download': bool(gallery.get('allow_download', 1)),
+                'sort_order': gallery.get('sort_order', 'newest'),
+                'nsfw_warning': bool(gallery.get('nsfw_warning', 0)),
+                'custom_header_text': gallery.get('custom_header_text', ''),
+                'cover_image': gallery.get('cover_image', ''),
+                'cover_url': f"{base_url}/image/{gallery['cover_image']}" if gallery.get('cover_image') else '',
             },
             'images': images_result['items'],
             'total': images_result['total'],
@@ -546,7 +569,16 @@ def shared_all_gallery_detail_api(share_all_token: str, gallery_id: int):
                 'name': gallery['name'],
                 'description': gallery.get('description'),
                 'image_count': gallery.get('image_count', 0),
-                'access_mode': access_mode
+                'access_mode': access_mode,
+                'layout_mode': gallery.get('layout_mode', 'masonry'),
+                'theme_color': gallery.get('theme_color', ''),
+                'show_image_info': bool(gallery.get('show_image_info', 1)),
+                'allow_download': bool(gallery.get('allow_download', 1)),
+                'sort_order': gallery.get('sort_order', 'newest'),
+                'nsfw_warning': bool(gallery.get('nsfw_warning', 0)),
+                'custom_header_text': gallery.get('custom_header_text', ''),
+                'cover_image': gallery.get('cover_image', ''),
+                'cover_url': f"{base_url}/image/{gallery['cover_image']}" if gallery.get('cover_image') else '',
             },
             'images': images_result['items'],
             'total': images_result['total'],

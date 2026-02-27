@@ -10,7 +10,25 @@
           to="/admin/galleries"
         />
         <div>
-          <h1 class="text-2xl font-bold text-stone-900 dark:text-white">{{ gallery?.name || '画集详情' }}</h1>
+          <div class="flex items-center gap-2">
+            <h1 class="text-2xl font-bold text-stone-900 dark:text-white">{{ gallery?.name || '画集详情' }}</h1>
+            <!-- 主题色标记 -->
+            <div
+              v-if="gallery?.theme_color"
+              class="w-4 h-4 rounded-full border-2 border-white dark:border-neutral-800 shadow-sm flex-shrink-0"
+              :style="{ backgroundColor: gallery.theme_color }"
+              :title="`主题色：${gallery.theme_color}`"
+            />
+            <!-- 布局模式标记 -->
+            <UBadge
+              v-if="gallery?.layout_mode && gallery.layout_mode !== 'masonry'"
+              color="gray"
+              variant="soft"
+              size="xs"
+            >
+              {{ gallery.layout_mode === 'grid' ? '网格' : '自适应' }}
+            </UBadge>
+          </div>
           <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
             {{ gallery?.image_count || 0 }} 张图片 · 创建于 {{ formatDate(gallery?.created_at) }}
           </p>
@@ -154,6 +172,146 @@
           <UFormGroup label="描述" hint="可选">
             <UTextarea v-model="editForm.description" placeholder="输入画集描述" :rows="3" :maxlength="500" />
           </UFormGroup>
+
+          <!-- 显示设置折叠区域 -->
+          <div class="border border-stone-200 dark:border-neutral-700 rounded-lg overflow-hidden">
+            <!-- 折叠标题 -->
+            <button
+              type="button"
+              class="w-full flex items-center justify-between px-4 py-3 bg-stone-50 dark:bg-neutral-800 hover:bg-stone-100 dark:hover:bg-neutral-700 transition-colors text-left"
+              @click="displaySettingsOpen = !displaySettingsOpen"
+            >
+              <div class="flex items-center gap-2">
+                <UIcon name="heroicons:paint-brush" class="w-4 h-4 text-stone-500" />
+                <span class="text-sm font-medium text-stone-700 dark:text-stone-300">显示设置</span>
+              </div>
+              <UIcon
+                :name="displaySettingsOpen ? 'heroicons:chevron-up' : 'heroicons:chevron-down'"
+                class="w-4 h-4 text-stone-400"
+              />
+            </button>
+
+            <!-- 折叠内容 -->
+            <div v-if="displaySettingsOpen" class="p-4 space-y-4">
+              <!-- 布局模式 -->
+              <UFormGroup label="布局模式">
+                <div class="grid grid-cols-3 gap-2">
+                  <button
+                    v-for="opt in layoutModeOptions"
+                    :key="opt.value"
+                    type="button"
+                    class="flex flex-col items-center gap-1 p-2 rounded-lg border-2 transition-all text-center"
+                    :class="editForm.layout_mode === opt.value
+                      ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                      : 'border-stone-200 dark:border-neutral-700 hover:border-stone-300 dark:hover:border-neutral-600'"
+                    @click="editForm.layout_mode = opt.value as any"
+                  >
+                    <span class="text-xs font-medium text-stone-700 dark:text-stone-300">{{ opt.label }}</span>
+                    <span class="text-xs text-stone-400 dark:text-stone-500 leading-tight">{{ opt.desc }}</span>
+                  </button>
+                </div>
+              </UFormGroup>
+
+              <!-- 图片排序 -->
+              <UFormGroup label="图片排序">
+                <USelectMenu
+                  v-model="editForm.sort_order"
+                  :options="sortOrderOptions"
+                  value-attribute="value"
+                  option-attribute="label"
+                />
+              </UFormGroup>
+
+              <!-- 主题色 -->
+              <UFormGroup label="主题色">
+                <div class="space-y-2">
+                  <!-- 预设色板 -->
+                  <div class="flex flex-wrap gap-2">
+                    <!-- 默认（无色）选项 -->
+                    <button
+                      type="button"
+                      class="w-7 h-7 rounded-full border-2 transition-all flex items-center justify-center bg-stone-100 dark:bg-neutral-700"
+                      :class="!editForm.theme_color ? 'border-amber-500 ring-2 ring-amber-500 ring-offset-1' : 'border-stone-300 dark:border-neutral-600 hover:border-stone-400'"
+                      title="默认（Amber）"
+                      @click="editForm.theme_color = ''; showCustomColor = false"
+                    >
+                      <UIcon name="heroicons:x-mark" class="w-3 h-3 text-stone-400" />
+                    </button>
+                    <!-- 预设颜色 -->
+                    <button
+                      v-for="color in presetColors"
+                      :key="color.value"
+                      type="button"
+                      class="w-7 h-7 rounded-full border-2 transition-all"
+                      :style="{ backgroundColor: color.value }"
+                      :class="editForm.theme_color === color.value
+                        ? 'border-white dark:border-neutral-800 ring-2 ring-amber-500 ring-offset-1'
+                        : 'border-white dark:border-neutral-800 hover:scale-110'"
+                      :title="color.label"
+                      @click="selectPresetColor(color.value)"
+                    />
+                    <!-- 自定义颜色按钮 -->
+                    <button
+                      type="button"
+                      class="w-7 h-7 rounded-full border-2 border-dashed transition-all flex items-center justify-center"
+                      :class="showCustomColor
+                        ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/20'
+                        : 'border-stone-300 dark:border-neutral-600 hover:border-stone-400'"
+                      title="自定义颜色"
+                      @click="toggleCustomColor"
+                    >
+                      <UIcon name="heroicons:pencil" class="w-3 h-3 text-stone-400" />
+                    </button>
+                  </div>
+                  <!-- 自定义 hex 输入 -->
+                  <div v-if="showCustomColor" class="flex items-center gap-2">
+                    <div
+                      class="w-7 h-7 rounded-full border border-stone-200 dark:border-neutral-700 flex-shrink-0"
+                      :style="{ backgroundColor: editForm.theme_color || '#ffffff' }"
+                    />
+                    <UInput
+                      v-model="editForm.theme_color"
+                      placeholder="#f59e0b"
+                      :maxlength="7"
+                      class="flex-1"
+                    />
+                  </div>
+                </div>
+              </UFormGroup>
+
+              <!-- 自定义头部文字 -->
+              <UFormGroup label="自定义头部文字" hint="可选，显示在分享页顶部">
+                <UInput v-model="editForm.custom_header_text" placeholder="输入自定义头部文字" :maxlength="200" />
+              </UFormGroup>
+
+              <!-- 开关选项 -->
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">显示图片信息</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">在图片下方显示文件名等信息</p>
+                  </div>
+                  <UToggle v-model="editForm.show_image_info" color="amber" />
+                </div>
+                <UDivider />
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">允许下载</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">访客可以下载画集中的图片</p>
+                  </div>
+                  <UToggle v-model="editForm.allow_download" color="amber" />
+                </div>
+                <UDivider />
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium text-stone-700 dark:text-stone-300">NSFW 警告</p>
+                    <p class="text-xs text-stone-500 dark:text-stone-400">访问前显示内容警告提示</p>
+                  </div>
+                  <UToggle v-model="editForm.nsfw_warning" color="red" />
+                </div>
+              </div>
+            </div>
+          </div>
 
           <!-- 访问控制设置 -->
           <UDivider label="访问控制" />
@@ -501,8 +659,67 @@ const selectedImages = ref<string[]>([])
 const selectAll = ref(false)
 
 const editModalOpen = ref(false)
-const editForm = ref({ name: '', description: '' })
+// 编辑表单，包含基本信息和显示设置
+const editForm = ref({
+  name: '',
+  description: '',
+  layout_mode: 'masonry' as 'masonry' | 'grid' | 'justified',
+  theme_color: '',
+  show_image_info: true,
+  allow_download: true,
+  sort_order: 'newest' as 'newest' | 'oldest' | 'filename',
+  nsfw_warning: false,
+  custom_header_text: ''
+})
 const saving = ref(false)
+
+// 显示设置折叠状态
+const displaySettingsOpen = ref(false)
+
+// 布局模式选项
+const layoutModeOptions = [
+  { value: 'masonry', label: '瀑布流', desc: '不等高自然排列' },
+  { value: 'grid', label: '网格', desc: '等高等宽整齐排列' },
+  { value: 'justified', label: '自适应', desc: '等宽不等高紧凑排列' }
+]
+
+// 排序选项
+const sortOrderOptions = [
+  { value: 'newest', label: '最新优先' },
+  { value: 'oldest', label: '最旧优先' },
+  { value: 'filename', label: '文件名排序' }
+]
+
+// 预设主题色
+const presetColors = [
+  { value: '#f59e0b', label: 'Amber' },
+  { value: '#3b82f6', label: 'Blue' },
+  { value: '#10b981', label: 'Green' },
+  { value: '#8b5cf6', label: 'Purple' },
+  { value: '#ec4899', label: 'Pink' },
+  { value: '#ef4444', label: 'Red' },
+  { value: '#14b8a6', label: 'Teal' },
+  { value: '#6366f1', label: 'Indigo' },
+  { value: '#f97316', label: 'Orange' },
+  { value: '#64748b', label: 'Slate' }
+]
+
+// 是否显示自定义颜色输入框
+const showCustomColor = ref(false)
+
+// 选择预设颜色
+const selectPresetColor = (color: string) => {
+  editForm.value.theme_color = color
+  showCustomColor.value = false
+}
+
+// 切换自定义颜色输入
+const toggleCustomColor = () => {
+  showCustomColor.value = !showCustomColor.value
+  if (showCustomColor.value && !editForm.value.theme_color.startsWith('#')) {
+    editForm.value.theme_color = '#'
+  }
+}
 
 const shareModalOpen = ref(false)
 const sharingAction = ref(false)
@@ -653,12 +870,24 @@ const setCoverImage = async (encryptedId: string) => {
 }
 
 const openEditModal = () => {
-  editForm.value = { name: gallery.value?.name || '', description: gallery.value?.description || '' }
+  editForm.value = {
+    name: gallery.value?.name || '',
+    description: gallery.value?.description || '',
+    layout_mode: gallery.value?.layout_mode || 'masonry',
+    theme_color: gallery.value?.theme_color || '',
+    show_image_info: gallery.value?.show_image_info !== false,
+    allow_download: gallery.value?.allow_download !== false,
+    sort_order: gallery.value?.sort_order || 'newest',
+    nsfw_warning: gallery.value?.nsfw_warning || false,
+    custom_header_text: gallery.value?.custom_header_text || ''
+  }
   accessForm.value = {
     mode: gallery.value?.access_mode || 'public',
     password: '',
     hideFromShareAll: gallery.value?.hide_from_share_all || false
   }
+  showCustomColor.value = false
+  displaySettingsOpen.value = false
   editModalOpen.value = true
   // 如果是 token 模式，加载 Token 授权列表
   if (accessForm.value.mode === 'token') {
@@ -676,8 +905,18 @@ watch(() => accessForm.value.mode, (newMode) => {
 const saveEdit = async () => {
   saving.value = true
   try {
-    // 保存基本信息
-    gallery.value = await galleryApi.updateGallery(galleryId.value, editForm.value)
+    // 保存基本信息 + 显示设置
+    gallery.value = await galleryApi.updateGallery(galleryId.value, {
+      name: editForm.value.name,
+      description: editForm.value.description,
+      layout_mode: editForm.value.layout_mode,
+      theme_color: editForm.value.theme_color,
+      show_image_info: editForm.value.show_image_info,
+      allow_download: editForm.value.allow_download,
+      sort_order: editForm.value.sort_order,
+      nsfw_warning: editForm.value.nsfw_warning,
+      custom_header_text: editForm.value.custom_header_text
+    })
 
     // 保存访问控制设置
     const accessBody: any = {

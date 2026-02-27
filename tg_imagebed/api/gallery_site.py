@@ -169,6 +169,8 @@ def gallery_site_detail(gallery_id):
             cursor.execute('''
                 SELECT g.id, g.name, g.description, g.share_token,
                     g.created_at, g.updated_at,
+                    g.layout_mode, g.theme_color, g.show_image_info,
+                    g.allow_download, g.sort_order, g.nsfw_warning, g.custom_header_text,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count
                 FROM galleries g
                 WHERE g.id = ? AND g.share_enabled = 1 AND g.access_mode = 'public'

@@ -17,7 +17,7 @@
     </div>
 
     <!-- 筛选栏 -->
-    <TokenFilters
+    <AdminTokensTokenFilters
       v-model:search-query="searchQuery"
       v-model:status="status"
       v-model:tg-bind="tgBind"
@@ -27,7 +27,7 @@
     />
 
     <!-- Token 表格 -->
-    <TokenTable
+    <AdminTokensTokenTable
       :tokens="tokens"
       :loading="loading"
       :selected-ids="selectedIds"
@@ -35,6 +35,8 @@
       :is-partial-selected="isPartialSelected"
       :updating-id="updatingId"
       :page="page"
+      :total="total"
+      :page-size="pageSize"
       :total-pages="totalPages"
       @toggle-select-all="toggleSelectAll"
       @toggle-select="toggleSelect"
@@ -45,7 +47,7 @@
     />
 
     <!-- 创建 Token 弹窗 -->
-    <TokenCreateModal
+    <AdminTokensTokenCreateModal
       v-model:open="createModalOpen"
       :creating="creating"
       :created-token="createdToken"
@@ -56,7 +58,7 @@
     />
 
     <!-- 删除 / 批量操作弹窗 -->
-    <TokenBatchActions
+    <AdminTokensTokenBatchActions
       v-model:delete-open="deleteModalOpen"
       :deleting-token="deletingToken"
       :delete-impact="deleteImpact"
