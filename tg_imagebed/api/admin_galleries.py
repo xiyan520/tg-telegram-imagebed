@@ -94,12 +94,26 @@ def admin_gallery_detail(gallery_id: int):
         sort_order = data.get('sort_order')
         nsfw_warning = data.get('nsfw_warning')
         custom_header_text = data.get('custom_header_text')
+        editor_pick_weight = data.get('editor_pick_weight')
+        homepage_expose_enabled = data.get('homepage_expose_enabled')
+        card_subtitle = data.get('card_subtitle')
+        seo_title = data.get('seo_title')
+        seo_description = data.get('seo_description')
+        seo_keywords = data.get('seo_keywords')
+        og_image_encrypted_id = data.get('og_image_encrypted_id')
         gallery = admin_update_gallery(
             gallery_id, name=name, description=description,
             layout_mode=layout_mode, theme_color=theme_color,
             show_image_info=show_image_info, allow_download=allow_download,
             sort_order=sort_order, nsfw_warning=nsfw_warning,
-            custom_header_text=custom_header_text
+            custom_header_text=custom_header_text,
+            editor_pick_weight=editor_pick_weight,
+            homepage_expose_enabled=homepage_expose_enabled,
+            card_subtitle=card_subtitle,
+            seo_title=seo_title,
+            seo_description=seo_description,
+            seo_keywords=seo_keywords,
+            og_image_encrypted_id=og_image_encrypted_id
         )
         if not gallery:
             return _admin_json({'success': False, 'error': '画集不存在'}, 404)

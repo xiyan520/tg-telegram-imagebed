@@ -4,6 +4,7 @@
 画集路由模块 - Gallery API
 """
 from flask import request, jsonify, session
+from typing import Optional, Dict, Any
 
 from . import auth_bp
 from .auth_helpers import extract_bearer_token, verify_request_token
@@ -43,6 +44,16 @@ def _json_response(data, status=200, cache='no-cache'):
     return add_cache_headers(jsonify(data), cache), status
 
 
+def _sanitize_gallery_payload(gallery: Optional[Dict[str, Any]]):
+    """脱敏画集字段，避免返回密码哈希"""
+    if not gallery:
+        return gallery
+    if 'password_hash' in gallery:
+        gallery['has_password'] = bool(gallery.get('password_hash'))
+        gallery.pop('password_hash', None)
+    return gallery
+
+
 # ===================== 画集 CRUD =====================
 
 @auth_bp.route('/api/auth/galleries', methods=['GET', 'POST'])
@@ -59,6 +70,7 @@ def galleries_list_create():
         result = list_galleries(token, page, limit)
         base_url = get_image_domain(request)
         for item in result['items']:
+            _sanitize_gallery_payload(item)
             if item.get('cover_image'):
                 item['cover_url'] = f"{base_url}/image/{item['cover_image']}"
         return _json_response({'success': True, 'data': result})
@@ -88,6 +100,7 @@ def gallery_detail(gallery_id: int):
         gallery = get_gallery(gallery_id, token)
         if not gallery:
             return _json_response({'success': False, 'error': '画集不存在'}, 404)
+        _sanitize_gallery_payload(gallery)
         base_url = get_domain(request)
         if gallery.get('share_enabled') and gallery.get('share_token'):
             gallery['share_url'] = f"{base_url}/g/{gallery['share_token']}"
@@ -113,15 +126,30 @@ def gallery_detail(gallery_id: int):
         sort_order = data.get('sort_order')
         nsfw_warning = data.get('nsfw_warning')
         custom_header_text = data.get('custom_header_text')
+        editor_pick_weight = data.get('editor_pick_weight')
+        homepage_expose_enabled = data.get('homepage_expose_enabled')
+        card_subtitle = data.get('card_subtitle')
+        seo_title = data.get('seo_title')
+        seo_description = data.get('seo_description')
+        seo_keywords = data.get('seo_keywords')
+        og_image_encrypted_id = data.get('og_image_encrypted_id')
         gallery = update_gallery(
             gallery_id, token, name, description,
             layout_mode=layout_mode, theme_color=theme_color,
             show_image_info=show_image_info, allow_download=allow_download,
             sort_order=sort_order, nsfw_warning=nsfw_warning,
-            custom_header_text=custom_header_text
+            custom_header_text=custom_header_text,
+            editor_pick_weight=editor_pick_weight,
+            homepage_expose_enabled=homepage_expose_enabled,
+            card_subtitle=card_subtitle,
+            seo_title=seo_title,
+            seo_description=seo_description,
+            seo_keywords=seo_keywords,
+            og_image_encrypted_id=og_image_encrypted_id
         )
         if not gallery:
             return _json_response({'success': False, 'error': '画集不存在或无权限'}, 404)
+        _sanitize_gallery_payload(gallery)
         return _json_response({'success': True, 'data': {'gallery': gallery}})
 
     # DELETE
@@ -227,6 +255,41 @@ def gallery_share(gallery_id: int):
     if not gallery:
         return _json_response({'success': False, 'error': '画集不存在或无权限'}, 404)
     return _json_response({'success': True})
+
+
+# ===================== 画集访问控制 =====================
+
+@auth_bp.route('/api/auth/galleries/<int:gallery_id>/access', methods=['PATCH'])
+def gallery_access(gallery_id: int):
+    """用户设置画集访问控制"""
+    token, error_resp, status = _verify_token()
+    if error_resp:
+        return add_cache_headers(error_resp, 'no-cache'), status
+
+    data = request.get_json(silent=True) or {}
+    access_mode = data.get('access_mode')
+    password = data.get('password')
+    hide_from_share_all = data.get('hide_from_share_all')
+
+    if access_mode and access_mode not in ('public', 'password', 'token'):
+        return _json_response({'success': False, 'error': '无效的访问模式'}, 400)
+
+    if access_mode == 'password' and not password:
+        return _json_response({'success': False, 'error': '密码模式需要设置密码'}, 400)
+
+    gallery = update_gallery_access(
+        gallery_id,
+        owner_token=token,
+        access_mode=access_mode,
+        password=password,
+        hide_from_share_all=hide_from_share_all,
+        is_admin=False
+    )
+    if not gallery:
+        return _json_response({'success': False, 'error': '画集不存在或无权限'}, 404)
+
+    _sanitize_gallery_payload(gallery)
+    return _json_response({'success': True, 'data': {'gallery': gallery}})
 
 
 # ===================== 画集 Token 授权管理 =====================

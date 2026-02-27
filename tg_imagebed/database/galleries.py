@@ -100,7 +100,14 @@ def update_gallery(gallery_id: int, owner_token: str, name: Optional[str] = None
                    layout_mode: Optional[str] = None, theme_color: Optional[str] = None,
                    show_image_info: Optional[bool] = None, allow_download: Optional[bool] = None,
                    sort_order: Optional[str] = None, nsfw_warning: Optional[bool] = None,
-                   custom_header_text: Optional[str] = None) -> Optional[Dict[str, Any]]:
+                   custom_header_text: Optional[str] = None,
+                   editor_pick_weight: Optional[int] = None,
+                   homepage_expose_enabled: Optional[bool] = None,
+                   card_subtitle: Optional[str] = None,
+                   seo_title: Optional[str] = None,
+                   seo_description: Optional[str] = None,
+                   seo_keywords: Optional[str] = None,
+                   og_image_encrypted_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """更新画集信息（含显示设置）"""
     try:
         with get_connection() as conn:
@@ -136,6 +143,28 @@ def update_gallery(gallery_id: int, owner_token: str, name: Optional[str] = None
             if custom_header_text is not None:
                 updates.append('custom_header_text = ?')
                 params.append(str(custom_header_text).strip()[:200])
+            if editor_pick_weight is not None:
+                updates.append('editor_pick_weight = ?')
+                params.append(max(0, min(1000, int(editor_pick_weight))))
+            if homepage_expose_enabled is not None:
+                updates.append('homepage_expose_enabled = ?')
+                params.append(1 if homepage_expose_enabled else 0)
+            if card_subtitle is not None:
+                updates.append('card_subtitle = ?')
+                params.append(str(card_subtitle).strip()[:120])
+            if seo_title is not None:
+                updates.append('seo_title = ?')
+                params.append(str(seo_title).strip()[:120])
+            if seo_description is not None:
+                updates.append('seo_description = ?')
+                params.append(str(seo_description).strip()[:300])
+            if seo_keywords is not None:
+                updates.append('seo_keywords = ?')
+                params.append(str(seo_keywords).strip()[:300])
+            if og_image_encrypted_id is not None:
+                norm = str(og_image_encrypted_id).strip()
+                updates.append('og_image_encrypted_id = ?')
+                params.append(norm or None)
             if not updates:
                 return get_gallery(gallery_id, owner_token)
             updates.append('updated_at = CURRENT_TIMESTAMP')

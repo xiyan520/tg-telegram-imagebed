@@ -64,6 +64,13 @@ from .admin_galleries import (
     admin_get_gallery_images, admin_update_gallery_share,
 )
 
+# 画集首页编排
+from .gallery_home import (
+    get_gallery_home_config, update_gallery_home_config,
+    list_gallery_home_sections, update_gallery_home_section,
+    replace_gallery_home_section_items, get_gallery_home_public_payload,
+)
+
 # TG 认证
 from .tg_auth import (
     upsert_tg_user, get_tg_user, get_tg_user_by_username,
@@ -132,6 +139,10 @@ __all__ = [
     'admin_update_gallery', 'admin_delete_gallery', 'admin_set_gallery_cover',
     'admin_add_images_to_gallery', 'admin_remove_images_from_gallery',
     'admin_get_gallery_images', 'admin_update_gallery_share',
+    # 画集首页编排
+    'get_gallery_home_config', 'update_gallery_home_config',
+    'list_gallery_home_sections', 'update_gallery_home_section',
+    'replace_gallery_home_section_items', 'get_gallery_home_public_payload',
     # TG 认证
     'upsert_tg_user', 'get_tg_user', 'get_tg_user_by_username',
     'create_login_code', 'verify_login_code',

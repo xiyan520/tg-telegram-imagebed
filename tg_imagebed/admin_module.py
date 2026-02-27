@@ -1278,6 +1278,18 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
         from .database.domains import get_active_gallery_domains, get_default_domain
 
+        def _host_aliases(host: str) -> set[str]:
+            """为 loopback 主机名生成等价别名集合（避免 localhost/127.0.0.1 误判）"""
+            h = (host or '').strip().lower()
+            if not h:
+                return set()
+            aliases = {h}
+            if h == 'localhost':
+                aliases.update({'127.0.0.1', '::1'})
+            elif h in {'127.0.0.1', '::1'}:
+                aliases.update({'localhost', '127.0.0.1', '::1'})
+            return aliases
+
         return_url = request.args.get('return_url', '')
 
         # 安全校验 return_url，防止开放重定向
@@ -1298,12 +1310,12 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             allowed_domains = set()
             gallery_domains = get_active_gallery_domains()
             for d in gallery_domains:
-                allowed_domains.add(d['domain'].lower())
+                allowed_domains.update(_host_aliases(d['domain']))
 
             # 主站域名也允许
             default_domain = get_default_domain()
             if default_domain:
-                allowed_domains.add(default_domain['domain'].lower())
+                allowed_domains.update(_host_aliases(default_domain['domain']))
 
             # 已保存的主站 URL 的域名也允许
             try:
@@ -1313,7 +1325,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                     from urllib.parse import urlparse as _urlparse
                     _parsed_main = _urlparse(saved_main_url)
                     if _parsed_main.hostname:
-                        allowed_domains.add(_parsed_main.hostname.lower())
+                        allowed_domains.update(_host_aliases(_parsed_main.hostname))
             except Exception:
                 pass
 
@@ -1321,7 +1333,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             try:
                 req_host = (request.headers.get('X-Forwarded-Host') or request.host or '').split(':')[0].lower()
                 if req_host:
-                    allowed_domains.add(req_host)
+                    allowed_domains.update(_host_aliases(req_host))
             except Exception:
                 pass
 
@@ -1333,7 +1345,8 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             except ValueError:
                 pass
 
-            if not _is_private and target_host.lower() not in allowed_domains:
+            target_aliases = _host_aliases(target_host)
+            if not _is_private and target_aliases.isdisjoint(allowed_domains):
                 logger.warning(f"SSO 回调 return_url 域名不合法: {target_host}")
                 return jsonify({'success': False, 'error': 'return_url 域名不合法'}), 400
         else:

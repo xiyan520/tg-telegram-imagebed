@@ -331,6 +331,72 @@ def _init_gallery_tables(cursor) -> None:
     ''')
 
 
+def _init_gallery_home_tables(cursor) -> None:
+    """创建首页编排相关表并初始化默认配置"""
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS gallery_home_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            hero_mode TEXT NOT NULL DEFAULT 'auto',
+            hero_gallery_id INTEGER,
+            mobile_items_per_section INTEGER NOT NULL DEFAULT 4,
+            desktop_items_per_section INTEGER NOT NULL DEFAULT 8,
+            enable_recent_strip INTEGER NOT NULL DEFAULT 1,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (hero_gallery_id) REFERENCES galleries(id) ON DELETE SET NULL
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS gallery_home_sections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            section_key TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            subtitle TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            display_order INTEGER NOT NULL DEFAULT 0,
+            max_items INTEGER NOT NULL DEFAULT 8,
+            source_mode TEXT NOT NULL DEFAULT 'hybrid',
+            auto_sort TEXT NOT NULL DEFAULT 'updated_desc',
+            auto_window_days INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS gallery_home_section_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            section_id INTEGER NOT NULL,
+            gallery_id INTEGER NOT NULL,
+            pin_order INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (section_id, gallery_id),
+            FOREIGN KEY (section_id) REFERENCES gallery_home_sections(id) ON DELETE CASCADE,
+            FOREIGN KEY (gallery_id) REFERENCES galleries(id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('''
+        INSERT OR IGNORE INTO gallery_home_config (
+            id, hero_mode, hero_gallery_id, mobile_items_per_section,
+            desktop_items_per_section, enable_recent_strip
+        ) VALUES (1, 'auto', NULL, 4, 8, 1)
+    ''')
+
+    default_sections = [
+        ('featured', '编辑精选', 'Editors Pick', '先看最有代表性的画集，快速建立站点内容风格。', 1, 8, 1, 'hybrid', 'editor_pick_desc', 0),
+        ('category', '分区浏览', 'Curated Sections', '按更新节奏、内容体量和策展推荐拆分，浏览效率和沉浸感两边都不掉。', 2, 8, 1, 'hybrid', 'updated_desc', 0),
+        ('high-volume', '高内容量', 'High Volume', '优先展示图片量更高、更适合深度浏览的画集。', 3, 10, 1, 'hybrid', 'image_count_desc', 0),
+    ]
+    for section in default_sections:
+        cursor.execute('''
+            INSERT OR IGNORE INTO gallery_home_sections (
+                section_key, title, subtitle, description, display_order,
+                max_items, enabled, source_mode, auto_sort, auto_window_days
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', section)
+
+
 def _migrate_galleries_table(cursor, conn) -> list:
     """
     galleries 表迁移：
@@ -464,6 +530,14 @@ def _migrate_galleries_table(cursor, conn) -> list:
         ('sort_order', "TEXT DEFAULT 'newest'"),
         ('nsfw_warning', 'INTEGER DEFAULT 0'),
         ('custom_header_text', "TEXT DEFAULT ''"),
+        # 首页与 SEO 展示增强
+        ('editor_pick_weight', 'INTEGER DEFAULT 0'),
+        ('homepage_expose_enabled', 'INTEGER DEFAULT 1'),
+        ('card_subtitle', "TEXT DEFAULT ''"),
+        ('seo_title', "TEXT DEFAULT ''"),
+        ('seo_description', "TEXT DEFAULT ''"),
+        ('seo_keywords', "TEXT DEFAULT ''"),
+        ('og_image_encrypted_id', 'TEXT'),
     ]
     for col_name, col_type in gallery_new_columns:
         if col_name not in gallery_columns:
@@ -559,11 +633,16 @@ def _create_indexes(cursor) -> None:
         ('idx_galleries_share_token', 'galleries(share_token)'),
         ('idx_galleries_access_mode', 'galleries(access_mode)'),
         ('idx_galleries_hide_share_all', 'galleries(hide_from_share_all)'),
+        ('idx_galleries_homepage_expose', 'galleries(homepage_expose_enabled)'),
+        ('idx_galleries_editor_pick', 'galleries(editor_pick_weight DESC, updated_at DESC)'),
         ('idx_gallery_images_gallery', 'gallery_images(gallery_id, added_at DESC)'),
         ('idx_share_all_token', 'share_all_links(share_token)'),
         ('idx_gallery_token_access_gallery', 'gallery_token_access(gallery_id)'),
         ('idx_gallery_token_access_token', 'gallery_token_access(token)'),
         ('idx_gallery_token_access_expires', 'gallery_token_access(expires_at)'),
+        ('idx_gallery_home_sections_order', 'gallery_home_sections(display_order, id)'),
+        ('idx_gallery_home_items_section_order', 'gallery_home_section_items(section_id, pin_order, id)'),
+        ('idx_gallery_home_items_gallery', 'gallery_home_section_items(gallery_id)'),
         ('idx_tg_login_codes_code', 'tg_login_codes(code)'),
         ('idx_tg_login_codes_expires', 'tg_login_codes(expires_at)'),
         ('idx_tg_sessions_expires', 'tg_sessions(expires_at)'),
@@ -593,6 +672,7 @@ def init_database(quiet: bool = False) -> None:
             _migrate_auth_tokens_columns(cursor)
             _init_gallery_tables(cursor)
             _migrate_galleries_table(cursor, conn)
+            _init_gallery_home_tables(cursor)
             _init_custom_domains_table(cursor, quiet=quiet)
             _create_indexes(cursor)
 

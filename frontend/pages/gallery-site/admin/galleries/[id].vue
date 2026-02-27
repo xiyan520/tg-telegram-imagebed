@@ -1,38 +1,49 @@
 <template>
-  <div class="space-y-6">
-    <!-- 页面标题 -->
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div class="flex items-center gap-3">
-        <UButton icon="heroicons:arrow-left" color="gray" variant="ghost" to="/gallery-site/admin/galleries" />
-        <div>
-          <h1 class="text-2xl font-bold text-stone-900 dark:text-white">{{ gallery?.name || '画集详情' }}</h1>
-          <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
-            {{ gallery?.image_count || 0 }} 张图片 · 创建于 {{ formatDate(gallery?.created_at) }}
-          </p>
+  <div class="space-y-6 sm:space-y-8">
+    <section class="rounded-3xl border border-stone-200/70 bg-white/85 p-5 backdrop-blur-sm dark:border-stone-700/70 dark:bg-neutral-900/75 sm:p-7">
+      <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div class="space-y-3">
+          <div class="flex items-center gap-2">
+            <UButton icon="heroicons:arrow-left" color="gray" variant="ghost" to="/gallery-site/admin/galleries" />
+            <span class="text-xs font-semibold uppercase tracking-[0.2em] text-amber-600 dark:text-amber-400">Gallery Detail</span>
+          </div>
+          <h1 class="text-2xl font-bold font-serif tracking-tight text-stone-900 dark:text-white sm:text-4xl">{{ gallery?.name || '画集详情' }}</h1>
+          <div class="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
+            <span class="rounded-full border border-stone-200 bg-stone-100 px-3 py-1 text-stone-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
+              {{ gallery?.image_count || 0 }} 张图片
+            </span>
+            <span class="rounded-full border border-stone-200 bg-stone-100 px-3 py-1 text-stone-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
+              创建于 {{ formatDate(gallery?.created_at) }}
+            </span>
+            <span class="rounded-full border border-stone-200 bg-stone-100 px-3 py-1 text-stone-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300">
+              第 {{ page }} / {{ totalPages }} 页
+            </span>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 lg:justify-end">
+          <UButton
+            icon="heroicons:share"
+            :color="gallery?.share_enabled ? 'green' : 'gray'"
+            variant="outline"
+            size="sm"
+            @click="shareOpen = true"
+          >
+            {{ gallery?.share_enabled ? '已分享' : '分享' }}
+          </UButton>
+          <UButton icon="heroicons:cog-6-tooth" color="gray" variant="outline" size="sm" @click="openSettings">
+            设置
+          </UButton>
+          <UButton icon="heroicons:trash" color="red" variant="outline" size="sm" @click="deleteOpen = true">
+            删除
+          </UButton>
         </div>
       </div>
-      <div class="flex items-center gap-2">
-        <UButton
-          icon="heroicons:share"
-          :color="gallery?.share_enabled ? 'green' : 'gray'"
-          variant="outline"
-          @click="shareOpen = true"
-        >
-          {{ gallery?.share_enabled ? '已分享' : '分享' }}
-        </UButton>
-        <UButton icon="heroicons:cog-6-tooth" color="gray" variant="outline" @click="openSettings">
-          设置
-        </UButton>
-        <UButton icon="heroicons:trash" color="red" variant="outline" @click="deleteOpen = true">
-          删除
-        </UButton>
-      </div>
-    </div>
+    </section>
 
-    <!-- 操作栏 -->
-    <UCard>
-      <div class="flex flex-col md:flex-row md:items-center gap-4">
-        <div class="flex items-center gap-3">
+    <section class="rounded-2xl border border-stone-200/80 bg-white/90 p-4 backdrop-blur-sm dark:border-stone-700/70 dark:bg-neutral-900/80">
+      <div class="flex flex-col gap-3 md:flex-row md:items-center">
+        <div class="flex flex-wrap items-center gap-2">
           <UCheckbox v-model="selectAll" @change="handleSelectAll">
             <template #label><span class="text-sm font-medium">全选</span></template>
           </UCheckbox>
@@ -41,7 +52,7 @@
             移除选中 ({{ selectedImages.length }})
           </UButton>
         </div>
-        <div class="flex items-center gap-2 md:ml-auto">
+        <div class="flex flex-wrap items-center gap-2 md:ml-auto">
           <UButton icon="heroicons:sparkles" color="amber" variant="soft" size="sm" :disabled="images.length === 0" @click="openCoverRecommend">
             推荐封面
           </UButton>
@@ -51,117 +62,160 @@
           <UButton icon="heroicons:arrow-path" color="gray" variant="ghost" size="sm" :loading="loading" @click="loadImages" />
         </div>
       </div>
-    </UCard>
+    </section>
 
-    <!-- 图片网格 -->
-    <UCard>
-      <div v-if="loading" class="flex flex-col justify-center items-center py-16">
-        <div class="w-16 h-16 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+    <section class="rounded-2xl border border-stone-200 bg-white p-4 dark:border-stone-700 dark:bg-neutral-900 sm:p-5">
+      <div v-if="loading" class="flex flex-col items-center justify-center py-16">
+        <div class="mb-4 h-16 w-16 animate-spin rounded-full border-4 border-amber-500 border-t-transparent" />
         <p class="text-stone-600 dark:text-stone-400">加载中...</p>
       </div>
 
-      <div v-else-if="images.length === 0" class="text-center py-16">
-        <div class="w-20 h-20 bg-stone-100 dark:bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4">
-          <UIcon name="heroicons:photo" class="w-10 h-10 text-stone-400" />
+      <div v-else-if="images.length === 0" class="py-16 text-center">
+        <div class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-stone-100 dark:bg-neutral-800">
+          <UIcon name="heroicons:photo" class="h-10 w-10 text-stone-400" />
         </div>
-        <p class="text-lg font-medium text-stone-900 dark:text-white mb-2">暂无图片</p>
-        <p class="text-sm text-stone-600 dark:text-stone-400">点击"添加图片"将图片添加到画集</p>
+        <p class="mb-2 text-lg font-medium text-stone-900 dark:text-white">暂无图片</p>
+        <p class="text-sm text-stone-600 dark:text-stone-400">点击“添加图片”将图片添加到画集</p>
       </div>
 
-      <div v-else class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div v-else class="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4 lg:grid-cols-6">
         <div
           v-for="(image, idx) in images"
           :key="image.encrypted_id"
-          class="relative group aspect-square rounded-xl overflow-hidden border-2 transition-all hover:shadow-lg cursor-pointer"
+          class="group relative aspect-square cursor-pointer overflow-hidden rounded-xl border-2 transition-all hover:shadow-lg"
           :class="[
             selectedImages.includes(image.encrypted_id)
-              ? 'border-amber-500 ring-2 ring-amber-500 ring-offset-2'
+              ? 'border-amber-500 ring-2 ring-amber-500 ring-offset-2 dark:ring-offset-neutral-900'
               : image.encrypted_id === gallery?.cover_image
-                ? 'border-green-500 ring-2 ring-green-500 ring-offset-2'
-                : 'border-stone-200 dark:border-neutral-700 hover:border-amber-400'
+                ? 'border-green-500 ring-2 ring-green-500 ring-offset-2 dark:ring-offset-neutral-900'
+                : 'border-stone-200 hover:border-amber-400 dark:border-neutral-700 dark:hover:border-amber-500'
           ]"
           @click="openLightbox(idx)"
         >
-          <img :src="getImageSrc(image)" :alt="image.original_filename" loading="lazy" class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-300" />
-          <!-- 封面标记 -->
-          <div v-if="image.encrypted_id === gallery?.cover_image" class="absolute top-2 right-2 z-10">
-            <div class="bg-green-500 text-white text-xs px-2 py-0.5 rounded-full shadow-lg flex items-center gap-1">
-              <UIcon name="heroicons:star-solid" class="w-3 h-3" /><span>封面</span>
+          <img :src="getImageSrc(image)" :alt="image.original_filename" loading="lazy" class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110" />
+          <div v-if="image.encrypted_id === gallery?.cover_image" class="absolute right-2 top-2 z-10">
+            <div class="flex items-center gap-1 rounded-full bg-green-500 px-2 py-0.5 text-xs text-white shadow-lg">
+              <UIcon name="heroicons:star-solid" class="h-3 w-3" /><span>封面</span>
             </div>
           </div>
-          <!-- 选择框 -->
-          <div class="absolute top-2 left-2 z-10" @click.stop>
-            <div class="bg-white/90 dark:bg-neutral-800/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg">
+          <div class="absolute left-2 top-2 z-10" @click.stop>
+            <div class="rounded-lg bg-white/90 p-2 shadow-lg backdrop-blur-sm dark:bg-neutral-800/90">
               <UCheckbox :model-value="selectedImages.includes(image.encrypted_id)" @change="toggleSelection(image.encrypted_id)" />
             </div>
           </div>
-          <!-- 设为封面按钮 -->
-          <div v-if="image.encrypted_id !== gallery?.cover_image" class="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div v-if="image.encrypted_id !== gallery?.cover_image" class="absolute right-2 top-2 z-10 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
             <UButton icon="heroicons:star" color="white" variant="solid" size="xs" :loading="settingCover === image.encrypted_id" @click.stop="setCoverImage(image.encrypted_id)">
               设为封面
             </UButton>
           </div>
-          <div class="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-            <p class="text-white text-xs truncate">{{ image.original_filename }}</p>
+          <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100">
+            <p class="truncate text-xs text-white">{{ image.original_filename }}</p>
           </div>
         </div>
       </div>
 
-      <template v-if="totalPages > 1" #footer>
-        <div class="flex justify-center pt-4">
-          <div class="flex items-center gap-2">
-            <UButton icon="heroicons:chevron-left" color="gray" variant="ghost" size="sm" :disabled="page <= 1" @click="page--" />
-            <span class="text-sm text-stone-500">{{ page }} / {{ totalPages }}</span>
-            <UButton icon="heroicons:chevron-right" color="gray" variant="ghost" size="sm" :disabled="page >= totalPages" @click="page++" />
-          </div>
+      <div v-if="totalPages > 1" class="flex justify-center pt-5">
+        <div class="flex items-center gap-2">
+          <UButton icon="heroicons:chevron-left" color="gray" variant="ghost" size="sm" :disabled="page <= 1" @click="page--" />
+          <span class="text-sm text-stone-500">{{ page }} / {{ totalPages }}</span>
+          <UButton icon="heroicons:chevron-right" color="gray" variant="ghost" size="sm" :disabled="page >= totalPages" @click="page++" />
         </div>
-      </template>
-    </UCard>
+      </div>
+    </section>
 
     <!-- 设置模态框 -->
-    <UModal v-model="settingsOpen" :prevent-close="addTokenOpen">
-      <UCard>
+    <UModal v-model="settingsOpen" :prevent-close="addTokenOpen" :ui="{ width: 'sm:max-w-2xl' }">
+      <UCard class="max-h-[85vh] overflow-y-auto">
         <template #header>
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">访问控制设置</h3>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">画集设置</h3>
             <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="settingsOpen = false" />
           </div>
         </template>
-        <div class="space-y-4">
-          <UFormGroup label="访问模式">
-            <USelect v-model="settingsForm.mode" :options="accessModeOptions" value-attribute="value" option-attribute="label" />
-          </UFormGroup>
-          <UFormGroup v-if="settingsForm.mode === 'password'" label="访问密码" required>
-            <UInput v-model="settingsForm.password" type="password" :placeholder="gallery?.has_password ? '留空保持原密码' : '设置访问密码'" />
-          </UFormGroup>
-          <!-- Token 授权管理 -->
-          <div v-if="settingsForm.mode === 'token'" class="space-y-3">
-            <div class="flex items-center justify-between">
-              <span class="text-sm font-medium text-stone-700 dark:text-stone-300">已授权的 Token</span>
-              <UButton size="xs" color="primary" variant="soft" @click="newToken = ''; addTokenOpen = true">
-                <UIcon name="heroicons:plus" class="w-3.5 h-3.5 mr-1" />添加授权
-              </UButton>
+        <div class="space-y-6">
+          <div class="space-y-4">
+            <h4 class="text-sm font-semibold uppercase tracking-[0.18em] text-stone-500 dark:text-stone-400">展示与 SEO</h4>
+            <UFormGroup label="画集标题" required>
+              <UInput v-model="settingsForm.name" :maxlength="100" placeholder="请输入画集标题" />
+            </UFormGroup>
+            <UFormGroup label="首页卡片副标题">
+              <UInput v-model="settingsForm.cardSubtitle" placeholder="例如：编辑推荐 · 风格集" />
+            </UFormGroup>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <UFormGroup label="首页精选权重">
+                <UInput v-model.number="settingsForm.editorPickWeight" type="number" :min="0" :max="1000" />
+              </UFormGroup>
+              <UFormGroup label="主题色">
+                <UInput v-model="settingsForm.themeColor" placeholder="如 #f59e0b" />
+              </UFormGroup>
             </div>
-            <div v-if="loadingTokenAccess" class="flex justify-center py-4">
-              <div class="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+            <div class="grid gap-3 sm:grid-cols-3">
+              <UFormGroup label="布局模式">
+                <USelect v-model="settingsForm.layoutMode" :options="layoutModeOptions" value-attribute="value" option-attribute="label" />
+              </UFormGroup>
+              <UFormGroup label="图片排序">
+                <USelect v-model="settingsForm.sortOrder" :options="sortOrderOptions" value-attribute="value" option-attribute="label" />
+              </UFormGroup>
+              <UFormGroup label="OG 图图片 ID">
+                <UInput v-model="settingsForm.ogImageEncryptedId" placeholder="留空使用封面图" />
+              </UFormGroup>
             </div>
-            <div v-else-if="tokenAccessList.length === 0" class="text-center py-4 text-sm text-stone-500">
-              暂无授权的 Token，添加后才能通过 Token 访问此画集
+            <div class="grid gap-3 sm:grid-cols-2">
+              <UCheckbox v-model="settingsForm.homepageExposeEnabled" label="允许首页曝光" />
+              <UCheckbox v-model="settingsForm.showImageInfo" label="前台显示图片信息" />
+              <UCheckbox v-model="settingsForm.allowDownload" label="前台允许下载图片" />
+              <UCheckbox v-model="settingsForm.nsfwWarning" label="启用 NSFW 提示" />
             </div>
-            <div v-else class="max-h-48 overflow-y-auto space-y-2">
-              <div v-for="item in tokenAccessList" :key="item.token_masked" class="flex items-center justify-between p-2 bg-stone-50 dark:bg-neutral-800 rounded-lg">
-                <div class="min-w-0 flex-1">
-                  <code class="text-xs text-stone-600 dark:text-stone-400">{{ item.token_masked }}</code>
-                  <p v-if="item.description" class="text-xs text-stone-500 truncate">{{ item.description }}</p>
+            <UFormGroup label="自定义头部文案">
+              <UInput v-model="settingsForm.customHeaderText" placeholder="进入画集详情页时显示在头部" />
+            </UFormGroup>
+            <UFormGroup label="SEO 标题">
+              <UInput v-model="settingsForm.seoTitle" placeholder="留空则使用画集名称" />
+            </UFormGroup>
+            <UFormGroup label="SEO 描述">
+              <UTextarea v-model="settingsForm.seoDescription" :rows="2" placeholder="留空则使用画集描述" />
+            </UFormGroup>
+            <UFormGroup label="SEO 关键词">
+              <UInput v-model="settingsForm.seoKeywords" placeholder="例如：插画,摄影,二次元" />
+            </UFormGroup>
+          </div>
+
+          <div class="space-y-4 border-t border-stone-200 pt-5 dark:border-stone-700">
+            <h4 class="text-sm font-semibold uppercase tracking-[0.18em] text-stone-500 dark:text-stone-400">访问控制</h4>
+            <UFormGroup label="访问模式">
+              <USelect v-model="settingsForm.mode" :options="accessModeOptions" value-attribute="value" option-attribute="label" />
+            </UFormGroup>
+            <UFormGroup v-if="settingsForm.mode === 'password'" label="访问密码" required>
+              <UInput v-model="settingsForm.password" type="password" :placeholder="gallery?.has_password ? '留空保持原密码' : '设置访问密码'" />
+            </UFormGroup>
+            <div v-if="settingsForm.mode === 'token'" class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-sm font-medium text-stone-700 dark:text-stone-300">已授权的 Token</span>
+                <UButton size="xs" color="primary" variant="soft" @click="newToken = ''; addTokenOpen = true">
+                  <UIcon name="heroicons:plus" class="w-3.5 h-3.5 mr-1" />添加授权
+                </UButton>
+              </div>
+              <div v-if="loadingTokenAccess" class="flex justify-center py-4">
+                <div class="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <div v-else-if="tokenAccessList.length === 0" class="text-center py-4 text-sm text-stone-500">
+                暂无授权的 Token，添加后才能通过 Token 访问此画集
+              </div>
+              <div v-else class="max-h-48 overflow-y-auto space-y-2">
+                <div v-for="item in tokenAccessList" :key="item.token_masked" class="flex items-center justify-between p-2 bg-stone-50 dark:bg-neutral-800 rounded-lg">
+                  <div class="min-w-0 flex-1">
+                    <code class="text-xs text-stone-600 dark:text-stone-400">{{ item.token_masked }}</code>
+                    <p v-if="item.description" class="text-xs text-stone-500 truncate">{{ item.description }}</p>
+                  </div>
+                  <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" :loading="revokingToken === item.token" @click="handleRevokeToken(item.token)" />
                 </div>
-                <UButton icon="heroicons:trash" color="red" variant="ghost" size="xs" :loading="revokingToken === item.token" @click="handleRevokeToken(item.token)" />
               </div>
             </div>
+            <UCheckbox v-model="settingsForm.hideFromShareAll" label="在全部分享中隐藏此画集" />
           </div>
-          <UCheckbox v-model="settingsForm.hideFromShareAll" label="在全部分享中隐藏此画集" />
         </div>
         <template #footer>
-          <div class="flex justify-end gap-2">
+          <div class="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <UButton color="gray" variant="ghost" @click="settingsOpen = false">取消</UButton>
             <UButton color="primary" :loading="settingsSaving" @click="saveSettings">保存</UButton>
           </div>
@@ -170,8 +224,8 @@
     </UModal>
 
     <!-- 添加 Token 授权模态框 -->
-    <UModal v-model="addTokenOpen">
-      <UCard>
+    <UModal v-model="addTokenOpen" :ui="{ width: 'sm:max-w-lg' }">
+      <UCard class="max-h-[85vh] overflow-y-auto">
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-stone-900 dark:text-white">添加 Token 授权</h3>
@@ -185,7 +239,7 @@
           </UFormGroup>
         </div>
         <template #footer>
-          <div class="flex justify-end gap-2">
+          <div class="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <UButton color="gray" variant="ghost" @click="addTokenOpen = false">取消</UButton>
             <UButton color="primary" :loading="addingToken" :disabled="!newToken.trim()" @click="handleAddToken">授权</UButton>
           </div>
@@ -194,8 +248,8 @@
     </UModal>
 
     <!-- 分享模态框 -->
-    <UModal v-model="shareOpen">
-      <UCard>
+    <UModal v-model="shareOpen" :ui="{ width: 'sm:max-w-xl' }">
+      <UCard class="max-h-[85vh] overflow-y-auto">
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-stone-900 dark:text-white">单独分享链接</h3>
@@ -204,10 +258,10 @@
         </template>
         <div class="space-y-4">
           <p class="text-sm text-stone-600 dark:text-stone-400">单独分享链接仅分享这一个画集。如需分享全部画集，请使用管理后台的"全部分享"功能。</p>
-          <div v-if="gallery?.share_enabled && gallery?.share_url" class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+          <div v-if="gallery?.share_enabled && gallery?.share_url" class="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
             <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">分享链接已开启</p>
-            <div class="flex items-center gap-2">
-              <code class="flex-1 text-xs p-2 bg-white dark:bg-neutral-900 rounded break-all">{{ gallery.share_url }}</code>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <code class="flex-1 break-all rounded bg-white p-2 text-xs dark:bg-neutral-900">{{ gallery.share_url }}</code>
               <UButton icon="heroicons:clipboard-document" color="primary" variant="soft" size="sm" @click="copyShareUrl">复制</UButton>
             </div>
           </div>
@@ -216,7 +270,7 @@
           </div>
         </div>
         <template #footer>
-          <div class="flex justify-between">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <UButton v-if="gallery?.share_enabled" color="red" variant="soft" :loading="sharingAction" @click="handleDisableShare">关闭分享</UButton>
             <div v-else></div>
             <UButton v-if="!gallery?.share_enabled" color="primary" :loading="sharingAction" @click="handleEnableShare">开启分享</UButton>
@@ -228,20 +282,20 @@
 
     <!-- 添加图片模态框 -->
     <UModal v-model="addModalOpen" :ui="{ width: 'sm:max-w-4xl' }">
-      <UCard>
+      <UCard class="max-h-[90vh] overflow-y-auto">
         <template #header>
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">添加图片到画集</h3>
+            <h3 class="text-base font-semibold text-stone-900 dark:text-white sm:text-lg">添加图片到画集</h3>
             <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="addModalOpen = false" />
           </div>
         </template>
-        <div class="space-y-4">
+        <div class="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
             <UInput v-model="userImagesSearch" class="flex-1" icon="heroicons:magnifying-glass" placeholder="搜索文件名" :disabled="loadingUserImages" />
           </div>
-          <div class="flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+          <div class="flex flex-col gap-2 text-xs text-stone-500 dark:text-stone-400 sm:flex-row sm:items-center sm:justify-between">
             <span>共 {{ userImagesTotal }} 张图片</span>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
               <UButton size="xs" color="gray" variant="ghost" :disabled="loadingUserImages || userImages.length === 0" @click="toggleSelectAllUserImages">
                 {{ allSelectableSelected ? '取消本页全选' : '全选本页' }}
               </UButton>
@@ -254,7 +308,7 @@
           <div v-else-if="userImages.length === 0" class="text-center py-8">
             <p class="text-stone-500">暂无可添加的图片</p>
           </div>
-          <div v-else class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 max-h-[400px] overflow-y-auto">
+          <div v-else class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 max-h-[400px] overflow-y-auto">
             <div
               v-for="img in userImages"
               :key="img.encrypted_id"
@@ -286,7 +340,7 @@
           </div>
         </div>
         <template #footer>
-          <div class="flex justify-between items-center">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span class="text-sm text-stone-500">已选择 {{ selectedToAdd.length }} 张</span>
             <div class="flex gap-2">
               <UButton color="gray" variant="ghost" @click="addModalOpen = false">取消</UButton>
@@ -298,14 +352,14 @@
     </UModal>
 
     <!-- 删除确认模态框 -->
-    <UModal v-model="deleteOpen">
-      <UCard>
+    <UModal v-model="deleteOpen" :ui="{ width: 'sm:max-w-lg' }">
+      <UCard class="max-h-[85vh] overflow-y-auto">
         <template #header>
           <h3 class="text-lg font-semibold text-red-600">确认删除</h3>
         </template>
         <p class="text-stone-700 dark:text-stone-300">确定要删除画集"{{ gallery?.name }}"吗？此操作不可恢复，但不会删除画集内的图片。</p>
         <template #footer>
-          <div class="flex justify-end gap-2">
+          <div class="flex flex-col gap-2 sm:flex-row sm:justify-end">
             <UButton color="gray" variant="ghost" @click="deleteOpen = false">取消</UButton>
             <UButton color="red" :loading="deleting" @click="confirmDelete">删除</UButton>
           </div>
@@ -314,8 +368,8 @@
     </UModal>
 
     <!-- 推荐封面模态框 -->
-    <UModal v-model="coverRecommendOpen">
-      <UCard>
+    <UModal v-model="coverRecommendOpen" :ui="{ width: 'sm:max-w-2xl' }">
+      <UCard class="max-h-[85vh] overflow-y-auto">
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-stone-900 dark:text-white">推荐封面</h3>
@@ -325,7 +379,7 @@
         <div class="space-y-3">
           <p class="text-sm text-stone-600 dark:text-stone-400">根据文件大小、类型和文件名智能推荐，点击即可设为封面</p>
           <div v-if="recommendedCovers.length === 0" class="text-center py-6 text-stone-500">暂无足够图片进行推荐</div>
-          <div v-else class="grid grid-cols-3 gap-3">
+          <div v-else class="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div
               v-for="(img, i) in recommendedCovers"
               :key="img.encrypted_id"
@@ -375,10 +429,11 @@ definePageMeta({
 const route = useRoute()
 const router = useRouter()
 const notification = useNotification()
+const { copy: clipboardCopy } = useClipboardCopy()
 const config = useRuntimeConfig()
 const {
   getGalleryDetail, deleteGallery,
-  enableShare, disableShare, updateAccess,
+  enableShare, disableShare, updateAccess, updateGallery,
   getTokenAccess, addTokenAccess, removeTokenAccess,
   getGalleryImages, addImagesToGallery, removeImagesFromGallery,
   setCover
@@ -640,7 +695,26 @@ const addImages = async () => {
 
 // ===================== 设置模态框 =====================
 const settingsOpen = ref(false)
-const settingsForm = ref({ mode: 'public', password: '', hideFromShareAll: false })
+const settingsForm = ref({
+  name: '',
+  mode: 'public',
+  password: '',
+  hideFromShareAll: false,
+  homepageExposeEnabled: true,
+  editorPickWeight: 0,
+  cardSubtitle: '',
+  layoutMode: 'masonry',
+  themeColor: '',
+  showImageInfo: true,
+  allowDownload: true,
+  sortOrder: 'newest',
+  nsfwWarning: false,
+  customHeaderText: '',
+  seoTitle: '',
+  seoDescription: '',
+  seoKeywords: '',
+  ogImageEncryptedId: ''
+})
 const settingsSaving = ref(false)
 const tokenAccessList = ref<TokenAccessItem[]>([])
 const loadingTokenAccess = ref(false)
@@ -656,11 +730,38 @@ const accessModeOptions = [
   { value: 'admin_only', label: '仅管理员可见' }
 ]
 
+const layoutModeOptions = [
+  { value: 'masonry', label: '瀑布流' },
+  { value: 'grid', label: '网格' },
+  { value: 'justified', label: '对齐布局' }
+]
+
+const sortOrderOptions = [
+  { value: 'newest', label: '最新优先' },
+  { value: 'oldest', label: '最早优先' },
+  { value: 'filename', label: '文件名排序' }
+]
+
 const openSettings = () => {
   settingsForm.value = {
+    name: gallery.value?.name || '',
     mode: gallery.value?.access_mode || 'public',
     password: '',
-    hideFromShareAll: gallery.value?.hide_from_share_all || false
+    hideFromShareAll: gallery.value?.hide_from_share_all || false,
+    homepageExposeEnabled: Boolean(gallery.value?.homepage_expose_enabled ?? true),
+    editorPickWeight: gallery.value?.editor_pick_weight ?? 0,
+    cardSubtitle: gallery.value?.card_subtitle || '',
+    layoutMode: gallery.value?.layout_mode || 'masonry',
+    themeColor: gallery.value?.theme_color || '',
+    showImageInfo: Boolean(gallery.value?.show_image_info ?? true),
+    allowDownload: Boolean(gallery.value?.allow_download ?? true),
+    sortOrder: gallery.value?.sort_order || 'newest',
+    nsfwWarning: Boolean(gallery.value?.nsfw_warning ?? false),
+    customHeaderText: gallery.value?.custom_header_text || '',
+    seoTitle: gallery.value?.seo_title || '',
+    seoDescription: gallery.value?.seo_description || '',
+    seoKeywords: gallery.value?.seo_keywords || '',
+    ogImageEncryptedId: gallery.value?.og_image_encrypted_id || ''
   }
   settingsOpen.value = true
   if (gallery.value?.access_mode === 'token') loadTokenList()
@@ -680,10 +781,40 @@ const loadTokenList = async () => {
 const saveSettings = async () => {
   settingsSaving.value = true
   try {
-    const body: any = { access_mode: settingsForm.value.mode, hide_from_share_all: settingsForm.value.hideFromShareAll }
-    if (settingsForm.value.mode === 'password' && settingsForm.value.password) body.password = settingsForm.value.password
-    gallery.value = await updateAccess(galleryId.value, body)
-    notification.success('已保存', '访问控制已更新')
+    const normalizedName = settingsForm.value.name.trim()
+    if (!normalizedName) {
+      notification.error('保存失败', '画集标题不能为空')
+      return
+    }
+
+    const accessBody: any = {
+      access_mode: settingsForm.value.mode,
+      hide_from_share_all: settingsForm.value.hideFromShareAll
+    }
+    if (settingsForm.value.mode === 'password' && settingsForm.value.password) {
+      accessBody.password = settingsForm.value.password
+    }
+    gallery.value = await updateAccess(galleryId.value, accessBody)
+
+    gallery.value = await updateGallery(galleryId.value, {
+      name: normalizedName,
+      card_subtitle: settingsForm.value.cardSubtitle,
+      editor_pick_weight: settingsForm.value.editorPickWeight,
+      homepage_expose_enabled: settingsForm.value.homepageExposeEnabled,
+      layout_mode: settingsForm.value.layoutMode as any,
+      theme_color: settingsForm.value.themeColor,
+      show_image_info: settingsForm.value.showImageInfo,
+      allow_download: settingsForm.value.allowDownload,
+      sort_order: settingsForm.value.sortOrder as any,
+      nsfw_warning: settingsForm.value.nsfwWarning,
+      custom_header_text: settingsForm.value.customHeaderText,
+      seo_title: settingsForm.value.seoTitle,
+      seo_description: settingsForm.value.seoDescription,
+      seo_keywords: settingsForm.value.seoKeywords,
+      og_image_encrypted_id: settingsForm.value.ogImageEncryptedId || null
+    })
+
+    notification.success('已保存', '画集设置已更新')
     settingsOpen.value = false
   } catch (e: any) {
     notification.error('保存失败', e.message)
@@ -737,10 +868,7 @@ const handleDisableShare = async () => {
 
 const copyShareUrl = async () => {
   if (!gallery.value?.share_url) return
-  try {
-    await navigator.clipboard.writeText(gallery.value.share_url)
-    notification.success('已复制', '链接已复制到剪贴板')
-  } catch { notification.error('复制失败', '请手动复制链接') }
+  await clipboardCopy(gallery.value.share_url, '链接已复制到剪贴板')
 }
 
 // ===================== 删除 =====================
@@ -766,7 +894,7 @@ const lightboxImages = computed(() =>
 const openLightbox = (idx: number) => { lightboxIndex.value = idx; lightboxOpen.value = true }
 const handleLightboxCopyLink = (image: any) => {
   const url = image.image_url || image.cdn_url
-  if (url) navigator.clipboard.writeText(url).then(() => notification.success('已复制', '图片链接已复制')).catch(() => {})
+  if (url) void clipboardCopy(url, '图片链接已复制')
 }
 
 watch(page, loadImages)

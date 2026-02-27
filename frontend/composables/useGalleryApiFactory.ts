@@ -43,7 +43,7 @@ export function createGalleryApi(baseUrl: string, getFetchOptions: () => Gallery
   }
 
   // 更新画集
-  const updateGallery = async (id: number, data: { name?: string; description?: string }) => {
+  const updateGallery = async (id: number, data: Partial<Gallery>) => {
     const response = await $fetch<ApiResponse>(`${apiBase}${baseUrl}/${id}`, {
       method: 'PATCH',
       ...getFetchOptions(),

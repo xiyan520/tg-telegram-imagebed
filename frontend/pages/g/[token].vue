@@ -1,81 +1,39 @@
 <template>
-  <!-- 根容器：通过 CSS 变量注入主题色，所有子元素可引用 --gallery-accent -->
   <div
-    class="min-h-screen flex flex-col bg-stone-50 dark:bg-neutral-950"
+    class="min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(251,191,36,0.14),transparent_38%),radial-gradient(circle_at_80%_0%,rgba(249,115,22,0.10),transparent_40%),linear-gradient(180deg,#fafaf9_0%,#f5f5f4_100%)] dark:bg-[radial-gradient(circle_at_20%_20%,rgba(251,191,36,0.12),transparent_38%),radial-gradient(circle_at_80%_0%,rgba(249,115,22,0.10),transparent_40%),linear-gradient(180deg,#0c0a09_0%,#171717_100%)]"
     :style="themeColor ? `--gallery-accent: ${themeColor}` : '--gallery-accent: #f59e0b'"
   >
-    <!-- 固定背景装饰层 -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none" style="z-index: 0;">
-      <div
-        class="absolute inset-0"
-        :style="themeColor
-          ? `background: linear-gradient(135deg, ${themeColor}08 0%, transparent 50%, ${themeColor}05 100%)`
-          : 'background: linear-gradient(135deg, rgb(231 229 228 / 0.5) 0%, transparent 50%, rgb(255 251 235 / 0.3) 100%)'"
-      ></div>
-      <div class="absolute top-0 right-1/4 w-px h-full bg-gradient-to-b from-transparent via-stone-300/20 dark:via-stone-700/15 to-transparent"></div>
-      <div class="absolute top-1/3 left-0 w-full h-px bg-gradient-to-r from-transparent via-stone-300/20 dark:via-stone-700/15 to-transparent"></div>
-    </div>
+    <div class="fixed inset-0 pointer-events-none opacity-40 [background-size:28px_28px] [background-image:linear-gradient(to_right,rgba(120,113,108,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(120,113,108,0.08)_1px,transparent_1px)] dark:opacity-25" />
 
-    <!-- 顶部导航栏（sticky） -->
-    <header
-      class="sticky top-0 backdrop-blur-xl bg-white/80 dark:bg-neutral-900/80 border-b border-stone-200/60 dark:border-stone-700/60 shadow-sm"
-      style="z-index: 100;"
-    >
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
-        <div class="flex items-center justify-between gap-3">
-          <!-- 左侧：返回 + 画集标识 -->
-          <div class="flex items-center gap-2 sm:gap-3 min-w-0">
-            <NuxtLink
-              v-if="fromGalleries"
-              :to="`/galleries/${fromGalleries}`"
-              class="shrink-0 p-2 -ml-2 rounded-xl text-stone-500 hover:text-amber-600 dark:text-stone-400 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
-              title="返回全部画集"
-            >
-              <UIcon name="heroicons:arrow-left" class="w-5 h-5" />
-            </NuxtLink>
-            <!-- 画集图标 -->
-            <div class="shrink-0 relative">
-              <div
-                class="absolute inset-0 rounded-xl blur opacity-30"
-                :style="`background: var(--gallery-accent)`"
-              ></div>
-              <div
-                class="relative w-9 h-9 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center shadow-lg"
-                :style="`background: linear-gradient(135deg, var(--gallery-accent), color-mix(in srgb, var(--gallery-accent) 80%, #000))`"
-              >
-                <UIcon name="heroicons:photo" class="w-4 h-4 sm:w-5 sm:h-5 text-white" />
-              </div>
-            </div>
-            <div class="min-w-0">
-              <h1 class="text-base sm:text-xl font-bold font-serif truncate leading-tight">
-                <span
-                  v-if="!themeColor"
-                  class="bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-400 dark:to-orange-400 bg-clip-text text-transparent"
-                >{{ galleryTitle }}</span>
-                <span v-else :style="`color: var(--gallery-accent)`">{{ galleryTitle }}</span>
-              </h1>
-              <p v-if="galleryData" class="text-xs text-stone-500 dark:text-stone-400 truncate mt-0.5">
-                <span class="inline-flex items-center gap-1">
-                  <UIcon name="heroicons:photo" class="w-3 h-3" />
-                  {{ galleryData.gallery.image_count }} 张图片
-                </span>
-                <span v-if="galleryData.gallery.description" class="hidden sm:inline text-stone-300 dark:text-stone-600 mx-1.5">·</span>
-                <span v-if="galleryData.gallery.description" class="hidden sm:inline">{{ galleryData.gallery.description }}</span>
-              </p>
-            </div>
+    <div class="relative z-10 mx-auto max-w-7xl px-3 pb-10 pt-4 sm:px-6 sm:pb-14 sm:pt-6 lg:px-8">
+      <header class="sticky top-3 z-40 mb-5 rounded-2xl border border-stone-200/75 bg-white/88 px-3 py-2.5 shadow-xl shadow-stone-200/60 backdrop-blur-xl dark:border-stone-700/70 dark:bg-neutral-900/86 dark:shadow-black/35 sm:px-4 sm:py-3">
+        <div class="flex items-start gap-2 sm:items-center sm:gap-3">
+          <NuxtLink
+            v-if="backLink"
+            :to="backLink"
+            class="mt-0.5 shrink-0 rounded-xl p-2 text-stone-500 transition-colors hover:bg-amber-50 hover:text-amber-600 dark:text-stone-400 dark:hover:bg-amber-900/20 dark:hover:text-amber-400 sm:mt-0"
+            title="返回列表"
+          >
+            <UIcon name="heroicons:arrow-left" class="h-5 w-5" />
+          </NuxtLink>
+
+          <div class="min-w-0 flex-1">
+            <p class="text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-500 dark:text-stone-400">Gallery Share</p>
+            <h1 class="truncate text-sm font-bold text-stone-900 dark:text-white sm:text-base">
+              {{ galleryTitle }}
+            </h1>
           </div>
 
-          <!-- 右侧操作按钮 -->
-          <div class="shrink-0 flex items-center gap-1 sm:gap-2">
+          <div class="shrink-0 flex items-center gap-1.5">
             <UButton
               variant="ghost"
               size="sm"
               :icon="copied ? 'heroicons:check' : 'heroicons:link'"
-              class="text-stone-600 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+              class="text-stone-600 hover:bg-amber-50 hover:text-amber-600 dark:text-stone-300 dark:hover:bg-amber-900/20 dark:hover:text-amber-400"
               aria-label="复制分享链接"
               @click="copyShareLink"
             >
-              <span class="hidden sm:inline text-xs">{{ copied ? '已复制' : '复制链接' }}</span>
+              <span class="hidden text-xs sm:inline">{{ copied ? '已复制' : '复制' }}</span>
             </UButton>
             <UButton
               v-if="allowDownload"
@@ -84,341 +42,251 @@
               icon="heroicons:arrow-down-tray"
               :loading="downloadingAll"
               :disabled="!galleryData || galleryData.images.length === 0"
-              class="text-stone-600 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+              class="text-stone-600 hover:bg-amber-50 hover:text-amber-600 dark:text-stone-300 dark:hover:bg-amber-900/20 dark:hover:text-amber-400"
               aria-label="下载全部图片"
               @click="downloadAllImages"
             >
-              <span class="hidden sm:inline text-xs">下载全部</span>
+              <span class="hidden text-xs sm:inline">下载</span>
             </UButton>
           </div>
         </div>
-      </div>
-    </header>
+      </header>
 
-    <!-- 主内容区 -->
-    <main class="flex-1 relative" style="z-index: 10;">
-
-      <!-- 骨架屏：首次加载时显示 -->
-      <div v-if="loading">
-        <!-- Hero 骨架 -->
-        <div class="w-full h-48 sm:h-64 bg-stone-200 dark:bg-neutral-800 animate-pulse"></div>
-        <!-- 图片网格骨架 -->
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div class="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 [column-gap:1rem]">
+      <main>
+        <div v-if="loading" class="space-y-5 sm:space-y-6">
+          <div class="h-44 animate-pulse rounded-3xl border border-stone-200 bg-stone-200/80 dark:border-stone-700 dark:bg-neutral-800/80 sm:h-56" />
+          <div class="columns-1 [column-gap:0.75rem] sm:columns-2 lg:columns-3 xl:columns-4 sm:[column-gap:1rem]">
             <div
               v-for="i in 12"
               :key="i"
-              class="mb-4 break-inside-avoid rounded-2xl bg-stone-200 dark:bg-neutral-800 animate-pulse"
-              :style="`height: ${[180, 240, 200, 160, 220, 280, 190, 210, 170, 250, 230, 195][i-1]}px`"
-            ></div>
+              class="mb-3 break-inside-avoid animate-pulse rounded-2xl bg-stone-200 dark:bg-neutral-800 sm:mb-4"
+              :style="`height: ${[170, 220, 195, 150, 210, 260, 185, 205, 165, 230, 215, 182][i - 1]}px`"
+            />
           </div>
         </div>
-      </div>
 
-      <!-- 密码解锁 -->
-      <div v-else-if="requiresPassword" class="flex items-center justify-center min-h-[60vh] px-4">
-        <div class="w-full max-w-sm text-center">
-          <div class="relative w-24 h-24 mx-auto mb-6">
-            <div class="absolute inset-0 rounded-full blur-xl opacity-20" :style="`background: var(--gallery-accent)`"></div>
-            <div class="relative w-full h-full bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center border border-amber-200/50 dark:border-amber-700/30">
-              <UIcon name="heroicons:lock-closed" class="w-12 h-12 text-amber-500" />
-            </div>
+        <div v-else-if="requiresPassword" class="mx-auto mt-8 max-w-md rounded-3xl border border-amber-200/70 bg-white/90 p-6 text-center shadow-2xl shadow-amber-100/70 backdrop-blur-sm dark:border-amber-700/40 dark:bg-neutral-900/88 dark:shadow-black/40 sm:mt-12 sm:p-8">
+          <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-lg">
+            <UIcon name="heroicons:lock-closed" class="h-8 w-8" />
           </div>
-          <h1 class="text-2xl font-bold font-serif mb-2 bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-400 dark:to-orange-400 bg-clip-text text-transparent">
-            {{ lockedGalleryName || '受保护的画集' }}
-          </h1>
-          <p class="text-stone-500 dark:text-stone-400 mb-8 text-sm">此画集需要密码才能访问</p>
+          <h2 class="mb-1 text-2xl font-bold text-stone-900 dark:text-white">{{ lockedGalleryName || '受保护画集' }}</h2>
+          <p class="mb-6 text-sm text-stone-500 dark:text-stone-400">请输入访问密码继续查看</p>
           <div class="space-y-3">
             <UInput v-model="passwordInput" type="password" placeholder="请输入访问密码" size="lg" @keyup.enter="submitPassword" />
-            <UButton
-              block size="lg" :loading="unlocking" :disabled="!passwordInput"
-              class="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg shadow-amber-500/25"
-              @click="submitPassword"
-            >解锁画集</UButton>
+            <UButton block size="lg" :loading="unlocking" :disabled="!passwordInput" class="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600" @click="submitPassword">
+              解锁画集
+            </UButton>
             <p v-if="unlockError" class="text-sm text-red-500">{{ unlockError }}</p>
           </div>
         </div>
-      </div>
 
-      <!-- Token 验证 -->
-      <div v-else-if="requiresToken" class="flex items-center justify-center min-h-[60vh] px-4">
-        <div class="w-full max-w-sm text-center">
-          <div class="relative w-24 h-24 mx-auto mb-6">
-            <div class="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-500 rounded-full blur-xl opacity-20"></div>
-            <div class="relative w-full h-full bg-amber-50 dark:bg-amber-900/20 rounded-full flex items-center justify-center border border-amber-200/50 dark:border-amber-700/30">
-              <UIcon name="heroicons:key" class="w-12 h-12 text-amber-500" />
-            </div>
+        <div v-else-if="requiresToken" class="mx-auto mt-8 max-w-md rounded-3xl border border-amber-200/70 bg-white/90 p-6 text-center shadow-2xl shadow-amber-100/70 backdrop-blur-sm dark:border-amber-700/40 dark:bg-neutral-900/88 dark:shadow-black/40 sm:mt-12 sm:p-8">
+          <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-lg">
+            <UIcon name="heroicons:key" class="h-8 w-8" />
           </div>
-          <h1 class="text-2xl font-bold font-serif mb-2 bg-gradient-to-r from-amber-600 to-orange-600 dark:from-amber-400 dark:to-orange-400 bg-clip-text text-transparent">
-            {{ lockedGalleryName || '受保护的画集' }}
-          </h1>
-          <p class="text-stone-500 dark:text-stone-400 mb-8 text-sm">此画集需要授权 Token 才能访问</p>
-          <UButton
-            block size="lg"
-            class="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg shadow-amber-500/25"
-            @click="showLoginModal = true"
-          >验证身份</UButton>
+          <h2 class="mb-1 text-2xl font-bold text-stone-900 dark:text-white">{{ lockedGalleryName || '受保护画集' }}</h2>
+          <p class="mb-6 text-sm text-stone-500 dark:text-stone-400">需要授权 Token 才能访问此画集</p>
+          <UButton block size="lg" class="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600" @click="showLoginModal = true">
+            验证身份
+          </UButton>
         </div>
-      </div>
 
-      <!-- 错误状态 -->
-      <div v-else-if="error" class="flex items-center justify-center min-h-[60vh] px-4">
-        <div class="w-full max-w-sm text-center">
-          <div class="relative w-24 h-24 mx-auto mb-6">
-            <div class="absolute inset-0 bg-gradient-to-br from-red-400 to-orange-400 rounded-full blur-xl opacity-20"></div>
-            <div class="relative w-full h-full bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center border border-red-200/50 dark:border-red-700/30">
-              <UIcon name="heroicons:exclamation-triangle" class="w-12 h-12 text-red-500" />
-            </div>
+        <div v-else-if="error" class="mx-auto mt-8 max-w-md rounded-3xl border border-red-200/70 bg-white/90 p-6 text-center shadow-2xl shadow-red-100/70 backdrop-blur-sm dark:border-red-700/40 dark:bg-neutral-900/88 dark:shadow-black/40 sm:mt-12 sm:p-8">
+          <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-red-400 to-orange-500 text-white shadow-lg">
+            <UIcon name="heroicons:exclamation-triangle" class="h-8 w-8" />
           </div>
-          <h1 class="text-2xl font-bold font-serif text-stone-900 dark:text-white mb-2">无法访问</h1>
-          <p class="text-stone-500 dark:text-stone-400 mb-8 text-sm">{{ error }}</p>
-          <UButton
-            to="/"
-            class="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white shadow-lg shadow-amber-500/25"
-          >返回首页</UButton>
+          <h2 class="mb-1 text-2xl font-bold text-stone-900 dark:text-white">无法访问</h2>
+          <p class="mb-6 text-sm text-stone-500 dark:text-stone-400">{{ error }}</p>
+          <UButton :to="errorBackLink" class="bg-gradient-to-r from-amber-500 to-orange-500 text-white hover:from-amber-600 hover:to-orange-600">
+            {{ errorBackLabel }}
+          </UButton>
         </div>
-      </div>
 
-      <!-- 画集内容 -->
-      <div v-else-if="galleryData">
-
-        <!-- NSFW 全屏警告遮罩 -->
-        <Transition name="fade">
-          <div
-            v-if="nsfwWarning && !nsfwConfirmed"
-            class="fixed inset-0 flex items-center justify-center bg-black/85 backdrop-blur-lg"
-            style="z-index: 200;"
-          >
-            <div class="max-w-md w-full mx-4 bg-white dark:bg-neutral-900 rounded-2xl shadow-2xl p-8 text-center border border-stone-200/60 dark:border-neutral-700/60">
-              <div class="relative w-20 h-20 mx-auto mb-5">
-                <div class="absolute inset-0 bg-gradient-to-br from-red-500 to-orange-500 rounded-full blur-xl opacity-30"></div>
-                <div class="relative w-full h-full bg-red-50 dark:bg-red-900/20 rounded-full flex items-center justify-center border border-red-200/50 dark:border-red-700/30">
-                  <UIcon name="heroicons:eye-slash" class="w-10 h-10 text-red-500" />
+        <div v-else-if="galleryData" class="space-y-5 sm:space-y-7">
+          <Transition name="fade">
+            <div
+              v-if="nsfwWarning && !nsfwConfirmed"
+              class="fixed inset-0 z-[120] flex items-center justify-center bg-black/85 px-4 backdrop-blur-lg"
+            >
+              <div class="w-full max-w-md rounded-2xl border border-stone-200/60 bg-white p-7 text-center shadow-2xl dark:border-neutral-700/60 dark:bg-neutral-900">
+                <div class="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-red-500 to-orange-500 text-white shadow-lg">
+                  <UIcon name="heroicons:eye-slash" class="h-8 w-8" />
+                </div>
+                <h3 class="mb-2 text-xl font-bold text-stone-900 dark:text-white">内容警告</h3>
+                <p class="mb-6 text-sm leading-relaxed text-stone-500 dark:text-stone-400">
+                  此画集可能包含敏感内容，请确认您已年满 18 岁并愿意继续浏览。
+                </p>
+                <div class="flex gap-3">
+                  <UButton block variant="outline" class="border-stone-300 text-stone-600 dark:border-neutral-600 dark:text-stone-300" @click="leaveNsfw">
+                    离开
+                  </UButton>
+                  <UButton block class="bg-gradient-to-r from-red-500 to-orange-500 text-white hover:from-red-600 hover:to-orange-600" @click="confirmNsfw">
+                    继续浏览
+                  </UButton>
                 </div>
               </div>
-              <h2 class="text-xl font-bold font-serif text-stone-900 dark:text-white mb-2">内容警告</h2>
-              <p class="text-stone-500 dark:text-stone-400 mb-6 text-sm leading-relaxed">
-                此画集可能包含敏感内容，不适合所有人查看。<br>请确认您已年满 18 岁且愿意继续。
-              </p>
-              <div class="flex gap-3">
-                <UButton
-                  block variant="outline"
-                  class="border-stone-300 dark:border-neutral-600 text-stone-600 dark:text-stone-300"
-                  @click="leaveNsfw"
-                >离开</UButton>
-                <UButton
-                  block
-                  class="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white"
-                  @click="confirmNsfw"
-                >我已了解，继续</UButton>
+            </div>
+          </Transition>
+
+          <section class="relative overflow-hidden rounded-3xl border border-stone-200/70 bg-white/90 shadow-xl shadow-stone-200/70 backdrop-blur-sm dark:border-stone-700/70 dark:bg-neutral-900/86 dark:shadow-black/35">
+            <div v-if="coverSrc" class="absolute inset-0">
+              <img :src="coverSrc" alt="" aria-hidden="true" class="h-full w-full object-cover blur-sm scale-110">
+              <div class="absolute inset-0 bg-gradient-to-br from-black/55 via-black/35 to-black/65" />
+            </div>
+            <div v-else class="absolute inset-0 bg-gradient-to-br from-amber-400/25 via-orange-400/18 to-stone-400/18 dark:from-amber-500/18 dark:via-orange-500/12 dark:to-stone-900/35" />
+
+            <div class="relative p-5 sm:p-7">
+              <div>
+                <h2 class="text-3xl font-black leading-tight text-white drop-shadow-lg sm:text-4xl">
+                  {{ galleryTitle }}
+                </h2>
+                <p v-if="galleryData.gallery.description" class="mt-3 max-w-2xl text-sm leading-relaxed text-white/90 sm:text-base">
+                  {{ galleryData.gallery.description }}
+                </p>
+                <p v-if="customHeaderText" class="mt-2 max-w-2xl text-xs leading-relaxed text-white/75 sm:text-sm">
+                  {{ customHeaderText }}
+                </p>
+
+                <div class="mt-5 flex flex-wrap gap-2">
+                  <span class="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                    {{ galleryData.gallery.image_count }} 张图片
+                  </span>
+                  <span class="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                    布局：{{ layoutModeLabel }}
+                  </span>
+                  <span class="rounded-full border border-white/30 bg-white/15 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                    {{ allowDownload ? '允许下载' : '仅浏览' }}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        </Transition>
+          </section>
 
-        <!-- Hero Banner -->
-        <div
-          class="relative w-full overflow-hidden"
-          :class="hasCover ? 'h-52 sm:h-72' : 'h-36 sm:h-48'"
-        >
-          <!-- 封面图背景（模糊） -->
-          <img
-            v-if="hasCover"
-            :src="galleryData.gallery.cover_url || galleryData.gallery.cover_image"
-            alt=""
-            aria-hidden="true"
-            class="absolute inset-0 w-full h-full object-cover scale-110 blur-sm"
-          />
-          <!-- 无封面时用主题色渐变 -->
-          <div
-            v-else
-            class="absolute inset-0"
-            :style="themeColor
-              ? `background: linear-gradient(135deg, ${themeColor}40, ${themeColor}20)`
-              : 'background: linear-gradient(135deg, rgb(245 158 11 / 0.25), rgb(249 115 22 / 0.15))'"
-          ></div>
-          <!-- 渐变遮罩 -->
-          <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-black/10"></div>
-          <!-- Banner 内容 -->
-          <div class="absolute inset-0 flex flex-col justify-end px-4 sm:px-8 pb-6 sm:pb-8 max-w-7xl mx-auto w-full left-0 right-0">
-            <h2 class="text-2xl sm:text-4xl font-bold font-serif text-white drop-shadow-lg mb-1 sm:mb-2 line-clamp-2">
-              {{ galleryTitle }}
-            </h2>
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-white/80 text-sm">
-              <span class="inline-flex items-center gap-1">
-                <UIcon name="heroicons:photo" class="w-4 h-4" />
-                {{ galleryData.gallery.image_count }} 张图片
+          <section class="rounded-3xl border border-stone-200/70 bg-white/86 p-3 shadow-xl shadow-stone-200/60 backdrop-blur-sm dark:border-stone-700/70 dark:bg-neutral-900/82 dark:shadow-black/35 sm:p-4">
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-2 px-1 sm:px-2">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 dark:text-stone-400">Content Stream</p>
+                <p class="text-sm text-stone-600 dark:text-stone-300">点击任意图片可进入沉浸式浏览</p>
+              </div>
+              <span class="rounded-full border border-stone-200 bg-stone-100 px-3 py-1 text-xs text-stone-500 dark:border-stone-700 dark:bg-neutral-800 dark:text-stone-400">
+                第 {{ page }} 页
               </span>
-              <span v-if="galleryData.gallery.description" class="hidden sm:inline opacity-60">·</span>
-              <span v-if="galleryData.gallery.description" class="hidden sm:inline line-clamp-1">{{ galleryData.gallery.description }}</span>
             </div>
-            <!-- 自定义头部文字 -->
-            <p v-if="customHeaderText" class="mt-2 text-white/70 text-xs sm:text-sm leading-relaxed line-clamp-2">
-              {{ customHeaderText }}
-            </p>
-          </div>
-        </div>
 
-        <!-- 图片区域 -->
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+            <div v-if="galleryData.images.length === 0" class="py-16 text-center">
+              <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-stone-100 dark:bg-neutral-800">
+                <UIcon name="heroicons:photo" class="h-8 w-8 text-stone-400" />
+              </div>
+              <p class="text-base font-medium text-stone-900 dark:text-white">画集暂无图片</p>
+            </div>
 
-          <!-- 空状态 -->
-          <div v-if="galleryData.images.length === 0" class="text-center py-20">
-            <div class="relative w-20 h-20 mx-auto mb-4">
-              <div class="absolute inset-0 rounded-full blur-xl opacity-15" :style="`background: var(--gallery-accent)`"></div>
-              <div class="relative w-full h-full bg-stone-100 dark:bg-neutral-800 rounded-full flex items-center justify-center border border-stone-200/50 dark:border-neutral-700/50">
-                <UIcon name="heroicons:photo" class="w-10 h-10 text-stone-400" />
+            <div v-else>
+              <div
+                v-if="layoutMode === 'masonry'"
+                class="columns-1 [column-gap:0.75rem] sm:columns-2 lg:columns-3 xl:columns-4 sm:[column-gap:1rem]"
+              >
+                <button
+                  v-for="(image, index) in galleryData.images"
+                  :key="image.encrypted_id"
+                  type="button"
+                  class="group relative mb-3 block w-full break-inside-avoid overflow-hidden rounded-2xl border border-stone-200/80 bg-white text-left shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10 dark:border-neutral-700/80 dark:bg-neutral-900 dark:hover:shadow-black/35 sm:mb-4"
+                  style="content-visibility: auto; contain-intrinsic-size: 360px 240px;"
+                  @click="openLightbox(index)"
+                >
+                  <img :src="image.image_url" :alt="image.original_filename" loading="lazy" decoding="async" class="block h-auto w-full" />
+                  <div class="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/18" />
+                  <div
+                    v-if="showImageInfo"
+                    class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2.5 opacity-95 transition-opacity duration-300 sm:opacity-0 sm:group-hover:opacity-100"
+                  >
+                    <p class="truncate text-xs text-white/90">{{ image.original_filename }}</p>
+                  </div>
+                </button>
+              </div>
+
+              <div
+                v-else-if="layoutMode === 'grid'"
+                class="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5"
+              >
+                <button
+                  v-for="(image, index) in galleryData.images"
+                  :key="image.encrypted_id"
+                  type="button"
+                  class="group relative block aspect-square overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-200 text-left shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10 dark:border-neutral-700/80 dark:bg-neutral-800 dark:hover:shadow-black/35"
+                  @click="openLightbox(index)"
+                >
+                  <img :src="image.image_url" :alt="image.original_filename" loading="lazy" decoding="async" class="h-full w-full object-cover" />
+                  <div class="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/18" />
+                  <div
+                    v-if="showImageInfo"
+                    class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2 opacity-95 transition-opacity duration-300 sm:opacity-0 sm:group-hover:opacity-100"
+                  >
+                    <p class="truncate text-xs text-white/90">{{ image.original_filename }}</p>
+                  </div>
+                </button>
+              </div>
+
+              <div v-else class="flex flex-wrap gap-2.5">
+                <button
+                  v-for="(image, index) in galleryData.images"
+                  :key="image.encrypted_id"
+                  type="button"
+                  class="group relative block min-w-[42%] flex-grow overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-200 text-left shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:shadow-black/10 dark:border-neutral-700/80 dark:bg-neutral-800 dark:hover:shadow-black/35 sm:min-w-[150px] sm:max-w-[380px]"
+                  style="height: 180px;"
+                  @click="openLightbox(index)"
+                >
+                  <img :src="image.image_url" :alt="image.original_filename" loading="lazy" decoding="async" class="h-full w-full object-cover" />
+                  <div class="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/18" />
+                  <div
+                    v-if="showImageInfo"
+                    class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 to-transparent p-2 opacity-95 transition-opacity duration-300 sm:opacity-0 sm:group-hover:opacity-100"
+                  >
+                    <p class="truncate text-xs text-white/90">{{ image.original_filename }}</p>
+                  </div>
+                </button>
               </div>
             </div>
-            <p class="text-lg font-medium font-serif text-stone-900 dark:text-white">画集暂无图片</p>
-          </div>
 
-          <!-- 图片网格 -->
-          <div v-else>
+            <div v-if="loadingMore" class="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 sm:gap-3">
+              <div v-for="i in 4" :key="i" class="aspect-square animate-pulse rounded-2xl bg-stone-200 dark:bg-neutral-800" />
+            </div>
 
-            <!-- 瀑布流（masonry，默认） -->
-            <div
-              v-if="layoutMode === 'masonry'"
-              class="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 [column-gap:1rem]"
-            >
-              <button
-                v-for="(image, index) in galleryData.images"
-                :key="image.encrypted_id"
-                type="button"
-                style="content-visibility: auto; contain-intrinsic-size: 360px 240px;"
-                class="group mb-4 w-full break-inside-avoid rounded-2xl overflow-hidden border border-stone-200/60 dark:border-neutral-700/60 bg-white dark:bg-neutral-900 shadow-sm hover:shadow-xl hover:shadow-black/10 dark:hover:shadow-black/30 hover:-translate-y-1 transition-all duration-300 text-left block"
-                @click="openLightbox(index)"
+            <div v-if="galleryData.has_more && !loadingMore" class="pt-6 text-center">
+              <UButton
+                variant="outline"
+                class="border-stone-300 text-stone-600 hover:border-amber-400 hover:text-amber-600 dark:border-neutral-600 dark:text-stone-300 dark:hover:border-amber-500 dark:hover:text-amber-400"
+                @click="loadMore"
               >
-                <div class="relative">
-                  <!-- 骨架占位（图片加载前） -->
-                  <div class="absolute inset-0 bg-stone-200 dark:bg-neutral-800 animate-pulse"></div>
-                  <img
-                    :src="image.image_url"
-                    :alt="image.original_filename"
-                    loading="lazy"
-                    decoding="async"
-                    class="relative block w-full h-auto"
-                    @load="(e) => (e.target as HTMLElement).previousElementSibling?.remove()"
-                  />
-                  <div class="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition-colors duration-300" />
-                  <div class="absolute inset-0 flex items-center justify-center">
-                    <UIcon name="heroicons:magnifying-glass-plus" class="w-8 h-8 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 drop-shadow-lg" />
-                  </div>
-                  <div
-                    v-if="showImageInfo"
-                    class="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                  >
-                    <p class="text-white/90 text-xs truncate">{{ image.original_filename }}</p>
-                  </div>
-                </div>
-              </button>
+                加载更多
+              </UButton>
             </div>
-
-            <!-- 网格（grid） -->
-            <div
-              v-else-if="layoutMode === 'grid'"
-              class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3"
-            >
-              <button
-                v-for="(image, index) in galleryData.images"
-                :key="image.encrypted_id"
-                type="button"
-                class="group aspect-square rounded-2xl overflow-hidden border border-stone-200/60 dark:border-neutral-700/60 bg-stone-200 dark:bg-neutral-800 shadow-sm hover:shadow-xl hover:shadow-black/10 dark:hover:shadow-black/30 hover:-translate-y-1 transition-all duration-300 text-left block"
-                @click="openLightbox(index)"
-              >
-                <div class="relative w-full h-full">
-                  <img
-                    :src="image.image_url"
-                    :alt="image.original_filename"
-                    loading="lazy"
-                    decoding="async"
-                    class="w-full h-full object-cover"
-                  />
-                  <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300" />
-                  <div class="absolute inset-0 flex items-center justify-center">
-                    <UIcon name="heroicons:magnifying-glass-plus" class="w-7 h-7 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 drop-shadow-lg" />
-                  </div>
-                  <div
-                    v-if="showImageInfo"
-                    class="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                  >
-                    <p class="text-white/90 text-xs truncate">{{ image.original_filename }}</p>
-                  </div>
-                </div>
-              </button>
-            </div>
-
-            <!-- 等高行（justified） -->
-            <div
-              v-else-if="layoutMode === 'justified'"
-              class="flex flex-wrap gap-2"
-            >
-              <button
-                v-for="(image, index) in galleryData.images"
-                :key="image.encrypted_id"
-                type="button"
-                class="group relative rounded-2xl overflow-hidden border border-stone-200/60 dark:border-neutral-700/60 bg-stone-200 dark:bg-neutral-800 shadow-sm hover:shadow-xl hover:shadow-black/10 dark:hover:shadow-black/30 hover:-translate-y-1 transition-all duration-300 text-left block"
-                style="height: 200px; flex-grow: 1; min-width: 150px; max-width: 380px;"
-                @click="openLightbox(index)"
-              >
-                <img
-                  :src="image.image_url"
-                  :alt="image.original_filename"
-                  loading="lazy"
-                  decoding="async"
-                  class="w-full h-full object-cover"
-                />
-                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300" />
-                <div class="absolute inset-0 flex items-center justify-center">
-                  <UIcon name="heroicons:magnifying-glass-plus" class="w-7 h-7 text-white opacity-0 group-hover:opacity-100 transition-opacity duration-300 drop-shadow-lg" />
-                </div>
-                <div
-                  v-if="showImageInfo"
-                  class="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                >
-                  <p class="text-white/90 text-xs truncate">{{ image.original_filename }}</p>
-                </div>
-              </button>
-            </div>
-
-          </div>
-
-          <!-- 加载更多骨架屏（无限滚动加载中） -->
-          <div v-if="loadingMore" class="mt-4">
-            <div
-              v-if="layoutMode === 'masonry'"
-              class="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 [column-gap:1rem]"
-            >
-              <div
-                v-for="i in 4"
-                :key="i"
-                class="mb-4 break-inside-avoid rounded-2xl bg-stone-200 dark:bg-neutral-800 animate-pulse"
-                :style="`height: ${[180, 220, 160, 200][i-1]}px`"
-              ></div>
-            </div>
-            <div v-else class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mt-0">
-              <div
-                v-for="i in 4"
-                :key="i"
-                class="aspect-square rounded-2xl bg-stone-200 dark:bg-neutral-800 animate-pulse"
-              ></div>
-            </div>
-          </div>
-
-          <!-- 手动加载更多按钮（无限滚动的备用） -->
-          <div v-if="galleryData.has_more && !loadingMore" class="text-center pt-6">
-            <UButton
-              variant="outline"
-              class="border-stone-300 dark:border-neutral-600 text-stone-600 dark:text-stone-300 hover:border-amber-400 hover:text-amber-600 dark:hover:border-amber-500 dark:hover:text-amber-400"
-              @click="loadMore"
-            >加载更多</UButton>
-          </div>
-
+          </section>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
 
-    <!-- 全屏灯箱 -->
+    <footer class="relative z-10 border-t border-stone-200/60 dark:border-stone-700/60">
+      <div class="mx-auto max-w-7xl px-3 py-6 text-center sm:px-6 lg:px-8">
+        <NuxtLink :to="footerLink" class="inline-flex items-center gap-1.5 text-xs text-stone-500 transition-colors hover:text-amber-600 dark:text-stone-400 dark:hover:text-amber-400">
+          <UIcon :name="footerIcon" class="h-3.5 w-3.5" />
+          <span>{{ footerLabel }}</span>
+        </NuxtLink>
+      </div>
+    </footer>
+
+    <Transition name="slide-up">
+      <button
+        v-if="showBackToTop"
+        type="button"
+        class="fixed bottom-6 right-6 z-50 flex h-11 w-11 items-center justify-center rounded-full text-white shadow-lg transition-all duration-200 hover:scale-110 active:scale-95"
+        :style="`background: var(--gallery-accent)`"
+        aria-label="回到顶部"
+        @click="scrollToTop"
+      >
+        <UIcon name="heroicons:arrow-up" class="h-5 w-5" />
+      </button>
+    </Transition>
+
     <GalleryLightbox
       :open="lightboxOpen"
       :index="lightboxIndex"
@@ -427,42 +295,11 @@
       @update:index="lightboxIndex = $event"
     />
 
-    <!-- 页脚 -->
-    <footer class="relative border-t border-stone-200/60 dark:border-stone-700/60" style="z-index: 10;">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div class="flex flex-col sm:flex-row items-center justify-center gap-2 text-xs text-stone-400 dark:text-stone-500">
-          <NuxtLink
-            :to="isGalleryMode ? '/gallery-site/' : '/'"
-            class="inline-flex items-center gap-1.5 hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
-          >
-            <UIcon :name="isGalleryMode ? 'heroicons:photo' : 'heroicons:cloud-arrow-up'" class="w-3.5 h-3.5" />
-            <span>{{ isGalleryMode ? `© ${new Date().getFullYear()} ${gallerySiteName}` : `Powered by ${displayName}` }}</span>
-          </NuxtLink>
-        </div>
-      </div>
-    </footer>
-
-    <!-- 回到顶部浮动按钮 -->
-    <Transition name="slide-up">
-      <button
-        v-if="showBackToTop"
-        type="button"
-        class="fixed bottom-6 right-6 w-10 h-10 rounded-full shadow-lg flex items-center justify-center text-white transition-all duration-200 hover:scale-110 active:scale-95"
-        :style="`background: var(--gallery-accent); box-shadow: 0 4px 14px color-mix(in srgb, var(--gallery-accent) 40%, transparent)`"
-        style="z-index: 50;"
-        aria-label="回到顶部"
-        @click="scrollToTop"
-      >
-        <UIcon name="heroicons:arrow-up" class="w-5 h-5" />
-      </button>
-    </Transition>
-
-    <!-- 登录弹窗 -->
     <AuthLoginModal
       v-model="showLoginModal"
       title="验证身份"
       :subtitle="lockedGalleryName ? `访问画集「${lockedGalleryName}」` : undefined"
-      :mode="requiresToken ? 'token' : 'both'"
+      mode="token"
       :gallery-share-token="shareToken"
       @success="onLoginSuccess"
     />
@@ -477,17 +314,21 @@ definePageMeta({ layout: false })
 
 const route = useRoute()
 const galleryApi = useGalleryApi()
+const requestURL = useRequestURL()
+const { copy: clipboardCopy } = useClipboardCopy()
+const toast = useLightToast()
 const { displayName } = useSeoSettings()
 
-// 画集域名模式检测
 const siteMode = useState<{ mode: string; site_name?: string } | null>('gallery-site-mode', () => null)
 const isGalleryMode = computed(() => siteMode.value?.mode === 'gallery')
 const gallerySiteName = computed(() => siteMode.value?.site_name || '画集')
 
-const shareToken = computed(() => route.params.token as string)
-const fromGalleries = computed(() => route.query.from as string | undefined)
+const shareToken = computed(() => String(route.params.token || ''))
+const fromGalleries = computed(() => {
+  const value = route.query.from
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+})
 
-// 数据状态
 const loading = ref(true)
 const error = ref('')
 const galleryData = ref<{
@@ -512,17 +353,98 @@ const galleryData = ref<{
   has_more: boolean
 } | null>(null)
 
-// 新字段：可选链 + 默认值，兼容后端字段尚未存在的情况
+const requiresPassword = ref(false)
+const lockedGalleryName = ref('')
+const passwordInput = ref('')
+const unlocking = ref(false)
+const unlockError = ref('')
+
+const requiresToken = ref(false)
+const showLoginModal = ref(false)
+
+const page = ref(1)
+const loadingMore = ref(false)
+let loadSeq = 0
+
+const lightboxOpen = ref(false)
+const lightboxIndex = ref(0)
+
+const copied = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | undefined
+const downloadingAll = ref(false)
+
+const nsfwConfirmed = ref(false)
+
+const galleryTitle = computed(() => {
+  const name = (galleryData.value?.gallery?.name || '').trim()
+  return name || '分享画集'
+})
 const layoutMode = computed(() => galleryData.value?.gallery?.layout_mode || 'masonry')
+const layoutModeLabel = computed(() => {
+  if (layoutMode.value === 'grid') return '网格'
+  if (layoutMode.value === 'justified') return '等高'
+  return '瀑布流'
+})
 const themeColor = computed(() => galleryData.value?.gallery?.theme_color || '')
 const showImageInfo = computed(() => galleryData.value?.gallery?.show_image_info !== false)
 const allowDownload = computed(() => galleryData.value?.gallery?.allow_download !== false)
 const nsfwWarning = computed(() => galleryData.value?.gallery?.nsfw_warning === true)
 const customHeaderText = computed(() => galleryData.value?.gallery?.custom_header_text || '')
-const hasCover = computed(() => !!(galleryData.value?.gallery?.cover_url || galleryData.value?.gallery?.cover_image))
 
-// NSFW 确认状态（使用 sessionStorage 记忆，同一会话不重复提示）
-const nsfwConfirmed = ref(false)
+const coverSrc = computed(() => {
+  const gallery = galleryData.value?.gallery
+  if (!gallery) return ''
+  if (gallery.cover_url) return gallery.cover_url
+  if (gallery.cover_image) {
+    return `${String(useRuntimeConfig().public.apiBase || '').replace(/\/$/, '')}/image/${gallery.cover_image}`
+  }
+  return ''
+})
+
+const backLink = computed(() => (fromGalleries.value ? `/galleries/${fromGalleries.value}` : undefined))
+const errorBackLink = computed(() => (isGalleryMode.value ? '/gallery-site/' : '/'))
+const errorBackLabel = computed(() => (isGalleryMode.value ? '返回画集首页' : '返回首页'))
+const footerLink = computed(() => (isGalleryMode.value ? '/gallery-site/' : '/'))
+const footerLabel = computed(() => isGalleryMode.value ? `© ${new Date().getFullYear()} ${gallerySiteName.value}` : `Powered by ${displayName.value}`)
+const footerIcon = computed(() => (isGalleryMode.value ? 'heroicons:photo' : 'heroicons:cloud-arrow-up'))
+
+const canonicalUrl = computed(() => {
+  if (import.meta.client) return `${window.location.origin}/g/${shareToken.value}`
+  return `${requestURL.origin}/g/${shareToken.value}`
+})
+
+const shareDescription = computed(() => {
+  const description = galleryData.value?.gallery?.description?.trim()
+  if (description) return description
+  return `${galleryTitle.value}，共 ${galleryData.value?.gallery?.image_count || 0} 张图片`
+})
+
+useHead(() => ({
+  link: [{ rel: 'canonical', href: canonicalUrl.value }],
+  meta: [
+    { name: 'robots', content: 'noindex,nofollow,noarchive' },
+    { name: 'googlebot', content: 'noindex,nofollow,noarchive' },
+    { name: 'referrer', content: 'no-referrer-when-downgrade' }
+  ]
+}))
+
+useSeoMeta(() => ({
+  title: `${galleryTitle.value} - 分享画集`,
+  description: shareDescription.value,
+  ogTitle: galleryTitle.value,
+  ogDescription: shareDescription.value,
+  ogImage: coverSrc.value || undefined,
+  ogUrl: canonicalUrl.value,
+  twitterTitle: galleryTitle.value,
+  twitterDescription: shareDescription.value,
+  twitterImage: coverSrc.value || undefined,
+  twitterCard: coverSrc.value ? 'summary_large_image' : 'summary'
+}))
+
+const syncNsfwSession = () => {
+  if (typeof sessionStorage === 'undefined') return
+  nsfwConfirmed.value = sessionStorage.getItem(`nsfw_confirmed_${shareToken.value}`) === '1'
+}
 
 const confirmNsfw = () => {
   nsfwConfirmed.value = true
@@ -535,107 +457,42 @@ const leaveNsfw = () => {
   if (typeof window !== 'undefined') window.history.back()
 }
 
-// 密码解锁状态
-const requiresPassword = ref(false)
-const lockedGalleryName = ref('')
-const passwordInput = ref('')
-const unlocking = ref(false)
-const unlockError = ref('')
-
-// Token 验证状态
-const requiresToken = ref(false)
-const showLoginModal = ref(false)
-
-const page = ref(1)
-const loadingMore = ref(false)
-let loadSeq = 0
-
-const galleryTitle = computed(() => {
-  const name = (galleryData.value?.gallery?.name || '').trim()
-  return name || '分享画集'
-})
-
-const copied = ref(false)
-const downloadingAll = ref(false)
-let copiedTimer: ReturnType<typeof setTimeout> | undefined
-
-const copyShareLink = async () => {
-  if (typeof window === 'undefined') return
-  const url = window.location.href
-  try {
-    await navigator.clipboard.writeText(url)
-  } catch {
-    const el = document.createElement('textarea')
-    el.value = url
-    el.style.cssText = 'position:fixed;left:-9999px;top:0'
-    document.body.appendChild(el)
-    el.select()
-    document.execCommand('copy')
-    document.body.removeChild(el)
-  }
-  copied.value = true
-  if (copiedTimer) clearTimeout(copiedTimer)
-  copiedTimer = setTimeout(() => { copied.value = false }, 1500)
-}
-
-const downloadAllImages = async () => {
-  if (typeof window === 'undefined') return
-  if (downloadingAll.value || !galleryData.value?.images?.length) return
-  const count = galleryData.value.images.length
-  if (!window.confirm(`将下载 ${count} 张图片，浏览器可能会拦截多个下载，是否继续？`)) return
-  downloadingAll.value = true
-  try {
-    for (const image of galleryData.value.images) {
-      const link = document.createElement('a')
-      link.href = image.image_url
-      link.download = image.original_filename || 'image'
-      link.target = '_blank'
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      await new Promise(r => setTimeout(r, 150))
-    }
-  } finally {
-    downloadingAll.value = false
-  }
-}
-
-// 灯箱状态
-const lightboxOpen = ref(false)
-const lightboxIndex = ref(0)
-
-// 加载画集
 const loadGallery = async () => {
   const seq = ++loadSeq
   const token = shareToken.value
+
   loading.value = true
   error.value = ''
   requiresPassword.value = false
   requiresToken.value = false
-  // 检查 sessionStorage 中的 NSFW 确认状态
-  if (typeof sessionStorage !== 'undefined' && sessionStorage.getItem(`nsfw_confirmed_${token}`)) {
-    nsfwConfirmed.value = true
-  } else {
-    nsfwConfirmed.value = false
-  }
+  unlockError.value = ''
+  lockedGalleryName.value = ''
+  syncNsfwSession()
+
   try {
     const data = await galleryApi.getSharedGallery(token, 1, 50)
     if (seq !== loadSeq || token !== shareToken.value) return
     galleryData.value = data
     page.value = 1
   } catch (e: any) {
-    if (seq !== loadSeq) return
+    if (seq !== loadSeq || token !== shareToken.value) return
+
+    galleryData.value = null
     if (e.requires_password) {
       requiresPassword.value = true
       lockedGalleryName.value = e.gallery_name || ''
-    } else if (e.requires_token) {
+      return
+    }
+    if (e.requires_token) {
       requiresToken.value = true
       lockedGalleryName.value = e.gallery_name || ''
-    } else {
-      error.value = e.message || '画集不存在或分享已关闭'
+      return
     }
+    error.value = e.message || '画集不存在或分享已关闭'
   } finally {
-    if (seq === loadSeq) loading.value = false
+    if (seq === loadSeq && token === shareToken.value) {
+      loading.value = false
+    }
   }
 }
 
@@ -672,10 +529,10 @@ const loadMore = async () => {
     galleryData.value.images.push(...result.images)
     galleryData.value.has_more = result.has_more
     page.value = nextPage
-  } catch (e: any) {
-    console.error('加载更多失败:', e)
   } finally {
-    if (seq === loadSeq) loadingMore.value = false
+    if (seq === loadSeq && token === shareToken.value) {
+      loadingMore.value = false
+    }
   }
 }
 
@@ -686,11 +543,52 @@ const openLightbox = (index: number) => {
   lightboxOpen.value = true
 }
 
-// 回到顶部
+const copyShareLink = async () => {
+  const ok = await clipboardCopy(canonicalUrl.value, '链接已复制到剪贴板')
+  if (!ok) return
+  copied.value = true
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => { copied.value = false }, 1400)
+}
+
+const downloadAllImages = async () => {
+  if (typeof window === 'undefined') return
+  if (downloadingAll.value || !galleryData.value?.images?.length) return
+
+  const count = galleryData.value.images.length
+  if (!window.confirm(`将下载 ${count} 张图片，浏览器可能会拦截多个下载，是否继续？`)) return
+
+  downloadingAll.value = true
+  let failed = 0
+  try {
+    for (const image of galleryData.value.images) {
+      try {
+        const link = document.createElement('a')
+        link.href = image.image_url
+        link.download = image.original_filename || 'image'
+        link.target = '_blank'
+        document.body.appendChild(link)
+        link.click()
+        link.remove()
+      } catch {
+        failed += 1
+      }
+      await new Promise(resolve => setTimeout(resolve, 140))
+    }
+  } finally {
+    downloadingAll.value = false
+    if (failed > 0) {
+      toast.warning(`下载完成，${failed} 张被浏览器拦截`)
+    }
+  }
+}
+
 const { y: scrollY } = useWindowScroll()
 const showBackToTop = computed(() => scrollY.value > 500)
 const scrollToTop = () => {
-  if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' })
+  if (typeof window !== 'undefined') {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 }
 
 watch(requiresToken, (needsToken) => {
@@ -709,9 +607,7 @@ if (import.meta.client) {
   })
 }
 
-onMounted(() => {
-  loadGallery()
-})
+onMounted(loadGallery)
 
 onBeforeUnmount(() => {
   if (copiedTimer) clearTimeout(copiedTimer)
@@ -719,7 +615,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-/* 淡入淡出过渡（NSFW 遮罩） */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.2s ease;
@@ -729,7 +624,6 @@ onBeforeUnmount(() => {
   opacity: 0;
 }
 
-/* 回到顶部按钮滑入 */
 .slide-up-enter-active,
 .slide-up-leave-active {
   transition: opacity 0.2s ease, transform 0.2s ease;
@@ -737,6 +631,6 @@ onBeforeUnmount(() => {
 .slide-up-enter-from,
 .slide-up-leave-to {
   opacity: 0;
-  transform: translateY(12px);
+  transform: translateY(10px);
 }
 </style>

@@ -28,6 +28,15 @@ export interface Gallery {
   sort_order?: 'newest' | 'oldest' | 'filename'
   nsfw_warning?: boolean
   custom_header_text?: string
+  // 运营与 SEO 字段
+  card_subtitle?: string
+  editor_pick_weight?: number
+  homepage_expose_enabled?: boolean
+  seo_title?: string
+  seo_description?: string
+  seo_keywords?: string
+  og_image_encrypted_id?: string | null
+  has_password?: boolean
 }
 
 export interface GalleryImage {
@@ -40,6 +49,22 @@ export interface GalleryImage {
   mime_type: string
   image_url: string
   added_at: string
+}
+
+export interface GalleryAccessUpdateBody {
+  access_mode?: 'public' | 'password' | 'token'
+  password?: string
+  hide_from_share_all?: boolean
+}
+
+export interface GalleryTokenAccessItem {
+  token: string
+  token_masked: string
+  description?: string
+  is_active?: boolean
+  token_expired?: boolean
+  expires_at?: string
+  created_at?: string
 }
 
 export const useGalleryApi = () => {
@@ -78,6 +103,42 @@ export const useGalleryApi = () => {
     })
     if (!response.success) throw new Error(response.error || '添加图片失败')
     return response.data as { added: number; skipped: number; not_found: string[]; not_owned: string[] }
+  }
+
+  const updateAccess = async (galleryId: number, body: GalleryAccessUpdateBody) => {
+    const response = await $fetch<ApiResponse>(`${baseURL}/api/auth/galleries/${galleryId}/access`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(),
+      body
+    })
+    if (!response.success) throw new Error(response.error || '更新访问控制失败')
+    return response.data.gallery as Gallery
+  }
+
+  const getTokenAccess = async (galleryId: number) => {
+    const response = await $fetch<ApiResponse>(`${baseURL}/api/auth/galleries/${galleryId}/access-tokens`, {
+      headers: getAuthHeaders()
+    })
+    if (!response.success) throw new Error(response.error || '获取 Token 授权列表失败')
+    return response.data.items as GalleryTokenAccessItem[]
+  }
+
+  const addTokenAccess = async (galleryId: number, token: string) => {
+    const response = await $fetch<ApiResponse>(`${baseURL}/api/auth/galleries/${galleryId}/access-tokens`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: { token }
+    })
+    if (!response.success) throw new Error(response.error || '添加 Token 授权失败')
+  }
+
+  const removeTokenAccess = async (galleryId: number, token: string) => {
+    const response = await $fetch<ApiResponse>(`${baseURL}/api/auth/galleries/${galleryId}/access-tokens`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+      body: { token }
+    })
+    if (!response.success) throw new Error(response.error || '撤销 Token 授权失败')
   }
 
   // ===================== 特有方法 =====================
@@ -170,6 +231,10 @@ export const useGalleryApi = () => {
     ...base,
     getGalleries,
     addImagesToGallery,
+    updateAccess,
+    getTokenAccess,
+    addTokenAccess,
+    removeTokenAccess,
     getSharedGallery,
     unlockGallery,
     getShareAllGallery,

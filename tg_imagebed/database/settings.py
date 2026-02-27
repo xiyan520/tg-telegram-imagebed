@@ -165,6 +165,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     'gallery_site_description': '精选图片画集', # 画集站点描述
     'gallery_site_enabled': '1',               # 画集站点总开关
     'gallery_site_images_per_page': '20',      # 画集站点每页图片数
+    'gallery_sso_main_url': '',                # 画集 SSO 主站 URL（回调目标）
 }
 
 def init_system_settings() -> None:

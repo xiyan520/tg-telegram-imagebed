@@ -7,7 +7,7 @@
 管理端点需要通过 SSO token 或 session 认证。
 """
 from functools import wraps
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from flask import request, jsonify, make_response, session, redirect
 
 from . import gallery_site_bp
@@ -17,9 +17,15 @@ from ..database import (
     get_system_setting, get_system_setting_int,
     update_system_setting,
     is_gallery_domain,
+    get_gallery_home_config,
+    update_gallery_home_config,
+    list_gallery_home_sections,
+    update_gallery_home_section,
+    replace_gallery_home_section_items,
+    get_gallery_home_public_payload,
 )
 from ..database.connection import get_connection
-from ..database.domains import get_default_domain, get_active_gallery_domains, build_domain_url
+from ..database.domains import get_active_gallery_domains, build_domain_url
 from .. import admin_module
 from ..database.admin_galleries import admin_get_gallery, admin_delete_gallery, admin_get_gallery_images, admin_update_gallery_share, admin_add_images_to_gallery, admin_remove_images_from_gallery, admin_set_gallery_cover
 from ..database.galleries import update_gallery_access, list_gallery_token_access, grant_gallery_token_access, revoke_gallery_token_access
@@ -52,7 +58,8 @@ def _build_cover_urls(items):
 
 # 公开画集列表的通用 SQL（含封面和图片数量）
 _GALLERY_LIST_SQL = '''
-    SELECT g.id, g.name, g.description, g.created_at, g.updated_at,
+    SELECT g.id, g.name, g.description, g.card_subtitle, g.editor_pick_weight,
+        g.created_at, g.updated_at,
         (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count,
         COALESCE(g.cover_image, (
             SELECT fs.encrypted_id
@@ -168,6 +175,8 @@ def gallery_site_detail(gallery_id):
             # 获取画集信息（仅公开且已分享）
             cursor.execute('''
                 SELECT g.id, g.name, g.description, g.share_token,
+                    g.card_subtitle, g.seo_title, g.seo_description, g.seo_keywords,
+                    g.og_image_encrypted_id, g.editor_pick_weight,
                     g.created_at, g.updated_at,
                     g.layout_mode, g.theme_color, g.show_image_info,
                     g.allow_download, g.sort_order, g.nsfw_warning, g.custom_header_text,
@@ -295,28 +304,102 @@ def gallery_site_stats():
         return _set_public_cors_headers(response), 500
 
 
+@gallery_site_bp.route('/api/gallery-site/home-config', methods=['GET', 'OPTIONS'])
+def gallery_site_home_config():
+    """获取首页编排配置与展示数据（公开）"""
+    if request.method == 'OPTIONS':
+        return _handle_options()
+
+    try:
+        payload = get_gallery_home_public_payload()
+
+        hero = payload.get('hero')
+        if isinstance(hero, dict):
+            _build_cover_urls([hero])
+
+        for section in payload.get('sections', []):
+            _build_cover_urls(section.get('items', []))
+
+        _build_cover_urls(payload.get('recent_items', []))
+
+        response = jsonify({'success': True, 'data': payload})
+        return _set_public_cors_headers(add_cache_headers(response, 'public', 60))
+    except Exception as e:
+        logger.error(f"获取首页编排配置失败: {e}")
+        response = jsonify({'success': False, 'error': '获取首页编排失败'})
+        return _set_public_cors_headers(response), 500
+
+
 # ===================== SSO 重定向端点 =====================
 
 def _get_main_site_url(request):
     """获取主站 URL，用于 SSO 重定向
 
-    优先级：gallery_sso_main_url 设置 > default域名 > 非gallery活跃域名 > get_domain fallback
+    优先级：default域名 > gallery_sso_main_url（校验后）> 非gallery活跃域名 > get_domain fallback
     """
-    # 0. 优先使用管理员配置 gallery 域名时自动保存的主站 URL
+    def _host_aliases(host: str) -> set[str]:
+        h = (host or '').strip().lower()
+        if not h:
+            return set()
+        aliases = {h}
+        if h == 'localhost':
+            aliases.update({'127.0.0.1', '::1'})
+        elif h in {'127.0.0.1', '::1'}:
+            aliases.update({'localhost', '127.0.0.1', '::1'})
+        return aliases
+
+    def _url_host(url: str) -> str:
+        try:
+            return (urlparse(url).hostname or '').lower()
+        except Exception:
+            return ''
+
+    gallery_hosts: set[str] = set()
+    try:
+        for d in get_active_gallery_domains():
+            gallery_hosts.update(_host_aliases(d.get('domain', '')))
+    except Exception:
+        pass
+
+    # 1. 优先使用 domain_type='default' 的活跃域名（主站域名）
+    # 注意：custom_domains.is_default 可能被 image 域名占用，不能直接等价为主站域名
+    default_url = ''
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT domain, use_https, port
+                FROM custom_domains
+                WHERE domain_type = 'default' AND is_active = 1
+                ORDER BY is_default DESC, sort_order ASC, id ASC
+                LIMIT 1
+            ''')
+            row = cursor.fetchone()
+            if row:
+                default_url = build_domain_url(
+                    row['domain'],
+                    row['port'],
+                    bool(row['use_https'])
+                )
+    except Exception:
+        pass
+
+    # 2. 使用管理员配置 gallery 域名时自动保存的主站 URL（需校验）
     saved_url = get_system_setting('gallery_sso_main_url')
     if saved_url:
-        return saved_url
+        saved_host = _url_host(saved_url)
+        saved_aliases = _host_aliases(saved_host)
+        # 防止主站 URL 被错误记录成 gallery 域名（会导致回调无主站会话）
+        if saved_aliases and saved_aliases.isdisjoint(gallery_hosts):
+            if default_url:
+                # default 域名存在时，以 default 为准（避免 http/https 或端口历史漂移）
+                return default_url
+            return saved_url
 
-    # 1. 使用 default 域名
-    default_domain = get_default_domain()
-    if default_domain:
-        return build_domain_url(
-            default_domain['domain'],
-            default_domain.get('port'),
-            bool(default_domain.get('use_https', 1))
-        )
+    if default_url:
+        return default_url
 
-    # 2. 尝试获取非 gallery 类型的活跃域名
+    # 3. 尝试获取非 gallery 类型的活跃域名
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -336,7 +419,7 @@ def _get_main_site_url(request):
     except Exception:
         pass
 
-    # 3. 最终 fallback
+    # 4. 最终 fallback
     return get_domain(request)
 
 
@@ -364,9 +447,26 @@ def gallery_sso_redirect():
     """SSO 重定向入口：画集站点发起，重定向到主站 SSO 回调"""
     return_url = request.args.get('return_url', '/gallery-site/admin')
 
-    # 纵深防御：return_url 必须是相对路径（以 / 开头），防止构造恶意绝对 URL
+    # return_url 仅接受相对路径；兼容历史前端传入的“同源绝对 URL”
     if not return_url.startswith('/'):
-        return_url = '/gallery-site/admin'
+        try:
+            parsed = urlparse(return_url)
+            # 允许 http(s) 且 host 与当前请求 host 一致（忽略端口）
+            req_host = (
+                request.headers.get('X-Forwarded-Host')
+                or request.headers.get('Host')
+                or request.host
+                or ''
+            ).split(':')[0].lower()
+            parsed_host = (parsed.hostname or '').lower()
+            if parsed.scheme in ('http', 'https') and parsed_host and parsed_host == req_host:
+                return_url = parsed.path or '/gallery-site/admin'
+                if parsed.query:
+                    return_url = f"{return_url}?{parsed.query}"
+            else:
+                return_url = '/gallery-site/admin'
+        except Exception:
+            return_url = '/gallery-site/admin'
 
     # 获取主站 URL（优先级：default域名 > 非gallery类型的活跃域名 > get_domain fallback）
     main_site_url = _get_main_site_url(request)
@@ -561,6 +661,94 @@ def gallery_admin_settings():
         return _set_admin_cors_headers(response), 500
 
 
+@gallery_site_bp.route('/api/gallery-site/admin/home-config', methods=['GET', 'PUT', 'OPTIONS'])
+@gallery_admin_required
+def gallery_admin_home_config():
+    """获取/更新首页全局编排配置"""
+    if request.method == 'OPTIONS':
+        return _handle_admin_options()
+
+    try:
+        if request.method == 'GET':
+            data = get_gallery_home_config()
+            response = jsonify({'success': True, 'data': data})
+            return _set_admin_cors_headers(response)
+
+        payload = request.get_json(silent=True) or {}
+        updated = update_gallery_home_config(payload)
+        response = jsonify({'success': True, 'data': updated})
+        return _set_admin_cors_headers(response)
+    except Exception as e:
+        logger.error(f"首页全局编排配置操作失败: {e}")
+        response = jsonify({'success': False, 'error': '操作失败'})
+        return _set_admin_cors_headers(response), 500
+
+
+@gallery_site_bp.route('/api/gallery-site/admin/home-sections', methods=['GET', 'OPTIONS'])
+@gallery_admin_required
+def gallery_admin_home_sections():
+    """获取首页分区配置（含手动编排项）"""
+    if request.method == 'OPTIONS':
+        return _handle_admin_options()
+
+    try:
+        sections = list_gallery_home_sections(include_items=True)
+        for section in sections:
+            _build_cover_urls(section.get('items', []))
+        response = jsonify({'success': True, 'data': {'sections': sections}})
+        return _set_admin_cors_headers(response)
+    except Exception as e:
+        logger.error(f"获取首页分区配置失败: {e}")
+        response = jsonify({'success': False, 'error': '获取分区配置失败'})
+        return _set_admin_cors_headers(response), 500
+
+
+@gallery_site_bp.route('/api/gallery-site/admin/home-sections/<string:section_key>', methods=['PATCH', 'OPTIONS'])
+@gallery_admin_required
+def gallery_admin_home_section_update(section_key: str):
+    """更新首页单个分区配置"""
+    if request.method == 'OPTIONS':
+        return _handle_admin_options()
+
+    try:
+        payload = request.get_json(silent=True) or {}
+        section = update_gallery_home_section(section_key, payload)
+        if not section:
+            response = jsonify({'success': False, 'error': '分区不存在'})
+            return _set_admin_cors_headers(response), 404
+        response = jsonify({'success': True, 'data': {'section': section}})
+        return _set_admin_cors_headers(response)
+    except Exception as e:
+        logger.error(f"更新首页分区配置失败: key={section_key}, err={e}")
+        response = jsonify({'success': False, 'error': '更新分区失败'})
+        return _set_admin_cors_headers(response), 500
+
+
+@gallery_site_bp.route('/api/gallery-site/admin/home-sections/<string:section_key>/items', methods=['PUT', 'OPTIONS'])
+@gallery_admin_required
+def gallery_admin_home_section_items_replace(section_key: str):
+    """替换首页分区手动编排项"""
+    if request.method == 'OPTIONS':
+        return _handle_admin_options()
+
+    try:
+        payload = request.get_json(silent=True) or {}
+        gallery_ids = payload.get('gallery_ids') or []
+        if not isinstance(gallery_ids, list):
+            response = jsonify({'success': False, 'error': 'gallery_ids 必须是数组'})
+            return _set_admin_cors_headers(response), 400
+        result = replace_gallery_home_section_items(section_key, gallery_ids)
+        if not result.get('section'):
+            response = jsonify({'success': False, 'error': '分区不存在'})
+            return _set_admin_cors_headers(response), 404
+        response = jsonify({'success': True, 'data': result})
+        return _set_admin_cors_headers(response)
+    except Exception as e:
+        logger.error(f"替换首页分区编排项失败: key={section_key}, err={e}")
+        response = jsonify({'success': False, 'error': '更新分区编排失败'})
+        return _set_admin_cors_headers(response), 500
+
+
 # ===================== 画集管理 API（管理员可见全部） =====================
 
 @gallery_site_bp.route('/api/gallery-site/admin/galleries', methods=['GET', 'OPTIONS'])
@@ -583,7 +771,9 @@ def gallery_admin_list():
 
             # 获取画集列表（含封面和图片数量，不限 share_enabled/access_mode）
             cursor.execute('''
-                SELECT g.id, g.name, g.description, g.share_enabled, g.access_mode,
+                SELECT g.id, g.name, g.description, g.card_subtitle,
+                    g.share_enabled, g.access_mode, g.editor_pick_weight,
+                    COALESCE(g.homepage_expose_enabled, 1) AS homepage_expose_enabled,
                     g.created_at, g.updated_at,
                     (SELECT COUNT(*) FROM gallery_images gi WHERE gi.gallery_id = g.id) AS image_count,
                     COALESCE(g.cover_image, (
@@ -622,9 +812,9 @@ def gallery_admin_list():
 @gallery_site_bp.route('/api/gallery-site/admin/galleries/<int:gallery_id>', methods=['PATCH', 'OPTIONS'])
 @gallery_admin_required
 def gallery_admin_toggle(gallery_id):
-    """快速切换画集的 share_enabled 和 access_mode"""
+    """更新画集展示配置、分享状态与访问模式"""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         if not data:
             response = jsonify({'success': False, 'error': '无效的请求数据'})
             return _set_admin_cors_headers(response), 400
@@ -643,6 +833,88 @@ def gallery_admin_toggle(gallery_id):
                 return _set_admin_cors_headers(response), 400
             updates.append('access_mode = ?')
             params.append(mode)
+            if mode != 'password':
+                updates.append('password_hash = NULL')
+
+        if 'name' in data:
+            name = str(data.get('name') or '').strip()
+            if not name:
+                response = jsonify({'success': False, 'error': '画集名称不能为空'})
+                return _set_admin_cors_headers(response), 400
+            if len(name) > 100:
+                response = jsonify({'success': False, 'error': '画集名称不能超过100字符'})
+                return _set_admin_cors_headers(response), 400
+            updates.append('name = ?')
+            params.append(name)
+
+        if 'description' in data:
+            updates.append('description = ?')
+            params.append(str(data.get('description') or '').strip()[:500] or None)
+
+        if 'layout_mode' in data:
+            layout_mode = str(data.get('layout_mode') or '').strip()
+            if layout_mode in ('masonry', 'grid', 'justified'):
+                updates.append('layout_mode = ?')
+                params.append(layout_mode)
+
+        if 'theme_color' in data:
+            updates.append('theme_color = ?')
+            params.append(str(data.get('theme_color') or '').strip()[:20])
+
+        if 'show_image_info' in data:
+            updates.append('show_image_info = ?')
+            params.append(1 if data.get('show_image_info') else 0)
+
+        if 'allow_download' in data:
+            updates.append('allow_download = ?')
+            params.append(1 if data.get('allow_download') else 0)
+
+        if 'sort_order' in data:
+            sort_order = str(data.get('sort_order') or '').strip()
+            if sort_order in ('newest', 'oldest', 'filename'):
+                updates.append('sort_order = ?')
+                params.append(sort_order)
+
+        if 'nsfw_warning' in data:
+            updates.append('nsfw_warning = ?')
+            params.append(1 if data.get('nsfw_warning') else 0)
+
+        if 'custom_header_text' in data:
+            updates.append('custom_header_text = ?')
+            params.append(str(data.get('custom_header_text') or '').strip()[:200])
+
+        if 'editor_pick_weight' in data:
+            try:
+                value = int(data.get('editor_pick_weight'))
+            except (TypeError, ValueError):
+                value = 0
+            updates.append('editor_pick_weight = ?')
+            params.append(max(0, min(1000, value)))
+
+        if 'homepage_expose_enabled' in data:
+            updates.append('homepage_expose_enabled = ?')
+            params.append(1 if data.get('homepage_expose_enabled') else 0)
+
+        if 'card_subtitle' in data:
+            updates.append('card_subtitle = ?')
+            params.append(str(data.get('card_subtitle') or '').strip()[:120])
+
+        if 'seo_title' in data:
+            updates.append('seo_title = ?')
+            params.append(str(data.get('seo_title') or '').strip()[:120])
+
+        if 'seo_description' in data:
+            updates.append('seo_description = ?')
+            params.append(str(data.get('seo_description') or '').strip()[:300])
+
+        if 'seo_keywords' in data:
+            updates.append('seo_keywords = ?')
+            params.append(str(data.get('seo_keywords') or '').strip()[:300])
+
+        if 'og_image_encrypted_id' in data:
+            og_image = str(data.get('og_image_encrypted_id') or '').strip()
+            updates.append('og_image_encrypted_id = ?')
+            params.append(og_image or None)
 
         if not updates:
             response = jsonify({'success': False, 'error': '没有要更新的字段'})
@@ -661,7 +933,26 @@ def gallery_admin_toggle(gallery_id):
                 response = jsonify({'success': False, 'error': '画集不存在'})
                 return _set_admin_cors_headers(response), 404
 
-        response = jsonify({'success': True, 'message': '更新成功'})
+        gallery = admin_get_gallery(gallery_id)
+        if not gallery:
+            response = jsonify({'success': False, 'error': '画集不存在'})
+            return _set_admin_cors_headers(response), 404
+
+        base_url = get_image_domain(request)
+        if gallery.get('cover_image'):
+            gallery['cover_url'] = f"{base_url}/image/{gallery['cover_image']}"
+        else:
+            gallery['cover_url'] = None
+
+        if gallery.get('share_enabled') and gallery.get('share_token'):
+            gallery['share_url'] = f"{_get_gallery_site_url(request)}/g/{gallery['share_token']}"
+        else:
+            gallery['share_url'] = None
+
+        gallery['has_password'] = bool(gallery.get('password_hash'))
+        gallery.pop('password_hash', None)
+
+        response = jsonify({'success': True, 'data': {'gallery': gallery}})
         return _set_admin_cors_headers(response)
 
     except Exception as e:
