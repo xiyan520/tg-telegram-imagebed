@@ -177,6 +177,14 @@ DEFAULT_SYSTEM_SETTINGS = {
     'gallery_site_enabled': '1',               # 画集站点总开关
     'gallery_site_images_per_page': '20',      # 画集站点每页图片数
     'gallery_sso_main_url': '',                # 画集 SSO 主站 URL（回调目标）
+    # 应用更新配置
+    'app_update_repo_url': 'https://github.com/xiyan520/tg-telegram-imagebed.git',  # 固定官方仓库
+    'app_update_branch': 'main',               # 更新分支
+    'app_update_last_status': 'idle',          # 最近更新状态
+    'app_update_last_error': '',               # 最近错误信息
+    'app_update_last_commit': '',              # 最近更新后的提交
+    'app_update_last_run_at': '',              # 最近执行时间
+    'app_update_last_duration_ms': '0',        # 最近执行耗时（ms）
 }
 
 def init_system_settings() -> None:

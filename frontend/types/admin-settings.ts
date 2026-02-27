@@ -7,6 +7,7 @@ export type SettingsSectionKey =
   | 'bot'
   | 'tg_auth'
   | 'proxy_and_tokens'
+  | 'about_update'
 
 export interface SettingsSectionItem {
   key: SettingsSectionKey
@@ -70,4 +71,11 @@ export interface AdminSystemSettings {
   tg_session_expire_days: number
   max_guest_tokens_per_ip: number
   image_domain_restriction_enabled: boolean
+  app_update_repo_url: string
+  app_update_branch: string
+  app_update_last_status: string
+  app_update_last_error: string
+  app_update_last_commit: string
+  app_update_last_run_at: string
+  app_update_last_duration_ms: number
 }
