@@ -1,10 +1,11 @@
 <template>
-  <div class="flex gap-8">
-    <!-- 侧边栏 - 桌面端（磁悬浮样式，保持原位置） -->
-    <aside ref="sidebarDock" class="hidden lg:block w-64 shrink-0">
+  <div ref="layoutRoot" class="flex gap-4 xl:gap-8">
+    <!-- 侧边栏 - 桌面端（sticky，避免遮挡正文） -->
+    <aside ref="sidebarDock" class="hidden xl:block w-64 shrink-0">
       <div
-        class="docs-floating-sidebar fixed top-20 z-30 w-64 max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border border-amber-200/80 bg-white/95 p-4 ring-2 ring-amber-500/10 backdrop-blur-xl dark:border-amber-400/30 dark:bg-stone-900/90 dark:ring-amber-400/10 supports-[backdrop-filter]:bg-white/80 supports-[backdrop-filter]:dark:bg-stone-900/70 transition-all duration-300"
-        :style="fixedSidebarStyle"
+        class="docs-floating-sidebar w-64 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl border border-amber-200/80 bg-white/95 p-4 ring-1 ring-amber-500/10 backdrop-blur-xl dark:border-amber-400/30 dark:bg-stone-900/90 dark:ring-amber-400/10 supports-[backdrop-filter]:bg-white/80 supports-[backdrop-filter]:dark:bg-stone-900/70 transition-all duration-300"
+        :class="floatingSidebarClass"
+        :style="floatingSidebarStyle"
       >
         <DocsSidebar
           :sections="sections"
@@ -14,17 +15,6 @@
         />
       </div>
     </aside>
-
-    <!-- 移动端侧边栏按钮 -->
-    <div class="lg:hidden fixed bottom-4 right-4 z-40">
-      <UButton
-        icon="heroicons:bars-3"
-        color="primary"
-        size="lg"
-        class="shadow-lg"
-        @click="showMobileSidebar = true"
-      />
-    </div>
 
     <!-- 移动端侧边栏抽屉 -->
     <USlideover v-model="showMobileSidebar" side="left">
@@ -50,6 +40,20 @@
 
     <!-- 主内容区 -->
     <main class="flex-1 min-w-0">
+      <div class="xl:hidden mb-4">
+        <div class="rounded-xl border border-amber-200/70 bg-white/90 p-2 shadow-sm dark:border-amber-400/30 dark:bg-stone-900/85">
+          <UButton
+            icon="heroicons:bars-3"
+            color="primary"
+            variant="soft"
+            size="sm"
+            class="w-full justify-center"
+            @click="showMobileSidebar = true"
+          >
+            打开目录导航
+          </UButton>
+        </div>
+      </div>
       <slot />
     </main>
   </div>
@@ -65,30 +69,60 @@ const props = defineProps<{
 const showMobileSidebar = ref(false)
 const activeSection = ref('')
 const activeEndpoint = ref('')
-
+const layoutRoot = ref<HTMLElement | null>(null)
 const sidebarDock = ref<HTMLElement | null>(null)
+const floatingMode = ref<'fixed' | 'sticky'>('sticky')
 const fixedSidebarLeft = ref<number | null>(null)
 
-const updateFixedSidebarLeft = () => {
-  const dock = sidebarDock.value
-  if (!dock) return
-  if (dock.getClientRects().length === 0) return
-  fixedSidebarLeft.value = dock.getBoundingClientRect().left
-}
+let rafId: number | null = null
 
-const fixedSidebarStyle = computed(() =>
-  fixedSidebarLeft.value === null ? undefined : { left: `${fixedSidebarLeft.value}px` }
+const floatingSidebarClass = computed(() =>
+  floatingMode.value === 'fixed'
+    ? 'fixed top-24 z-30'
+    : 'sticky top-24 z-20'
 )
 
-const handleResize = () => {
-  updateFixedSidebarLeft()
+const floatingSidebarStyle = computed(() => {
+  if (floatingMode.value !== 'fixed' || fixedSidebarLeft.value === null) return undefined
+  return { left: `${fixedSidebarLeft.value}px` }
+})
+
+const updateFloatingSidebar = () => {
+  if (!import.meta.client) return
+
+  const dock = sidebarDock.value
+  const root = layoutRoot.value
+  if (!dock || !root || dock.getClientRects().length === 0) return
+
+  fixedSidebarLeft.value = dock.getBoundingClientRect().left
+
+  const rootRect = root.getBoundingClientRect()
+  const shouldFloat =
+    window.innerWidth >= 1280 &&
+    rootRect.top <= 96 &&
+    rootRect.bottom > 220
+
+  floatingMode.value = shouldFloat ? 'fixed' : 'sticky'
+}
+
+const scheduleFloatingSidebarUpdate = () => {
+  if (!import.meta.client) return
+  if (rafId !== null) return
+
+  rafId = window.requestAnimationFrame(() => {
+    rafId = null
+    updateFloatingSidebar()
+  })
 }
 
 const scrollToElement = (id: string) => {
+  if (!import.meta.client) return
   const element = document.getElementById(id)
-  if (element) {
-    element.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  if (!element) return
+
+  const topOffset = 88
+  const targetTop = element.getBoundingClientRect().top + window.scrollY - topOffset
+  window.scrollTo({ top: Math.max(targetTop, 0), behavior: 'smooth' })
 }
 
 const handleMobileNavigate = (id: string) => {
@@ -115,8 +149,9 @@ let observer: IntersectionObserver | null = null
 
 // 监听滚动，更新当前激活的 section/endpoint
 onMounted(() => {
-  updateFixedSidebarLeft()
-  window.addEventListener('resize', handleResize, { passive: true })
+  scheduleFloatingSidebarUpdate()
+  window.addEventListener('resize', scheduleFloatingSidebarUpdate, { passive: true })
+  window.addEventListener('scroll', scheduleFloatingSidebarUpdate, { passive: true })
 
   observer = new IntersectionObserver(
     (entries) => {
@@ -152,8 +187,8 @@ onMounted(() => {
 
   // 只观察有效的锚点元素
   nextTick(() => {
-    updateFixedSidebarLeft()
-    requestAnimationFrame(updateFixedSidebarLeft)
+    scheduleFloatingSidebarUpdate()
+    requestAnimationFrame(scheduleFloatingSidebarUpdate)
 
     validAnchorIds.value.forEach((id) => {
       const el = document.getElementById(id)
@@ -166,7 +201,13 @@ onMounted(() => {
 
 // 清理 observer
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
+  window.removeEventListener('resize', scheduleFloatingSidebarUpdate)
+  window.removeEventListener('scroll', scheduleFloatingSidebarUpdate)
+  if (rafId !== null && import.meta.client) {
+    window.cancelAnimationFrame(rafId)
+    rafId = null
+  }
+
   observer?.disconnect()
   observer = null
 })
@@ -175,45 +216,38 @@ onUnmounted(() => {
 <style scoped>
 /* 磁悬浮效果 - 卡片浮起来的视觉感 */
 .docs-floating-sidebar {
-  animation: float-in 0.6s ease-out;
-  /* 核心磁悬浮效果：向上浮起 + 多层阴影 */
-  transform: translateY(-4px);
+  animation: float-in 0.45s ease-out;
   box-shadow:
-    0 10px 25px -5px rgba(0, 0, 0, 0.1),
-    0 20px 40px -15px rgba(251, 191, 36, 0.2),
-    0 0 0 1px rgba(251, 191, 36, 0.05);
+    0 8px 22px -10px rgba(0, 0, 0, 0.15),
+    0 12px 30px -18px rgba(251, 191, 36, 0.22);
 }
 
 .docs-floating-sidebar:hover {
-  transform: translateY(-6px);
   box-shadow:
-    0 15px 35px -5px rgba(0, 0, 0, 0.15),
-    0 25px 50px -15px rgba(251, 191, 36, 0.35),
-    0 0 0 1px rgba(251, 191, 36, 0.1);
+    0 10px 28px -10px rgba(0, 0, 0, 0.2),
+    0 16px 36px -16px rgba(251, 191, 36, 0.28);
 }
 
 :global(.dark) .docs-floating-sidebar {
   box-shadow:
-    0 10px 25px -5px rgba(0, 0, 0, 0.4),
-    0 20px 40px -15px rgba(251, 191, 36, 0.15),
-    0 0 0 1px rgba(251, 191, 36, 0.08);
+    0 8px 24px -12px rgba(0, 0, 0, 0.5),
+    0 14px 30px -16px rgba(251, 191, 36, 0.15);
 }
 
 :global(.dark) .docs-floating-sidebar:hover {
   box-shadow:
-    0 15px 35px -5px rgba(0, 0, 0, 0.5),
-    0 25px 50px -15px rgba(251, 191, 36, 0.25),
-    0 0 0 1px rgba(251, 191, 36, 0.15);
+    0 10px 30px -10px rgba(0, 0, 0, 0.55),
+    0 18px 36px -14px rgba(251, 191, 36, 0.22);
 }
 
 @keyframes float-in {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
-    transform: translateY(-4px);
+    transform: translateY(0);
   }
 }
 

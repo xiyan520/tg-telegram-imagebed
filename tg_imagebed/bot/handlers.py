@@ -445,10 +445,11 @@ async def handle_verify_text(update: Update, context):
     """处理文本消息 — web_verify 验证码登录"""
     from ..database import consume_web_verify_code, upsert_tg_user
 
-    text = (update.message.text or '').strip()
-    # 仅处理 6 位纯数字
-    if not re.match(r'^\d{6}$', text):
+    raw_text = (update.message.text or '').strip()
+    # 兼容旧版 6 位数字验证码 + 新版 8 位字母数字验证码（排除易混淆字符）
+    if not re.match(r'^(?:\d{6}|[A-HJ-NP-Z2-9]{8})$', raw_text, re.IGNORECASE):
         return  # 非验证码格式，静默忽略
+    text = raw_text.upper()
 
     user = update.effective_user
     if not user:

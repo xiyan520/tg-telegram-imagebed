@@ -73,7 +73,7 @@
                 class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
               >
                 <UIcon name="heroicons:chat-bubble-left-right" class="w-4 h-4" />
-                {{ tgAuthStore.user?.first_name || tgAuthStore.user?.username || 'TG 用户' }}
+                控制台
               </NuxtLink>
             </template>
             <template v-else-if="tokenStore.hasToken">
@@ -83,7 +83,7 @@
                 class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
               >
                 <UIcon name="heroicons:key" class="w-4 h-4" />
-                Token 登录
+                控制台
               </NuxtLink>
             </template>
             <template v-else>
@@ -128,7 +128,7 @@
               @click="mobileMenuOpen = false"
             >
               <UIcon name="heroicons:chat-bubble-left-right" class="w-4 h-4 inline -mt-0.5" />
-              {{ tgAuthStore.user?.first_name || 'TG 用户' }}
+              控制台
             </NuxtLink>
           </template>
           <template v-else-if="tokenStore.hasToken">
@@ -138,7 +138,7 @@
               @click="mobileMenuOpen = false"
             >
               <UIcon name="heroicons:key" class="w-4 h-4 inline -mt-0.5" />
-              Token 登录
+              控制台
             </NuxtLink>
           </template>
           <template v-else>

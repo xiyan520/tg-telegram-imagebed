@@ -1,273 +1,421 @@
 <template>
-  <div class="max-w-7xl mx-auto pt-4 px-4">
-    <!-- 页面标题 -->
-    <div class="text-center space-y-4 mb-8">
-      <h1 class="text-4xl font-bold bg-gradient-to-r from-amber-600 to-orange-500 bg-clip-text text-transparent">
-        API 文档
-      </h1>
-      <p class="text-stone-600 dark:text-stone-400">
-        使用我们的 API 轻松集成图片上传功能
-      </p>
-      <!-- 基础 URL 卡片 -->
-      <div class="inline-flex items-center gap-3 px-5 py-3 bg-white dark:bg-neutral-800 border border-stone-200 dark:border-stone-700 rounded-xl shadow-sm">
-        <span class="text-xs font-medium text-stone-400 uppercase tracking-wider">Base URL</span>
-        <code class="px-3 py-1.5 bg-stone-100 dark:bg-stone-900 rounded-lg text-sm font-mono text-amber-600 dark:text-amber-400">
-          {{ baseUrl }}
-        </code>
-        <UButton
-          icon="heroicons:clipboard-document"
-          color="gray"
-          variant="ghost"
-          size="xs"
-          @click="copyBaseUrl"
-        />
-      </div>
-      <!-- curl 快速示例 -->
-      <div class="max-w-xl mx-auto text-left">
-        <p class="text-xs text-stone-400 mb-1.5 ml-1">快速上传示例</p>
-        <div class="relative group">
-          <code class="block px-4 py-3 bg-stone-900 dark:bg-stone-950 text-green-400 text-xs font-mono rounded-lg overflow-x-auto">curl -F "file=@image.jpg" {{ baseUrl }}/api/upload</code>
-          <UButton
-            icon="heroicons:clipboard-document"
-            color="gray"
-            variant="ghost"
-            size="xs"
-            class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-            @click="copyCurlExample"
-          />
-        </div>
-      </div>
-    </div>
+  <div class="relative overflow-hidden">
+    <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_20%,rgba(251,191,36,0.18),transparent_35%),radial-gradient(circle_at_88%_8%,rgba(249,115,22,0.14),transparent_38%),radial-gradient(circle_at_50%_100%,rgba(245,158,11,0.1),transparent_50%)]" />
 
-    <!-- 两栏布局 -->
-    <DocsLayout :sections="apiSections">
-      <div class="space-y-12">
-        <!-- 快速开始 -->
-        <UCard id="quickstart" class="scroll-mt-20">
-          <template #header>
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:rocket-launch" class="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h2 class="text-xl font-bold text-stone-900 dark:text-white">快速开始</h2>
-                <p class="text-sm text-stone-500 dark:text-stone-400">了解 API 基本用法</p>
-              </div>
-            </div>
-          </template>
+    <div class="relative mx-auto max-w-7xl space-y-8 px-3 pb-14 pt-6 sm:px-4 md:space-y-10">
+      <section class="relative overflow-hidden rounded-3xl border border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-4 shadow-sm dark:border-amber-400/30 dark:from-stone-900 dark:via-stone-900 dark:to-stone-800 sm:p-6 md:p-10">
+        <div class="absolute -right-24 -top-28 h-56 w-56 rounded-full bg-amber-300/30 blur-3xl dark:bg-amber-500/20" />
+        <div class="absolute -bottom-28 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-orange-300/25 blur-3xl dark:bg-orange-500/20" />
 
-          <div class="space-y-4">
-            <p class="text-stone-700 dark:text-stone-300">
-              我们的 API 提供简单易用的图片上传服务。所有请求都使用标准 HTTP 方法。
-            </p>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div class="flex items-start gap-3 p-4 bg-stone-50 dark:bg-stone-800/50 rounded-lg">
-                <div class="w-8 h-8 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <UIcon name="heroicons:photo" class="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                </div>
-                <div>
-                  <h4 class="font-semibold text-stone-900 dark:text-white mb-1">支持格式</h4>
-                  <p class="text-sm text-stone-600 dark:text-stone-400">
-                    JPG、PNG、GIF、WebP、AVIF、SVG
-                  </p>
-                </div>
-              </div>
-              <div class="flex items-start gap-3 p-4 bg-stone-50 dark:bg-stone-800/50 rounded-lg">
-                <div class="w-8 h-8 bg-amber-100 dark:bg-amber-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
-                  <UIcon name="heroicons:arrow-up-tray" class="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                </div>
-                <div>
-                  <h4 class="font-semibold text-stone-900 dark:text-white mb-1">文件限制</h4>
-                  <p class="text-sm text-stone-600 dark:text-stone-400">
-                    单文件最大 20MB
-                  </p>
-                </div>
-              </div>
+        <div class="relative grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+          <div class="space-y-6">
+            <div class="flex flex-wrap items-center gap-2">
+              <UBadge color="amber" variant="subtle" size="sm">Developer Docs</UBadge>
+              <UBadge color="gray" variant="soft" size="sm">Version {{ docsVersion }}</UBadge>
             </div>
 
-            <div class="p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-              <div class="flex items-start gap-2">
-                <UIcon name="heroicons:light-bulb" class="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-                <div>
-                  <p class="text-sm text-amber-800 dark:text-amber-200">
-                    <strong>提示：</strong>如果系统启用了 Token 模式，匿名上传可能被禁用。
-                    请先获取 Token 再进行上传。
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </UCard>
-
-        <!-- API 分组 -->
-        <div v-for="section in apiSections" :key="section.id" class="space-y-6">
-          <!-- 分组标题 -->
-          <div :id="section.id" class="scroll-mt-20 flex items-center gap-3">
-            <div class="w-10 h-10 bg-gradient-to-br from-stone-600 to-stone-700 dark:from-stone-500 dark:to-stone-600 rounded-lg flex items-center justify-center">
-              <UIcon :name="section.icon || 'heroicons:cube'" class="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h2 class="text-2xl font-bold text-stone-900 dark:text-white">{{ section.title }}</h2>
-              <p v-if="section.description" class="text-sm text-stone-500 dark:text-stone-400">
-                {{ section.description }}
+            <div class="space-y-3">
+              <h1 class="text-3xl font-bold leading-tight text-stone-900 dark:text-white md:text-5xl">
+                TG 图床 API 文档中心
+              </h1>
+              <p class="max-w-2xl text-sm leading-6 text-stone-600 dark:text-stone-300 md:text-base">
+                这套文档按真实接入流程重排：先跑通上传，再扩展 Token 与资源查询。你可以直接从右侧指标预估接入规模，下面每个模块都支持快速跳转。
               </p>
             </div>
-          </div>
 
-          <!-- 端点卡片 -->
-          <div class="space-y-6">
-            <DocsEndpointCard
-              v-for="endpoint in section.endpoints"
-              :key="endpoint.id"
-              :endpoint="endpoint"
-              :base-url="baseUrl"
-            />
-          </div>
-        </div>
-
-        <!-- 错误代码 -->
-        <UCard id="error-codes" class="scroll-mt-20">
-          <template #header>
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-red-500 to-red-600 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:exclamation-triangle" class="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h2 class="text-xl font-bold text-stone-900 dark:text-white">错误代码</h2>
-                <p class="text-sm text-stone-500 dark:text-stone-400">HTTP 状态码说明</p>
-              </div>
-            </div>
-          </template>
-
-          <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead class="bg-stone-50 dark:bg-stone-800/50">
-                <tr>
-                  <th class="px-4 py-2 text-left font-medium text-stone-700 dark:text-stone-300">状态码</th>
-                  <th class="px-4 py-2 text-left font-medium text-stone-700 dark:text-stone-300">说明</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-stone-200 dark:divide-stone-700">
-                <tr v-for="code in errorCodes" :key="code.status">
-                  <td class="px-4 py-2">
-                    <UBadge :color="getStatusColor(code.status)" variant="subtle">
-                      {{ code.status }}
-                    </UBadge>
-                  </td>
-                  <td class="px-4 py-2 text-stone-600 dark:text-stone-400">{{ code.description }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </UCard>
-
-        <!-- 在线测试 -->
-        <UCard id="test" class="scroll-mt-20">
-          <template #header>
-            <div class="flex items-center gap-3">
-              <div class="w-10 h-10 bg-gradient-to-br from-green-500 to-green-600 rounded-lg flex items-center justify-center">
-                <UIcon name="heroicons:play" class="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h2 class="text-xl font-bold text-stone-900 dark:text-white">在线测试</h2>
-                <p class="text-sm text-stone-500 dark:text-stone-400">测试 API 上传功能</p>
-              </div>
-            </div>
-          </template>
-
-          <div class="space-y-4">
-            <p class="text-stone-700 dark:text-stone-300">
-              选择一张图片测试 API 上传功能
-            </p>
-
-            <!-- Token 输入（可选） -->
-            <div class="flex items-center gap-3">
-              <UInput
-                v-model="testToken"
-                placeholder="Token（可选，留空则匿名上传）"
-                size="sm"
-                class="flex-1"
-                :ui="{ base: 'font-mono text-xs' }"
-              />
-            </div>
-
-            <div>
-              <input
-                ref="testFileInput"
-                type="file"
-                accept="image/*"
-                class="hidden"
-                @change="handleTestUpload"
-              />
-              <UButton
-                icon="heroicons:cloud-arrow-up"
-                color="primary"
-                size="lg"
-                :loading="testUploading"
-                @click="testFileInput?.click()"
-              >
-                选择图片测试
+            <div class="flex flex-wrap gap-3">
+              <UButton icon="heroicons:clipboard-document" color="primary" @click="copyBaseUrl">
+                复制 Base URL
+              </UButton>
+              <UButton icon="heroicons:rocket-launch" color="gray" variant="soft" @click="jumpToAnchor('quickstart')">
+                查看快速开始
+              </UButton>
+              <UButton icon="heroicons:beaker" color="gray" variant="ghost" @click="jumpToAnchor('test')">
+                直接在线调试
               </UButton>
             </div>
 
-            <!-- 上传成功预览 -->
-            <div v-if="testResult && testResult.success && testResult.data" class="flex items-start gap-4 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
-              <img
-                :src="testResult.data.url"
-                :alt="testResult.data.filename"
-                class="w-20 h-20 object-cover rounded-lg border border-green-300 dark:border-green-700 flex-shrink-0"
+            <div class="rounded-2xl border border-stone-200/80 bg-white/85 p-4 dark:border-stone-700 dark:bg-stone-900/85">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <span class="text-xs font-semibold uppercase tracking-[0.2em] text-stone-400">Base URL</span>
+                <code class="rounded-md bg-stone-100 px-2 py-1 font-mono text-xs text-amber-600 dark:bg-stone-800 dark:text-amber-300">{{ baseUrl }}</code>
+              </div>
+              <DocsCodeBlock :code="heroCurlExample" language="bash" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+            <div
+              v-for="stat in heroStats"
+              :key="stat.label"
+              class="rounded-2xl border border-amber-200/70 bg-white/80 p-4 shadow-sm dark:border-amber-400/25 dark:bg-stone-900/80"
+            >
+              <div class="mb-3 flex items-center justify-between">
+                <span class="text-sm font-medium text-stone-600 dark:text-stone-300">{{ stat.label }}</span>
+                <UIcon :name="stat.icon" class="h-5 w-5 text-amber-500 dark:text-amber-300" />
+              </div>
+              <p class="text-3xl font-bold text-stone-900 dark:text-white">{{ stat.value }}</p>
+              <p class="mt-1 text-xs text-stone-500 dark:text-stone-400">{{ stat.tip }}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="quickstart" class="scroll-mt-24 space-y-4 rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-700 dark:bg-stone-900/80 sm:p-5 md:p-6">
+        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 class="text-2xl font-bold text-stone-900 dark:text-white">场景化快速开始</h2>
+            <p class="text-sm text-stone-600 dark:text-stone-400">先选策略再写代码，匿名上传和 Token 上传各有使用场景。</p>
+          </div>
+          <span class="text-xs text-stone-500 dark:text-stone-400">最后更新：{{ docsUpdatedAt }}</span>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <article
+            v-for="scenario in quickStartScenarios"
+            :key="scenario.id"
+            class="rounded-xl border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-700 dark:bg-stone-800/40"
+          >
+            <div class="mb-3 flex flex-wrap items-center gap-2">
+              <UBadge :color="scenario.badgeColor" variant="soft">{{ scenario.badge }}</UBadge>
+              <code class="rounded-md bg-white px-2 py-1 font-mono text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">{{ scenario.endpoint }}</code>
+            </div>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">{{ scenario.title }}</h3>
+            <p class="mb-3 mt-1 text-sm text-stone-600 dark:text-stone-400">{{ scenario.description }}</p>
+            <DocsCodeBlock :code="scenario.code" language="bash" />
+            <div class="mt-3 flex justify-end">
+              <UButton size="xs" color="gray" variant="ghost" icon="heroicons:clipboard-document" @click="copySnippet(scenario.code)">
+                复制命令
+              </UButton>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="space-y-4">
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <h2 class="text-2xl font-bold text-stone-900 dark:text-white">接口地图</h2>
+          <p class="text-sm text-stone-500 dark:text-stone-400">点击任意分组可快速定位到对应端点区域。</p>
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <button
+            v-for="section in sectionHighlights"
+            :key="section.id"
+            type="button"
+            class="rounded-xl border border-stone-200 bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-sm dark:border-stone-700 dark:bg-stone-900 dark:hover:border-amber-500/50"
+            @click="jumpToAnchor(section.id)"
+          >
+            <div class="mb-2 flex items-start justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <UIcon :name="section.icon || 'heroicons:cube'" class="h-5 w-5 text-amber-500 dark:text-amber-300" />
+                <h3 class="font-semibold text-stone-900 dark:text-white">{{ section.title }}</h3>
+              </div>
+              <UBadge color="gray" variant="soft">{{ section.endpointCount }}</UBadge>
+            </div>
+            <p class="line-clamp-2 text-sm text-stone-600 dark:text-stone-400">{{ section.description || '暂无描述' }}</p>
+            <div class="mt-3 flex flex-wrap gap-1.5">
+              <UBadge
+                v-for="method in section.methods"
+                :key="method"
+                :color="getMethodBadgeColor(method)"
+                variant="subtle"
+                size="xs"
+              >
+                {{ method }}
+              </UBadge>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <DocsLayout :sections="apiSections">
+        <div class="space-y-10">
+          <section
+            v-for="section in apiSections"
+            :key="section.id"
+            class="space-y-5 rounded-2xl border border-stone-200 bg-white/70 p-3 dark:border-stone-700 dark:bg-stone-900/60 sm:p-4 md:p-5"
+          >
+            <div :id="section.id" class="scroll-mt-24 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div class="flex items-start gap-3">
+                <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm">
+                  <UIcon :name="section.icon || 'heroicons:cube'" class="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 class="text-2xl font-bold text-stone-900 dark:text-white">{{ section.title }}</h2>
+                  <p v-if="section.description" class="mt-1 text-sm text-stone-600 dark:text-stone-400">{{ section.description }}</p>
+                </div>
+              </div>
+              <UBadge color="gray" variant="soft" size="sm" class="self-start">{{ section.endpoints.length }} 个端点</UBadge>
+            </div>
+
+            <div class="space-y-5">
+              <DocsEndpointCard
+                v-for="endpoint in section.endpoints"
+                :key="endpoint.id"
+                :endpoint="endpoint"
+                :base-url="baseUrl"
               />
-              <div class="flex-1 min-w-0">
-                <h4 class="font-semibold text-green-800 dark:text-green-200 mb-1">测试成功</h4>
-                <p class="text-xs text-green-700 dark:text-green-300 truncate font-mono">{{ testResult.data.url }}</p>
-                <DocsCodeBlock :code="JSON.stringify(testResult, null, 2)" language="json" class="mt-2" />
+            </div>
+          </section>
+
+          <section id="error-codes" class="scroll-mt-24 rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-700 dark:bg-stone-900/80 sm:p-5 md:p-6">
+            <div class="mb-4 flex items-center gap-3">
+              <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-red-500 to-red-600 text-white shadow-sm">
+                <UIcon name="heroicons:exclamation-triangle" class="h-5 w-5" />
+              </div>
+              <div>
+                <h2 class="text-xl font-bold text-stone-900 dark:text-white">错误代码速查</h2>
+                <p class="text-sm text-stone-500 dark:text-stone-400">常见 HTTP 响应状态整理</p>
               </div>
             </div>
 
-            <!-- 上传失败 -->
-            <div v-else-if="testResult && !testResult.success" class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <h4 class="font-semibold mb-2 text-red-800 dark:text-red-200">测试失败</h4>
-              <DocsCodeBlock :code="JSON.stringify(testResult, null, 2)" language="json" />
+            <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div
+                v-for="code in errorCodes"
+                :key="code.status"
+                class="rounded-xl border border-stone-200 bg-stone-50/70 p-3 dark:border-stone-700 dark:bg-stone-800/40"
+              >
+                <div class="mb-2">
+                  <UBadge :color="getStatusColor(code.status)" variant="subtle">{{ code.status }}</UBadge>
+                </div>
+                <p class="text-sm text-stone-700 dark:text-stone-300">{{ code.description }}</p>
+              </div>
             </div>
-          </div>
-        </UCard>
-      </div>
-    </DocsLayout>
+          </section>
+
+          <section id="test" class="scroll-mt-24 rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-700 dark:bg-stone-900/80 sm:p-5 md:p-6">
+            <div class="mb-5 flex items-center gap-3">
+              <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-sm">
+                <UIcon name="heroicons:beaker" class="h-5 w-5" />
+              </div>
+              <div>
+                <h2 class="text-xl font-bold text-stone-900 dark:text-white">在线调试沙箱</h2>
+                <p class="text-sm text-stone-500 dark:text-stone-400">即刻上传一张图，验证你当前环境连通性。</p>
+              </div>
+            </div>
+
+            <div class="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+              <div class="space-y-4">
+                <p class="text-sm leading-6 text-stone-600 dark:text-stone-300">
+                  不填 Token 走匿名上传，填写后自动切换到 <code class="rounded bg-stone-100 px-1 py-0.5 font-mono text-xs dark:bg-stone-800">Bearer</code> 上传通道。
+                </p>
+
+                <UInput
+                  v-model="testToken"
+                  placeholder="可选：Bearer Token，留空则匿名上传"
+                  size="sm"
+                  :ui="{ base: 'font-mono text-xs' }"
+                />
+
+                <div class="flex flex-wrap items-center gap-3">
+                  <input
+                    ref="testFileInput"
+                    type="file"
+                    accept="image/*"
+                    class="hidden"
+                    @change="handleTestUpload"
+                  />
+                  <UButton
+                    icon="heroicons:cloud-arrow-up"
+                    color="primary"
+                    size="lg"
+                    :loading="testUploading"
+                    @click="testFileInput?.click()"
+                  >
+                    选择图片并测试
+                  </UButton>
+                  <span class="text-xs text-stone-500 dark:text-stone-400">支持 JPG / PNG / GIF / WebP / AVIF / SVG</span>
+                </div>
+
+                <div class="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                  如果返回 401 或 403，先检查系统是否开启匿名上传或 Token 功能，再确认 Token 是否过期。
+                </div>
+              </div>
+
+              <div class="space-y-3">
+                <div v-if="!testResult" class="flex min-h-48 items-center justify-center rounded-xl border border-dashed border-stone-300 bg-stone-50/80 p-4 text-center text-sm text-stone-500 dark:border-stone-700 dark:bg-stone-800/30 dark:text-stone-400">
+                  上传后会在这里展示响应数据和图片预览。
+                </div>
+
+                <div
+                  v-else-if="testResult.success"
+                  class="space-y-3 rounded-xl border border-green-200 bg-green-50/60 p-4 dark:border-green-500/40 dark:bg-green-500/10"
+                >
+                  <div class="flex items-start gap-3">
+                    <img
+                      v-if="previewImageUrl"
+                      :src="previewImageUrl"
+                      :alt="previewImageName"
+                      class="h-20 w-20 flex-shrink-0 rounded-lg border border-green-300 object-cover dark:border-green-700"
+                    />
+                    <div class="min-w-0 flex-1">
+                      <h4 class="font-semibold text-green-800 dark:text-green-200">测试成功</h4>
+                      <p v-if="previewImageUrl" class="truncate font-mono text-xs text-green-700 dark:text-green-300">{{ previewImageUrl }}</p>
+                    </div>
+                  </div>
+                  <DocsCodeBlock :code="JSON.stringify(testResult, null, 2)" language="json" />
+                </div>
+
+                <div
+                  v-else
+                  class="space-y-3 rounded-xl border border-red-200 bg-red-50/70 p-4 dark:border-red-500/40 dark:bg-red-500/10"
+                >
+                  <h4 class="font-semibold text-red-800 dark:text-red-200">测试失败</h4>
+                  <DocsCodeBlock :code="JSON.stringify(testResult, null, 2)" language="json" />
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </DocsLayout>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { apiSections } from '~/data/apiDocs'
+import type { HttpMethod } from '~/data/apiDocs'
+import { apiSections, getMethodColor } from '~/data/apiDocs'
+
+interface TestUploadResult {
+  success: boolean
+  data?: Record<string, any>
+  error?: string
+}
 
 const config = useRuntimeConfig()
+const requestUrl = useRequestURL()
 const toast = useLightToast()
 const { copy: clipboardCopy } = useClipboardCopy()
-const baseUrl = computed(() => config.public.apiBase || window.location.origin)
+
+const baseUrl = computed(() => (config.public.apiBase || requestUrl.origin).replace(/\/$/, ''))
 
 const testFileInput = ref<HTMLInputElement>()
 const testUploading = ref(false)
-const testResult = ref<any>(null)
+const testResult = ref<TestUploadResult | null>(null)
 const testToken = ref('')
+
+const docsVersion = '2.0'
+const docsUpdatedAt = '2026-02'
+
+const endpointCount = computed(() => apiSections.reduce((sum, section) => sum + section.endpoints.length, 0))
+const tokenSecuredCount = computed(() =>
+  apiSections.reduce(
+    (sum, section) => sum + section.endpoints.filter((endpoint) => endpoint.auth === 'bearer').length,
+    0
+  )
+)
+const publicCount = computed(() => endpointCount.value - tokenSecuredCount.value)
+
+const heroStats = computed(() => [
+  {
+    label: 'API 分组',
+    value: apiSections.length,
+    icon: 'heroicons:squares-2x2',
+    tip: '按业务域拆分文档结构',
+  },
+  {
+    label: '端点总数',
+    value: endpointCount.value,
+    icon: 'heroicons:command-line',
+    tip: '覆盖上传、查询、Token、状态',
+  },
+  {
+    label: '公开端点',
+    value: publicCount.value,
+    icon: 'heroicons:lock-open',
+    tip: '无需 Bearer 可直接访问',
+  },
+  {
+    label: 'Token 端点',
+    value: tokenSecuredCount.value,
+    icon: 'heroicons:lock-closed',
+    tip: '需携带 Authorization 头',
+  },
+])
+
+const quickStartScenarios = computed(() => [
+  {
+    id: 'anonymous-upload',
+    badge: '匿名策略',
+    badgeColor: 'green' as const,
+    title: '无需 Token，直接上传',
+    endpoint: '/api/upload',
+    description: '适合开放站点或内部临时上传。若系统策略限制匿名上传，会返回 403。',
+    code: `curl -X POST "${baseUrl.value}/api/upload" \\\n  -F "file=@image.jpg"`,
+  },
+  {
+    id: 'token-upload',
+    badge: 'Token 策略',
+    badgeColor: 'amber' as const,
+    title: '先拿 Token，再上传',
+    endpoint: '/api/auth/upload',
+    description: '适合配额控制和访问审计。Token 模式能限制上传次数和有效期。',
+    code: `curl -X POST "${baseUrl.value}/api/auth/upload" \\\n  -H "Authorization: Bearer guest_xxxxx" \\\n  -F "file=@image.jpg"`,
+  },
+])
+
+const heroCurlExample = computed(() => quickStartScenarios.value[0]?.code || '')
+
+const sectionHighlights = computed(() =>
+  apiSections.map((section) => ({
+    id: section.id,
+    title: section.title,
+    description: section.description,
+    icon: section.icon,
+    endpointCount: section.endpoints.length,
+    methods: Array.from(new Set(section.endpoints.map((endpoint) => endpoint.method))),
+  }))
+)
 
 const errorCodes = [
   { status: 200, description: '请求成功' },
-  { status: 302, description: '重定向（CDN 跳转）' },
-  { status: 400, description: '请求参数错误' },
-  { status: 401, description: '未授权（Token 无效）' },
-  { status: 403, description: '禁止访问（功能被禁用）' },
-  { status: 404, description: '资源不存在' },
-  { status: 413, description: '文件过大' },
-  { status: 429, description: '请求过于频繁' },
-  { status: 500, description: '服务器错误' },
+  { status: 302, description: '资源可能被重定向到 CDN' },
+  { status: 400, description: '请求参数错误或缺失' },
+  { status: 401, description: 'Token 缺失、格式错误或已失效' },
+  { status: 403, description: '功能被禁用或访问策略不允许' },
+  { status: 404, description: '目标资源不存在' },
+  { status: 413, description: '上传文件体积超过限制' },
+  { status: 429, description: '请求过于频繁，触发限流' },
+  { status: 500, description: '服务器内部错误' },
 ]
+
+const previewImageUrl = computed(() => {
+  if (!testResult.value?.success || !testResult.value.data) return ''
+  return (
+    testResult.value.data.url ||
+    testResult.value.data.image_url ||
+    ''
+  )
+})
+
+const previewImageName = computed(() => {
+  if (!testResult.value?.success || !testResult.value.data) return 'upload-result'
+  return (
+    testResult.value.data.filename ||
+    testResult.value.data.original_filename ||
+    'upload-result'
+  )
+})
+
+const resolveApiUrl = (path: string): string => {
+  const targetPath = path.startsWith('/') ? path : `/${path}`
+  return `${baseUrl.value}${targetPath}`
+}
 
 const copyBaseUrl = () => {
   clipboardCopy(baseUrl.value, '基础 URL 已复制')
 }
 
-const copyCurlExample = () => {
-  clipboardCopy(`curl -F "file=@image.jpg" ${baseUrl.value}/api/upload`, '已复制 curl 命令')
+const copySnippet = (code: string) => {
+  clipboardCopy(code, '示例命令已复制')
+}
+
+const jumpToAnchor = (id: string) => {
+  if (!import.meta.client) return
+  const element = document.getElementById(id)
+  if (!element) return
+  element.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 const getStatusColor = (status: number) => {
@@ -275,6 +423,10 @@ const getStatusColor = (status: number) => {
   if (status >= 300 && status < 400) return 'blue' as const
   if (status >= 400 && status < 500) return 'amber' as const
   return 'red' as const
+}
+
+const getMethodBadgeColor = (method: HttpMethod) => {
+  return getMethodColor(method) as 'blue' | 'green' | 'amber' | 'red' | 'gray'
 }
 
 const handleTestUpload = async (event: Event) => {
@@ -285,20 +437,20 @@ const handleTestUpload = async (event: Event) => {
   testResult.value = null
 
   try {
-    // 根据是否填写 Token 选择不同的上传端点
     const file = target.files[0]
     const fd = new FormData()
     fd.append('file', file)
 
+    const token = testToken.value.trim()
     const headers: Record<string, string> = {}
-    let url = `${baseUrl.value}/api/upload`
+    let uploadUrl = resolveApiUrl('/api/upload')
 
-    if (testToken.value.trim()) {
-      url = `${baseUrl.value}/api/auth/upload`
-      headers['Authorization'] = `Bearer ${testToken.value.trim()}`
+    if (token) {
+      uploadUrl = resolveApiUrl('/api/auth/upload')
+      headers.Authorization = `Bearer ${token}`
     }
 
-    const resp = await $fetch<any>(url, {
+    const resp = await $fetch<any>(uploadUrl, {
       method: 'POST',
       body: fd,
       headers,
@@ -306,18 +458,25 @@ const handleTestUpload = async (event: Event) => {
 
     testResult.value = {
       success: true,
-      data: resp.data || resp,
+      data: resp?.data || resp,
     }
     toast.success('测试成功', '图片上传成功')
   } catch (error: any) {
+    const errorMessage =
+      error?.data?.error ||
+      error?.data?.message ||
+      error?.message ||
+      '未知错误'
+
     testResult.value = {
       success: false,
-      error: error.data?.error || error.message,
+      error: errorMessage,
+      data: error?.data,
     }
-    toast.error('测试失败', error.data?.error || error.message)
+    toast.error('测试失败', errorMessage)
   } finally {
     testUploading.value = false
-    if (target) target.value = ''
+    target.value = ''
   }
 }
 </script>
