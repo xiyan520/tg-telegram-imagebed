@@ -9,6 +9,7 @@ import asyncio
 import os
 import re
 import time
+from html import escape as html_escape
 from typing import Any, Dict, List, Optional, Tuple
 
 from telegram import Update
@@ -16,7 +17,7 @@ from telegram import Update
 from ..config import logger
 from ..utils import format_size
 from .media_batch import _MediaBatch, _media_group_batches, _flush_media_group, _MAX_BATCH_ITEMS
-from .state import _inc_bot_stats
+from .state import _inc_bot_stats, _inc_template_error
 
 # 文件下载超时（秒）
 _DOWNLOAD_TIMEOUT = 60
@@ -40,16 +41,17 @@ async def start(update: Update, context):
 
     stats = get_stats()
     bot_status = _get_bot_status()
+    web_url = html_escape(str(get_domain(None) or ''))
     await update.message.reply_text(
-        "☁️ *Telegram 云图床机器人*\n\n"
+        "☁️ <b>Telegram 云图床机器人</b>\n\n"
         "✨ 直接发送图片获取永久直链\n\n"
-        f"🌐 *Web界面:* {get_domain(None)}\n"
-        f"📊 *已存储:* {stats['total_files']} 个文件\n"
-        f"💾 *总大小:* {stats['total_size'] / 1024 / 1024:.1f} MB\n"
-        f"🤖 *Bot统计:* 处理 {bot_status['stats_processed']} 张"
+        f"🌐 <b>Web界面:</b> {web_url}\n"
+        f"📊 <b>已存储:</b> {stats['total_files']} 个文件\n"
+        f"💾 <b>总大小:</b> {stats['total_size'] / 1024 / 1024:.1f} MB\n"
+        f"🤖 <b>Bot统计:</b> 处理 {bot_status['stats_processed']} 张"
         f"（✅{bot_status['stats_success']} ❌{bot_status['stats_failed']}）\n\n"
         "直接发送图片即可开始使用！",
-        parse_mode='Markdown'
+        parse_mode='HTML'
     )
 
 
@@ -194,15 +196,22 @@ def _build_reply_text(result: dict, permanent_url: str, filename: str, get_syste
     reply_template = str(get_system_setting('bot_reply_template') or '').strip()
     show_size = str(get_system_setting('bot_reply_show_size') or '1') == '1'
     show_filename = str(get_system_setting('bot_reply_show_filename') or '0') == '1'
+    strict_mode = str(get_system_setting('bot_template_strict_mode') or '0') == '1'
 
     if reply_template:
-        text = reply_template.format(
-            url=permanent_url,
-            size=format_size(result['file_size']),
-            filename=result.get('original_filename') or filename,
-            id=result['encrypted_id'],
-        )
-        return text, None
+        try:
+            text = reply_template.format(
+                url=permanent_url,
+                size=format_size(result['file_size']),
+                filename=result.get('original_filename') or filename,
+                id=result['encrypted_id'],
+            )
+            return text, None
+        except Exception as e:
+            _inc_template_error()
+            logger.warning(f"Bot 回复模板渲染失败: {type(e).__name__}: {e}")
+            if strict_mode:
+                return "⚠️ 回复模板配置错误，请联系管理员", None
 
     from html import escape as html_escape
     lines = [
@@ -248,6 +257,7 @@ async def handle_photo(update: Update, context):
 
     # 获取用户信息
     user = update.effective_user
+    tg_user_id = user.id if user else None
     if user:
         username = user.username or user.full_name or str(user.id)
     else:
@@ -321,6 +331,7 @@ async def handle_photo(update: Update, context):
                 "content_type": content_type,
                 "message_id": message.message_id,
                 "username": username,
+                "tg_user_id": tg_user_id,
                 "auth_token": upload_auth_token,
             })
             batch.updated_at = time.monotonic()
@@ -353,6 +364,7 @@ async def handle_photo(update: Update, context):
                 filename=filename,
                 content_type=content_type,
                 username=username,
+                tg_user_id=tg_user_id,
                 source='telegram_group',
                 auth_token=upload_auth_token,
                 is_group_upload=True,
@@ -365,6 +377,7 @@ async def handle_photo(update: Update, context):
                 filename=filename,
                 content_type=content_type,
                 username=username,
+                tg_user_id=tg_user_id,
                 source='telegram_bot',
                 auth_token=upload_auth_token,
                 is_group_upload=False,

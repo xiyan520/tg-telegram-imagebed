@@ -3,6 +3,7 @@
 """TG 认证 API 路由"""
 import time
 import asyncio
+import threading
 from collections import defaultdict
 from flask import request, jsonify, make_response
 
@@ -34,21 +35,23 @@ class SimpleRateLimiter:
         self._max = max_requests
         self._window = window_seconds
         self._requests: dict[str, list[float]] = defaultdict(list)
+        self._lock = threading.Lock()
 
     def is_allowed(self, key: str) -> bool:
         now = time.time()
         cutoff = now - self._window
-        reqs = self._requests[key]
-        # 清理过期记录
-        self._requests[key] = [t for t in reqs if t > cutoff]
-        if len(self._requests[key]) >= self._max:
-            return False
-        # 超出最大条目数时，清理最旧的条目（LRU 淘汰）
-        if len(self._requests) >= self._MAX_ENTRIES:
-            oldest_key = next(iter(self._requests))
-            del self._requests[oldest_key]
-        self._requests[key].append(now)
-        return True
+        with self._lock:
+            reqs = self._requests[key]
+            # 清理过期记录
+            self._requests[key] = [t for t in reqs if t > cutoff]
+            if len(self._requests[key]) >= self._max:
+                return False
+            # 超出最大条目数时，清理最旧的条目（LRU 淘汰）
+            if len(self._requests) >= self._MAX_ENTRIES:
+                oldest_key = next(iter(self._requests))
+                del self._requests[oldest_key]
+            self._requests[key].append(now)
+            return True
 
 
 # 速率限制器实例
@@ -658,3 +661,47 @@ def tg_sync_tokens():
         'success': True,
         'data': {'tokens': result}
     }), 'no-cache')
+
+
+@auth_bp.route('/api/auth/tg/webhook/<secret>', methods=['POST'])
+def tg_webhook_ingest(secret: str):
+    """
+    Telegram Webhook 入站端点
+
+    将更新转发到 Bot 线程中的 Application.update_queue。
+    """
+    from telegram import Update
+    from ..bot.state import (
+        get_bot_application, get_bot_instance, get_bot_loop, _set_queue_depth
+    )
+    from ..bot_control import get_webhook_secret
+
+    expected_secret = get_webhook_secret()
+    if not expected_secret or secret != expected_secret:
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+
+    telegram_app = get_bot_application()
+    bot = get_bot_instance()
+    bot_loop = get_bot_loop()
+    if not telegram_app or not bot or not bot_loop:
+        return jsonify({'ok': False, 'error': 'bot_not_ready'}), 503
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({'ok': False, 'error': 'invalid_payload'}), 400
+
+    try:
+        update_obj = Update.de_json(payload, bot)
+        fut = asyncio.run_coroutine_threadsafe(
+            telegram_app.update_queue.put(update_obj),
+            bot_loop
+        )
+        fut.result(timeout=3)
+        try:
+            _set_queue_depth(telegram_app.update_queue.qsize())
+        except Exception:
+            pass
+        return jsonify({'ok': True})
+    except Exception as e:
+        logger.error(f"Webhook 更新入队失败: {type(e).__name__}: {e}")
+        return jsonify({'ok': False, 'error': 'enqueue_failed'}), 500

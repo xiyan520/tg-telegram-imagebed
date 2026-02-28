@@ -54,6 +54,10 @@ export interface AdminSystemSettings {
   bot_user_delete_enabled: boolean
   bot_myuploads_enabled: boolean
   bot_myuploads_page_size: number
+  bot_update_mode: string
+  bot_webhook_url: string
+  bot_settoken_ttl_seconds: number
+  bot_template_strict_mode: boolean
   bot_reply_link_formats: string
   bot_reply_template: string
   bot_reply_show_size: boolean

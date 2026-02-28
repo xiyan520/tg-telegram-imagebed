@@ -846,6 +846,73 @@
         </template>
 
         <div class="space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <UFormGroup label="Bot 更新模式">
+              <USelect
+                v-model="settings.bot_update_mode"
+                :options="botUpdateModeOptions"
+                option-attribute="label"
+                value-attribute="value"
+              />
+              <template #hint>
+                <span class="text-xs text-stone-500">Polling 适合单机，Webhook 适合公网反代部署</span>
+              </template>
+            </UFormGroup>
+
+            <UFormGroup label="/settoken 有效期（秒）">
+              <UInput
+                v-model.number="settings.bot_settoken_ttl_seconds"
+                type="number"
+                min="30"
+                max="3600"
+                placeholder="600"
+              />
+              <template #hint>
+                <span class="text-xs text-stone-500">回调按钮过期时间，范围 30-3600 秒</span>
+              </template>
+            </UFormGroup>
+          </div>
+
+          <UFormGroup v-if="settings.bot_update_mode === 'webhook'" label="Webhook 基础 URL">
+            <UInput
+              v-model="settings.bot_webhook_url"
+              placeholder="https://example.com"
+            />
+            <template #hint>
+              <div class="flex flex-wrap items-center gap-2 text-xs text-stone-500">
+                <span>仅填写基础域名，系统会自动拼接 webhook 路径</span>
+                <UButton
+                  type="button"
+                  size="2xs"
+                  color="gray"
+                  variant="ghost"
+                  icon="heroicons:question-mark-circle"
+                  @click="showWebhookGuide = !showWebhookGuide"
+                >
+                  如何获取
+                </UButton>
+              </div>
+            </template>
+
+            <div v-if="showWebhookGuide" class="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
+              <p class="font-medium">Webhook 基础 URL 填写说明</p>
+              <p class="mt-1">1. 填你的公网可访问站点根地址，不要带路径。</p>
+              <p>2. 常见就是当前图床外网地址，例如：<code>https://img.example.com</code>。</p>
+              <p>3. 保存后系统会自动生成完整地址：<code>/api/auth/tg/webhook/&lt;secret&gt;</code>，无需手动拼接。</p>
+              <p>4. 本地 <code>http://127.0.0.1</code> 这类内网地址 Telegram 访问不到，不能用于 webhook。</p>
+            </div>
+          </UFormGroup>
+
+          <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
+            <div>
+              <p class="font-medium text-stone-900 dark:text-white">模板严格模式</p>
+              <p class="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                开启后，自定义回复模板渲染失败时不回退默认模板
+              </p>
+            </div>
+            <UToggle v-model="settings.bot_template_strict_mode" size="lg" />
+          </div>
+
           <div class="flex items-center justify-between p-4 bg-stone-50 dark:bg-neutral-800 rounded-xl">
             <div>
               <p class="font-medium text-stone-900 dark:text-white">Caption 自定义文件名</p>
@@ -1397,6 +1464,10 @@ const settings = ref<AdminSystemSettings>({
   bot_user_delete_enabled: true,
   bot_myuploads_enabled: true,
   bot_myuploads_page_size: 8,
+  bot_update_mode: 'polling',
+  bot_webhook_url: '',
+  bot_settoken_ttl_seconds: 600,
+  bot_template_strict_mode: false,
   // Bot 回复配置
   bot_reply_link_formats: 'url',
   bot_reply_template: '',
@@ -1478,6 +1549,10 @@ const sectionFieldGroups: Record<SettingsSectionKey, string[]> = {
     'bot_user_delete_enabled',
     'bot_myuploads_enabled',
     'bot_myuploads_page_size',
+    'bot_update_mode',
+    'bot_webhook_url',
+    'bot_settoken_ttl_seconds',
+    'bot_template_strict_mode',
     'bot_reply_link_formats',
     'bot_reply_template',
     'bot_reply_show_size',
@@ -1525,6 +1600,12 @@ const linkFormatOptions = [
   { value: 'html', label: 'HTML' },
   { value: 'bbcode', label: 'BBCode' },
 ]
+
+const botUpdateModeOptions = [
+  { value: 'polling', label: 'Polling（长轮询）' },
+  { value: 'webhook', label: 'Webhook（推送）' },
+]
+const showWebhookGuide = ref(false)
 
 const isLinkFormatEnabled = (fmt: string) => {
   const formats = (settings.value.bot_reply_link_formats || 'url').split(',').map((s: string) => s.trim())

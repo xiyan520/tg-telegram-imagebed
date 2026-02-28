@@ -89,6 +89,10 @@ def _format_settings_for_response(settings: dict) -> dict:
         'bot_user_delete_enabled': settings.get('bot_user_delete_enabled', '1') == '1',
         'bot_myuploads_enabled': settings.get('bot_myuploads_enabled', '1') == '1',
         'bot_myuploads_page_size': _safe_int(settings.get('bot_myuploads_page_size'), 8, 1, 50),
+        'bot_update_mode': settings.get('bot_update_mode', 'polling'),
+        'bot_webhook_url': settings.get('bot_webhook_url', ''),
+        'bot_settoken_ttl_seconds': _safe_int(settings.get('bot_settoken_ttl_seconds'), 600, 30, 3600),
+        'bot_template_strict_mode': settings.get('bot_template_strict_mode', '0') == '1',
         # Bot 回复配置
         'bot_reply_link_formats': settings.get('bot_reply_link_formats', 'url'),
         'bot_reply_template': settings.get('bot_reply_template', ''),
@@ -375,6 +379,30 @@ def admin_system_settings():
                     errors.append('上传历史每页数量必须在 1-50 之间')
                 else:
                     settings_to_update['bot_myuploads_page_size'] = str(ps)
+
+            if 'bot_update_mode' in data:
+                mode = str(data.get('bot_update_mode') or '').strip().lower()
+                if mode not in ('polling', 'webhook'):
+                    errors.append('Bot 更新模式必须为 polling 或 webhook')
+                else:
+                    settings_to_update['bot_update_mode'] = mode
+
+            if 'bot_webhook_url' in data:
+                webhook_url = str(data.get('bot_webhook_url') or '').strip()
+                if webhook_url and not webhook_url.startswith(('http://', 'https://')):
+                    errors.append('Webhook URL 必须以 http:// 或 https:// 开头')
+                else:
+                    settings_to_update['bot_webhook_url'] = webhook_url
+
+            if 'bot_settoken_ttl_seconds' in data:
+                ttl = _safe_int(data.get('bot_settoken_ttl_seconds'), 600)
+                if ttl < 30 or ttl > 3600:
+                    errors.append('/settoken 有效期必须在 30-3600 秒之间')
+                else:
+                    settings_to_update['bot_settoken_ttl_seconds'] = str(ttl)
+
+            if 'bot_template_strict_mode' in data:
+                settings_to_update['bot_template_strict_mode'] = '1' if data['bot_template_strict_mode'] else '0'
 
             # Bot 回复配置
             if 'bot_reply_link_formats' in data:
@@ -687,6 +715,21 @@ def admin_system_settings():
                     else:
                         os.environ.pop('HTTP_PROXY', None)
                         os.environ.pop('HTTPS_PROXY', None)
+
+                # Bot 运行时关键配置变更后，触发热重启
+                restart_sensitive_keys = {
+                    'bot_update_mode',
+                    'bot_webhook_url',
+                    'bot_settoken_ttl_seconds',
+                    'bot_template_strict_mode',
+                    'proxy_url',
+                }
+                if restart_sensitive_keys.intersection(settings_to_update.keys()):
+                    try:
+                        from ..bot_control import request_bot_restart
+                        request_bot_restart(reason='system_settings_updated')
+                    except Exception as e:
+                        logger.debug(f"触发 Bot 热重启失败（可忽略）: {e}")
 
             # 获取更新后的有效配置
             updated_settings = get_all_system_settings()

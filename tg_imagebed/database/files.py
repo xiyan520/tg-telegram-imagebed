@@ -53,18 +53,19 @@ def save_file_info(encrypted_id: str, file_info: Dict[str, Any]) -> None:
         cursor.execute('''
             INSERT INTO file_storage (
                 encrypted_id, file_id, file_path, upload_time,
-                user_id, username, file_size, source,
+                user_id, tg_user_id, username, file_size, source,
                 original_filename, mime_type, etag, file_hash,
                 cdn_url, cdn_cached, is_group_upload, group_message_id,
                 group_chat_id, auth_token, storage_backend, storage_key,
                 storage_meta, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             encrypted_id,
             file_info['file_id'],
             file_info.get('file_path', ''),
             file_info['upload_time'],
             file_info.get('user_id'),
+            file_info.get('tg_user_id'),
             file_info.get('username', 'unknown'),
             file_info.get('file_size', 0),
             file_info.get('source', 'unknown'),
@@ -260,11 +261,18 @@ def get_uncached_files(since_timestamp: int, limit: int = 100) -> List[Dict[str,
         return [dict(row) for row in cursor.fetchall()]
 
 
-def get_user_uploads(username: str, limit: int = 10, page: int = 1) -> tuple:
+def get_user_uploads(
+    username: Optional[str] = None,
+    *,
+    tg_user_id: Optional[int] = None,
+    limit: int = 10,
+    page: int = 1
+) -> tuple:
     """获取指定用户的上传记录（分页）
 
     Args:
         username: 用户名（与上传时保存的 username 字段一致）
+        tg_user_id: TG 用户 ID（优先使用）
         limit: 每页数量
         page: 页码（从1开始）
 
@@ -275,22 +283,43 @@ def get_user_uploads(username: str, limit: int = 10, page: int = 1) -> tuple:
         cursor = conn.cursor()
         offset = (page - 1) * limit
 
-        cursor.execute(
-            'SELECT COUNT(*) FROM file_storage WHERE username = ?',
-            (username,)
-        )
-        total = cursor.fetchone()[0]
+        files: List[Dict[str, Any]] = []
+        total = 0
 
-        cursor.execute('''
-            SELECT encrypted_id, original_filename, file_size,
-                   created_at, username, mime_type
-            FROM file_storage
-            WHERE username = ?
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        ''', (username, limit, offset))
+        if tg_user_id is not None:
+            cursor.execute(
+                'SELECT COUNT(*) FROM file_storage WHERE tg_user_id = ?',
+                (tg_user_id,)
+            )
+            total = int(cursor.fetchone()[0] or 0)
+            if total > 0:
+                cursor.execute('''
+                    SELECT encrypted_id, original_filename, file_size,
+                           created_at, username, mime_type, tg_user_id
+                    FROM file_storage
+                    WHERE tg_user_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                ''', (tg_user_id, limit, offset))
+                files = [dict(row) for row in cursor.fetchall()]
 
-        files = [dict(row) for row in cursor.fetchall()]
+        # 兼容历史记录（旧数据仅按 username 存储）
+        if total == 0 and username:
+            cursor.execute(
+                'SELECT COUNT(*) FROM file_storage WHERE username = ?',
+                (username,)
+            )
+            total = int(cursor.fetchone()[0] or 0)
+            cursor.execute('''
+                SELECT encrypted_id, original_filename, file_size,
+                       created_at, username, mime_type, tg_user_id
+                FROM file_storage
+                WHERE username = ?
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            ''', (username, limit, offset))
+            files = [dict(row) for row in cursor.fetchall()]
+
         return files, total
 
 

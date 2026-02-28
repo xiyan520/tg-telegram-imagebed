@@ -60,6 +60,7 @@ def process_upload(
     filename: str,
     content_type: str,
     username: str = 'web_user',
+    tg_user_id: Optional[int] = None,
     source: str = 'web_upload',
     auth_token: Optional[str] = None,
     is_group_upload: bool = False,
@@ -75,6 +76,7 @@ def process_upload(
         filename: 文件名
         content_type: MIME 类型
         username: 用户名
+        tg_user_id: Telegram 用户 ID（可选）
         source: 来源
         auth_token: 认证 Token
         is_group_upload: 是否群组上传
@@ -155,6 +157,7 @@ def process_upload(
         'file_path': put_result.file_path,
         'upload_time': int(time.time()),
         'user_id': 0,
+        'tg_user_id': tg_user_id,
         'username': username,
         'file_size': put_result.file_size,
         'source': source,
@@ -192,6 +195,7 @@ def record_existing_telegram_file(
     filename: str,
     content_type: str,
     username: str = 'web_user',
+    tg_user_id: Optional[int] = None,
     source: str = 'telegram_group',
     auth_token: Optional[str] = None,
     is_group_upload: bool = False,
@@ -224,6 +228,7 @@ def record_existing_telegram_file(
         'file_path': file_path,
         'upload_time': upload_time,
         'user_id': 0,
+        'tg_user_id': tg_user_id,
         'username': username,
         'file_size': file_size,
         'source': source,

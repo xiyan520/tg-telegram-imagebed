@@ -8,6 +8,8 @@ callback_query 统一分发，以及上传成功 inline keyboard 构建。
 """
 import math
 import re
+import time
+from html import escape as html_escape
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
@@ -115,20 +117,20 @@ async def id_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat = update.effective_chat
 
-    lines = ["🆔 *你的信息*\n"]
+    lines = ["🆔 <b>你的信息</b>\n"]
     if user:
-        lines.append(f"👤 *用户 ID:* `{user.id}`")
+        lines.append(f"👤 <b>用户 ID:</b> <code>{user.id}</code>")
         if user.username:
-            lines.append(f"📛 *用户名:* @{user.username}")
-        lines.append(f"📝 *全名:* {user.full_name}")
+            lines.append(f"📛 <b>用户名:</b> @{html_escape(user.username)}")
+        lines.append(f"📝 <b>全名:</b> {html_escape(user.full_name or '')}")
     if chat:
-        lines.append(f"\n💬 *聊天 ID:* `{chat.id}`")
-        lines.append(f"📋 *聊天类型:* {chat.type}")
+        lines.append(f"\n💬 <b>聊天 ID:</b> <code>{chat.id}</code>")
+        lines.append(f"📋 <b>聊天类型:</b> {html_escape(str(chat.type))}")
         if chat.title:
-            lines.append(f"📌 *聊天标题:* {chat.title}")
+            lines.append(f"📌 <b>聊天标题:</b> {html_escape(chat.title)}")
 
-    lines.append("\n💡 将用户 ID 添加到 `group_admin_ids` 可获得群组管理权限")
-    await update.message.reply_text('\n'.join(lines), parse_mode='Markdown')
+    lines.append("\n💡 将用户 ID 添加到 <code>group_admin_ids</code> 可获得群组管理权限")
+    await update.message.reply_text('\n'.join(lines), parse_mode='HTML')
 
 
 async def myuploads_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -144,10 +146,16 @@ async def myuploads_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 无法获取用户信息")
         return
     username = user.username or user.full_name or str(user.id)
-    await _show_myuploads(update.message, username, page=1)
+    await _show_myuploads(update.message, user.id, username, page=1)
 
 
-async def _show_myuploads(message_or_query, username: str, page: int = 1, edit: bool = False):
+async def _show_myuploads(
+    message_or_query,
+    tg_user_id: int,
+    username: str,
+    page: int = 1,
+    edit: bool = False
+):
     """展示上传历史（支持首次发送和翻页编辑）
 
     Args:
@@ -157,13 +165,12 @@ async def _show_myuploads(message_or_query, username: str, page: int = 1, edit: 
         edit: 是否编辑现有消息（翻页时为 True）
     """
     from ..database import get_user_uploads, get_system_setting
-    from ..utils import get_image_domain
 
     try:
         per_page = max(1, min(50, int(get_system_setting('bot_myuploads_page_size') or '8')))
     except (TypeError, ValueError):
         per_page = 8
-    files, total = get_user_uploads(username, limit=per_page, page=page)
+    files, total = get_user_uploads(username, tg_user_id=tg_user_id, limit=per_page, page=page)
     total_pages = max(1, math.ceil(total / per_page))
     page = min(page, total_pages)
 
@@ -175,13 +182,12 @@ async def _show_myuploads(message_or_query, username: str, page: int = 1, edit: 
             await message_or_query.reply_text(text)
         return
 
-    base_url = get_image_domain(None)
-    lines = [f"📋 *你的上传记录* （共 {total} 张，第 {page}/{total_pages} 页）\n"]
+    lines = [f"📋 <b>你的上传记录</b>（共 {total} 张，第 {page}/{total_pages} 页）\n"]
     for f in files:
-        name = f.get('original_filename') or f['encrypted_id'][:12]
+        name = html_escape(str(f.get('original_filename') or f['encrypted_id'][:12]))
         size_str = format_size(f.get('file_size') or 0)
-        eid = f['encrypted_id']
-        lines.append(f"• `{eid[:12]}` | {name} | {size_str}")
+        eid = html_escape(str(f['encrypted_id'][:12]))
+        lines.append(f"• <code>{eid}</code> | {name} | {size_str}")
 
     text = '\n'.join(lines)
 
@@ -195,9 +201,9 @@ async def _show_myuploads(message_or_query, username: str, page: int = 1, edit: 
     markup = InlineKeyboardMarkup([buttons]) if buttons else None
 
     if edit:
-        await message_or_query.edit_message_text(text, parse_mode='Markdown', reply_markup=markup)
+        await message_or_query.edit_message_text(text, parse_mode='HTML', reply_markup=markup)
     else:
-        await message_or_query.reply_text(text, parse_mode='Markdown', reply_markup=markup)
+        await message_or_query.reply_text(text, parse_mode='HTML', reply_markup=markup)
 
 
 async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -222,33 +228,32 @@ async def delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 无法获取用户信息")
         return
 
-    username = user.username or user.full_name or str(user.id)
-
     # 查询文件并验证所有权
     file_info = get_file_info(encrypted_id)
     if not file_info:
         await update.message.reply_text("❌ 文件不存在")
         return
 
-    if file_info.get('username') != username:
+    if not _is_file_owner(file_info, user):
         await update.message.reply_text("❌ 你没有权限删除此文件")
         return
 
     # 弹出确认按钮
-    name = file_info.get('original_filename') or encrypted_id[:12]
+    name = html_escape(str(file_info.get('original_filename') or encrypted_id[:12]))
     size_str = format_size(file_info.get('file_size') or 0)
+    short_id = html_escape(str(encrypted_id[:16]))
     text = (
-        f"⚠️ *确认删除？*\n\n"
-        f"📄 *文件:* {name}\n"
-        f"🆔 *ID:* `{encrypted_id[:16]}`\n"
-        f"📊 *大小:* {size_str}\n\n"
+        f"⚠️ <b>确认删除？</b>\n\n"
+        f"📄 <b>文件:</b> {name}\n"
+        f"🆔 <b>ID:</b> <code>{short_id}</code>\n"
+        f"📊 <b>大小:</b> {size_str}\n\n"
         f"此操作不可撤销！"
     )
     markup = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ 确认删除", callback_data=f"cdel:{encrypted_id}:y"),
         InlineKeyboardButton("❌ 取消", callback_data=f"cdel:{encrypted_id}:n"),
     ]])
-    await update.message.reply_text(text, parse_mode='Markdown', reply_markup=markup)
+    await update.message.reply_text(text, parse_mode='HTML', reply_markup=markup)
 
 
 # ===================== Callback 统一分发 =====================
@@ -292,7 +297,7 @@ async def _handle_myuploads_page(query):
     if not user:
         return
     username = user.username or user.full_name or str(user.id)
-    await _show_myuploads(query, username, page=page, edit=True)
+    await _show_myuploads(query, user.id, username, page=page, edit=True)
 
 
 async def _handle_confirm_delete(query):
@@ -317,14 +322,13 @@ async def _handle_confirm_delete(query):
     user = query.from_user
     if not user:
         return
-    username = user.username or user.full_name or str(user.id)
 
     file_info = get_file_info(encrypted_id)
     if not file_info:
         await query.edit_message_text("❌ 文件不存在或已被删除")
         return
 
-    if file_info.get('username') != username:
+    if not _is_file_owner(file_info, user):
         await query.edit_message_text("❌ 你没有权限删除此文件")
         return
 
@@ -350,14 +354,13 @@ async def _handle_quick_delete(query):
     user = query.from_user
     if not user:
         return
-    username = user.username or user.full_name or str(user.id)
 
     file_info = get_file_info(encrypted_id)
     if not file_info:
         await query.edit_message_text("❌ 文件不存在或已被删除")
         return
 
-    if file_info.get('username') != username:
+    if not _is_file_owner(file_info, user):
         await query.edit_message_text("❌ 你没有权限删除此文件")
         return
 
@@ -450,23 +453,79 @@ async def _handle_settoken_callback(query):
         return
 
     # 从缓存中取出该用户的 token 列表
-    token_list = _settoken_pending.pop(user.id, None)
+    token_list = _pop_pending_tokens(user.id)
     if not token_list or idx < 0 or idx >= len(token_list):
         await query.edit_message_text("❌ 选择已过期，请重新使用 /settoken")
         return
 
     token = token_list[idx]
     if set_default_upload_token(user.id, token):
-        masked = _mask_token(token)
-        await query.edit_message_text(f"✅ 默认上传 Token 已更新\n🔑 `{masked}`", parse_mode='Markdown')
+        masked = html_escape(_mask_token(token))
+        await query.edit_message_text(
+            f"✅ 默认上传 Token 已更新\n🔑 <code>{masked}</code>",
+            parse_mode='HTML'
+        )
     else:
         await query.edit_message_text("❌ 设置失败，请检查 Token 是否有效")
 
 
 # ===================== TG 认证命令 =====================
 
-# /settoken 待选缓存：{tg_user_id: [token_str, ...]}
-_settoken_pending: dict[int, list[str]] = {}
+# /settoken 待选缓存：{tg_user_id: {"tokens": [...], "expires_at": float}}
+_settoken_pending: dict[int, dict] = {}
+
+
+def _is_file_owner(file_info: dict, user) -> bool:
+    """校验文件所有权：优先 tg_user_id，兼容 username 历史数据"""
+    if not user or not file_info:
+        return False
+    file_tg_user_id = file_info.get('tg_user_id')
+    if file_tg_user_id is not None:
+        try:
+            return int(file_tg_user_id) == int(user.id)
+        except (TypeError, ValueError):
+            return False
+    username = user.username or user.full_name or str(user.id)
+    return file_info.get('username') == username
+
+
+def _get_settoken_ttl_seconds() -> int:
+    """读取 /settoken 回调有效期"""
+    from ..database import get_system_setting_int
+    return get_system_setting_int('bot_settoken_ttl_seconds', 600, minimum=30, maximum=3600)
+
+
+def _prune_pending_tokens(now_ts: float = None) -> None:
+    """清理过期待选缓存，防止内存累积"""
+    now_ts = now_ts if now_ts is not None else time.time()
+    expired_ids = [
+        uid for uid, payload in _settoken_pending.items()
+        if float(payload.get('expires_at') or 0) <= now_ts
+    ]
+    for uid in expired_ids:
+        _settoken_pending.pop(uid, None)
+
+
+def _set_pending_tokens(tg_user_id: int, token_list: list[str]) -> None:
+    """写入待选缓存（带 TTL）"""
+    now_ts = time.time()
+    _prune_pending_tokens(now_ts)
+    ttl = _get_settoken_ttl_seconds()
+    _settoken_pending[tg_user_id] = {
+        "tokens": list(token_list),
+        "expires_at": now_ts + ttl,
+    }
+
+
+def _pop_pending_tokens(tg_user_id: int) -> list[str] | None:
+    """读取并删除待选缓存（过期返回 None）"""
+    payload = _settoken_pending.pop(tg_user_id, None)
+    if not payload:
+        return None
+    if float(payload.get('expires_at') or 0) <= time.time():
+        return None
+    tokens = payload.get("tokens")
+    return list(tokens) if isinstance(tokens, list) else None
 
 
 def _mask_token(token: str) -> str:
@@ -491,7 +550,7 @@ async def settoken_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 始终弹出选择列表
-    _settoken_pending[user.id] = [t['token'] for t in tokens]
+    _set_pending_tokens(user.id, [t['token'] for t in tokens])
     buttons = []
     for i, t in enumerate(tokens):
         masked = _mask_token(t['token'])
@@ -569,13 +628,13 @@ async def mytokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 你还没有绑定任何 Token\n\n💡 通过 Web 端登录后生成的 Token 会自动绑定")
         return
 
-    lines = [f"🔑 *你的 Token*（共 {len(tokens)} 个）\n"]
+    lines = [f"🔑 <b>你的 Token</b>（共 {len(tokens)} 个）\n"]
     for t in tokens:
         token_str = t['token']
-        masked = f"{token_str[:8]}…{token_str[-4:]}" if len(token_str) > 12 else token_str
+        masked = html_escape(f"{token_str[:8]}…{token_str[-4:]}" if len(token_str) > 12 else token_str)
         status = "✅" if t['is_active'] else "🚫"
         usage = f"{t['upload_count']}/{t['upload_limit']}"
-        desc = t.get('description') or ''
+        desc = html_escape(str(t.get('description') or ''))
         desc_str = f" | {desc}" if desc else ''
 
         # 过期状态
@@ -612,7 +671,7 @@ async def mytokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except (ValueError, TypeError):
                 pass
 
-        lines.append(f"• `{masked}` {status} {usage}{desc_str}{expire_str}{last_used_str}")
+        lines.append(f"• <code>{masked}</code> {status} {usage}{desc_str}{expire_str}{last_used_str}")
 
     # 构建 inline 按钮：跳转 Web 端
     base_url = get_domain(None)
@@ -621,4 +680,4 @@ async def mytokens_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons.append([InlineKeyboardButton("🌐 在 Web 端管理", url=f"{base_url}/album")])
     markup = InlineKeyboardMarkup(buttons) if buttons else None
 
-    await update.message.reply_text('\n'.join(lines), parse_mode='Markdown', reply_markup=markup)
+    await update.message.reply_text('\n'.join(lines), parse_mode='HTML', reply_markup=markup)

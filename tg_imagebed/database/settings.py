@@ -121,6 +121,10 @@ DEFAULT_SYSTEM_SETTINGS = {
     'bot_user_delete_enabled': '1',         # 允许用户通过 Bot 删除图片
     'bot_myuploads_enabled': '1',           # 允许用户查看上传历史
     'bot_myuploads_page_size': '8',         # 上传历史每页显示数量
+    'bot_update_mode': 'polling',           # Bot 更新模式：polling / webhook
+    'bot_webhook_url': '',                  # webhook 基础 URL（不含路径）
+    'bot_settoken_ttl_seconds': '600',      # /settoken 回调有效期（秒）
+    'bot_template_strict_mode': '0',        # 回复模板严格模式
     # 网络代理
     'proxy_url': '',
     # 允许的文件后缀（逗号分隔）

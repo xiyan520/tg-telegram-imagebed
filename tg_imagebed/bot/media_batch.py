@@ -145,6 +145,7 @@ async def _flush_media_group(
                 filename=item.get("filename", ""),
                 content_type=item.get("content_type", "image/jpeg"),
                 username=item.get("username", ""),
+                tg_user_id=item.get("tg_user_id"),
                 source="telegram_group",
                 auth_token=item.get("auth_token"),
                 is_group_upload=True,
@@ -171,7 +172,6 @@ async def _flush_media_group(
     summary_text = _format_batch_summary(
         urls, success_count, total_count, total_size_bytes, failure_count
     )
-    # PLACEHOLDER_FLUSH_SEND
 
     reply_msg_id: Optional[int] = None
 
