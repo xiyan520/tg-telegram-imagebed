@@ -18,6 +18,7 @@ import time
 import socket
 import base64
 import hashlib
+import ipaddress
 import atexit
 import threading
 from pathlib import Path
@@ -103,6 +104,87 @@ def get_local_ip() -> str:
 
 # 缓存本机IP
 LOCAL_IP = get_local_ip()
+
+
+# ===================== 客户端 IP 解析 =====================
+def _normalize_ip_candidate(raw_value: str) -> Optional[str]:
+    """将请求头中的 IP 候选值规范化为可用 IP 字符串，失败返回 None"""
+    value = str(raw_value or '').strip()
+    if not value:
+        return None
+
+    # 兼容 Forwarded: for=1.2.3.4 / for="[2001:db8::1]:1234"
+    if value.lower().startswith('for='):
+        value = value[4:].strip()
+
+    # 去掉引号与常见无效占位
+    value = value.strip('"').strip("'").strip()
+    if not value or value.lower() in {'unknown', 'null', 'none'}:
+        return None
+
+    # 兼容 [IPv6]:port 格式
+    if value.startswith('[') and ']' in value:
+        value = value[1:value.index(']')]
+    # 兼容 IPv4:port 格式（IPv6 不走这个分支）
+    elif value.count(':') == 1 and '.' in value:
+        host, port = value.rsplit(':', 1)
+        if port.isdigit():
+            value = host
+
+    # 兼容 IPv6 映射 IPv4（如 ::ffff:1.2.3.4）
+    lower_value = value.lower()
+    if lower_value.startswith('::ffff:') and '.' in value:
+        value = value[7:]
+
+    try:
+        return str(ipaddress.ip_address(value))
+    except ValueError:
+        return None
+
+
+def get_client_ip(req) -> str:
+    """
+    提取真实客户端 IP（兼容 Cloudflare + 反向代理）
+
+    优先级：
+    1. CF-Connecting-IP / True-Client-IP（Cloudflare）
+    2. X-Forwarded-For（取最左侧首个合法 IP）
+    3. Forwarded（RFC 7239）
+    4. X-Real-IP
+    5. remote_addr
+    """
+    for header_name in ('CF-Connecting-IP', 'True-Client-IP'):
+        normalized = _normalize_ip_candidate(req.headers.get(header_name))
+        if normalized:
+            return normalized
+
+    xff = (req.headers.get('X-Forwarded-For') or '').strip()
+    if xff:
+        for part in xff.split(','):
+            normalized = _normalize_ip_candidate(part)
+            if normalized:
+                return normalized
+
+    # 兼容标准 Forwarded 头（RFC 7239）
+    forwarded = (req.headers.get('Forwarded') or '').strip()
+    if forwarded:
+        for segment in forwarded.split(','):
+            fields = [f.strip() for f in segment.split(';') if f.strip()]
+            for field in fields:
+                if field.lower().startswith('for='):
+                    normalized = _normalize_ip_candidate(field)
+                    if normalized:
+                        return normalized
+
+    normalized = _normalize_ip_candidate(req.headers.get('X-Real-IP'))
+    if normalized:
+        return normalized
+
+    normalized = _normalize_ip_candidate(req.remote_addr)
+    if normalized:
+        return normalized
+
+    return '127.0.0.1'
 
 
 # ===================== 加密工具 =====================
@@ -582,7 +664,7 @@ __all__ = [
     # 单实例锁
     'acquire_lock', 'release_lock',
     # 网络工具
-    'get_local_ip', 'LOCAL_IP',
+    'get_local_ip', 'get_client_ip', 'LOCAL_IP',
     # 加密工具（sign_file_id 为正式名，encrypt_file_id 保留向后兼容）
     'sign_file_id', 'encrypt_file_id',
     # MIME类型

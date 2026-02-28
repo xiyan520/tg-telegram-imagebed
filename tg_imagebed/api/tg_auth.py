@@ -8,7 +8,7 @@ from flask import request, jsonify, make_response
 
 from . import auth_bp
 from ..config import logger
-from ..utils import add_cache_headers
+from ..utils import add_cache_headers, get_client_ip
 from ..database import (
     get_system_setting, get_tg_user_by_username,
     create_login_code, verify_login_code,
@@ -60,8 +60,7 @@ def _is_secure_request() -> bool:
 
 def _get_client_ip() -> str:
     """提取客户端 IP"""
-    xff = (request.headers.get('X-Forwarded-For') or '').strip()
-    return xff.split(',')[0].strip() if xff else request.remote_addr
+    return get_client_ip(request)
 
 
 def _check_tg_auth_enabled():

@@ -80,12 +80,15 @@ def verify_gallery_auth_token(token: str) -> tuple[bool, str]:
 
 # 从 utils.py 导入 get_domain 和 format_size
 try:
-    from .utils import get_domain, get_image_domain, format_size
+    from .utils import get_domain, get_image_domain, format_size, get_client_ip
 except ImportError:
     # 兼容独立运行场景
     def get_domain(req):
         """简化版 get_domain 函数"""
         return req.host_url.rstrip('/')
+    def get_client_ip(req):
+        """简化版客户端 IP 提取"""
+        return req.remote_addr or '127.0.0.1'
     get_image_domain = get_domain
 
 # 从 config.py 导入配置
@@ -119,8 +122,8 @@ _LOGIN_TRACKER_MAX_ENTRIES = 10000
 
 
 def _get_client_ip(req) -> str:
-    """获取真实客户端 IP（ProxyFix 已将 X-Forwarded-For 解析到 remote_addr）"""
-    return req.remote_addr or '127.0.0.1'
+    """获取真实客户端 IP（兼容 Cloudflare 与反向代理）"""
+    return get_client_ip(req)
 
 
 def _cleanup_expired_trackers():

@@ -11,7 +11,7 @@ from flask import request, jsonify
 from . import auth_bp
 from .auth_helpers import extract_bearer_token
 from ..config import logger
-from ..utils import add_cache_headers, format_size, get_domain, get_image_domain
+from ..utils import add_cache_headers, format_size, get_domain, get_image_domain, get_client_ip
 from ..database import (
     verify_auth_token, verify_auth_token_access, get_token_info, update_token_usage,
     update_token_description, is_token_generation_allowed, is_token_upload_allowed,
@@ -31,9 +31,8 @@ def _extract_bearer_token() -> str:
 
 
 def _get_client_ip() -> str:
-    """提取客户端 IP（兼容反向代理 X-Forwarded-For）"""
-    xff = (request.headers.get('X-Forwarded-For') or '').strip()
-    return xff.split(',')[0].strip() if xff else (request.remote_addr or '127.0.0.1')
+    """提取客户端 IP（兼容 Cloudflare + 反向代理）"""
+    return get_client_ip(request)
 
 
 @auth_bp.route('/api/auth/token/generate', methods=['POST'])
