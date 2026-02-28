@@ -1,7 +1,7 @@
 <template>
   <div class="relative group">
     <pre
-      class="p-4 bg-stone-900 text-stone-100 rounded-lg overflow-x-auto text-sm font-mono"
+      class="w-full max-w-full overflow-x-auto rounded-lg bg-stone-900 p-4 font-mono text-sm text-stone-100"
     ><code :class="languageClass">{{ displayCode }}</code></pre>
     <button
       class="absolute top-2 right-2 p-1.5 rounded-md bg-stone-700/50 hover:bg-stone-600 text-stone-400 hover:text-stone-200 opacity-0 group-hover:opacity-100 transition-opacity"

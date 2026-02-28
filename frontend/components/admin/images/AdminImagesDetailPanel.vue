@@ -1,6 +1,6 @@
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <header class="flex items-center justify-between border-b border-stone-200 px-4 py-3 dark:border-neutral-700">
+    <header class="shrink-0 flex items-center justify-between border-b border-stone-200 px-4 py-3 dark:border-neutral-700">
       <div class="min-w-0">
         <p class="text-xs uppercase tracking-[0.16em] text-stone-500 dark:text-stone-400">Image Detail</p>
         <h3 class="truncate text-sm font-semibold text-stone-900 dark:text-white">{{ image?.filename || '图片详情' }}</h3>
@@ -141,7 +141,7 @@
       </div>
     </div>
 
-    <footer class="border-t border-stone-200 bg-white/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-neutral-700 dark:bg-neutral-900/95 sm:px-4">
+    <footer class="shrink-0 border-t border-stone-200 bg-white/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-neutral-700 dark:bg-neutral-900/95 sm:px-4">
       <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <UButton
           color="blue"

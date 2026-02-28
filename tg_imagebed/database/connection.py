@@ -5,6 +5,7 @@ import sqlite3
 import time
 import random
 import json
+import secrets
 from datetime import datetime
 from contextlib import contextmanager
 from functools import wraps
@@ -234,14 +235,66 @@ def _init_tg_auth_tables(cursor) -> None:
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS tg_sessions (
             session_token TEXT PRIMARY KEY,
+            session_id TEXT UNIQUE,
             tg_user_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at TIMESTAMP NOT NULL,
+            last_seen_at TIMESTAMP,
+            status TEXT NOT NULL DEFAULT 'active',
+            revoked_at TIMESTAMP,
+            revoke_reason TEXT,
             ip_address TEXT,
             user_agent TEXT,
             FOREIGN KEY (tg_user_id) REFERENCES tg_users(tg_user_id) ON DELETE CASCADE
         )
     ''')
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tg_session_devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_token TEXT NOT NULL UNIQUE,
+            device_id TEXT,
+            device_name TEXT,
+            platform TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at TIMESTAMP,
+            revoked_at TIMESTAMP,
+            revoke_reason TEXT,
+            FOREIGN KEY (session_token) REFERENCES tg_sessions(session_token) ON DELETE CASCADE
+        )
+    ''')
+
+    # 兼容升级：为 tg_sessions 增加会话管理字段
+    cursor.execute("PRAGMA table_info(tg_sessions)")
+    tg_session_columns = [col[1] for col in cursor.fetchall()]
+    tg_session_new_columns = [
+        ('session_id', 'TEXT'),
+        ('last_seen_at', 'TIMESTAMP'),
+        ('status', "TEXT NOT NULL DEFAULT 'active'"),
+        ('revoked_at', 'TIMESTAMP'),
+        ('revoke_reason', 'TEXT'),
+    ]
+    for col_name, col_type in tg_session_new_columns:
+        if col_name not in tg_session_columns:
+            logger.info(f"添加 {col_name} 列到 tg_sessions")
+            cursor.execute(f'ALTER TABLE tg_sessions ADD COLUMN {col_name} {col_type}')
+            tg_session_columns.append(col_name)
+
+    # 回填历史会话字段
+    try:
+        cursor.execute("UPDATE tg_sessions SET status = 'active' WHERE status IS NULL OR status = ''")
+        cursor.execute("UPDATE tg_sessions SET last_seen_at = created_at WHERE last_seen_at IS NULL")
+        cursor.execute("SELECT session_token FROM tg_sessions WHERE session_id IS NULL OR session_id = ''")
+        rows = cursor.fetchall()
+        for row in rows:
+            cursor.execute(
+                "UPDATE tg_sessions SET session_id = ? WHERE session_token = ?",
+                (secrets.token_urlsafe(12), row['session_token'])
+            )
+    except Exception as e:
+        logger.debug(f"回填 tg_sessions 字段失败（可忽略）: {e}")
 
 
 def _migrate_auth_tokens_columns(cursor) -> None:
@@ -647,6 +700,13 @@ def _create_indexes(cursor) -> None:
         ('idx_tg_login_codes_expires', 'tg_login_codes(expires_at)'),
         ('idx_tg_sessions_expires', 'tg_sessions(expires_at)'),
         ('idx_tg_sessions_user', 'tg_sessions(tg_user_id)'),
+        ('idx_tg_sessions_status', 'tg_sessions(status)'),
+        ('idx_tg_sessions_user_status', 'tg_sessions(tg_user_id, status, expires_at)'),
+        ('idx_tg_sessions_last_seen', 'tg_sessions(last_seen_at)'),
+        ('idx_tg_sessions_session_id', 'tg_sessions(session_id)'),
+        ('idx_tg_session_devices_token', 'tg_session_devices(session_token)'),
+        ('idx_tg_session_devices_device_id', 'tg_session_devices(device_id)'),
+        ('idx_tg_session_devices_last_seen', 'tg_session_devices(last_seen_at)'),
         ('idx_auth_tokens_tg_user', 'auth_tokens(tg_user_id)'),
         ('idx_custom_domains_domain', 'custom_domains(domain)'),
         ('idx_custom_domains_type', 'custom_domains(domain_type)'),

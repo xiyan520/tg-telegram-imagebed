@@ -208,7 +208,8 @@ const handleTokenVerify = async () => {
       // 普通 Token 验证
       const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/verify`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${tokenForm.token}` }
+        headers: { Authorization: `Bearer ${tokenForm.token}` },
+        credentials: 'include'
       })
       if (!response.success || !response.valid) {
         throw new Error(response.reason || 'Token 无效')

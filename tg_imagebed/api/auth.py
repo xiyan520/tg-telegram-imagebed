@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import request, jsonify
 
 from . import auth_bp
-from .auth_helpers import extract_bearer_token
+from .auth_helpers import extract_bearer_token, get_bound_token_session_issue
 from ..config import logger
 from ..utils import add_cache_headers, format_size, get_domain, get_image_domain, get_client_ip
 from ..database import (
@@ -159,6 +159,14 @@ def verify_token_api():
 
         if verification['valid']:
             token_data = verification['token_data']
+            issue = get_bound_token_session_issue(token_data)
+            if issue:
+                # verify 接口保持 200 返回，前端才能稳定识别为 tokenInvalid 并移除本地失效 token
+                return add_cache_headers(jsonify({
+                    'success': False,
+                    'valid': False,
+                    'reason': issue['reason']
+                }), 'no-cache')
             return add_cache_headers(jsonify({
                 'success': True,
                 'valid': True,
@@ -203,6 +211,9 @@ def upload_with_token():
     verification = verify_auth_token(token)
     if not verification['valid']:
         return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
+    issue = get_bound_token_session_issue(verification.get('token_data'))
+    if issue:
+        return add_cache_headers(jsonify({'success': False, 'error': issue['reason']}), 'no-cache'), issue['status']
 
     # 保存首次验证的剩余上传次数，避免上传后二次查询
     initial_remaining = verification.get('remaining_uploads', 0)
@@ -282,6 +293,9 @@ def get_token_uploads_api():
         verification = verify_auth_token_access(token)
         if not verification['valid']:
             return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
+        issue = get_bound_token_session_issue(verification.get('token_data'))
+        if issue:
+            return add_cache_headers(jsonify({'success': False, 'error': issue['reason']}), 'no-cache'), issue['status']
 
         limit = request.args.get('limit', 50, type=int)
         page = request.args.get('page', 1, type=int)
@@ -338,6 +352,9 @@ def token_profile_api():
     verification = verify_auth_token_access(token)
     if not verification['valid']:
         return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
+    issue = get_bound_token_session_issue(verification.get('token_data'))
+    if issue:
+        return add_cache_headers(jsonify({'success': False, 'error': issue['reason']}), 'no-cache'), issue['status']
 
     token_data = verification['token_data']
 
@@ -575,6 +592,9 @@ def user_delete_image(encrypted_id):
     verification = verify_auth_token_access(token)
     if not verification['valid']:
         return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
+    issue = get_bound_token_session_issue(verification.get('token_data'))
+    if issue:
+        return add_cache_headers(jsonify({'success': False, 'error': issue['reason']}), 'no-cache'), issue['status']
 
     # 是否同时删除存储文件（默认 true，仅删记录时传 false）
     delete_storage = request.args.get('delete_storage', 'true').lower() not in ('false', '0')
@@ -601,6 +621,9 @@ def user_batch_delete_images():
     verification = verify_auth_token_access(token)
     if not verification['valid']:
         return add_cache_headers(jsonify({'success': False, 'error': f"Token无效: {verification['reason']}"}), 'no-cache'), 401
+    issue = get_bound_token_session_issue(verification.get('token_data'))
+    if issue:
+        return add_cache_headers(jsonify({'success': False, 'error': issue['reason']}), 'no-cache'), issue['status']
 
     data = request.get_json(silent=True) or {}
     ids = data.get('ids', [])

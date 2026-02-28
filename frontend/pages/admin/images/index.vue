@@ -124,8 +124,8 @@
       </div>
     </div>
 
-    <UModal v-model="detailModalOpen" :ui="{ width: 'sm:max-w-5xl', height: 'max-h-[92dvh]' }">
-      <div class="max-h-[90dvh] overflow-hidden rounded-xl bg-white dark:bg-neutral-900">
+    <UModal v-model="detailModalOpen" :ui="{ width: 'sm:max-w-5xl', height: 'h-[92dvh] sm:h-auto sm:max-h-[92dvh]' }">
+      <div class="h-full min-h-0 overflow-hidden rounded-xl bg-white dark:bg-neutral-900">
         <AdminImagesDetailPanel
           :image="selectedImage"
           :has-prev="hasPrevDetail"

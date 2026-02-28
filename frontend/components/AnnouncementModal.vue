@@ -1,5 +1,12 @@
 <template>
-  <UModal v-model="isOpen" :ui="{ width: 'sm:max-w-3xl' }">
+  <UModal
+    v-model="isOpen"
+    :ui="{
+      width: 'sm:max-w-3xl',
+      container: 'flex items-center justify-center',
+      base: '!bg-transparent dark:!bg-transparent !shadow-none !rounded-[1.5rem] !overflow-visible'
+    }"
+  >
     <div class="overflow-hidden rounded-3xl border border-amber-200/80 bg-white/95 shadow-[0_22px_55px_-26px_rgba(245,158,11,0.5)] backdrop-blur dark:border-amber-800/50 dark:bg-neutral-900/95">
       <div class="border-b border-amber-100/80 bg-gradient-to-r from-amber-50/80 to-orange-50/60 px-4 py-3 dark:border-amber-800/50 dark:from-amber-900/20 dark:to-orange-900/10 sm:px-6 sm:py-4">
         <div class="flex items-start justify-between gap-3">
@@ -19,11 +26,12 @@
       </div>
 
       <div class="max-h-[62vh] overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-        <div
-          v-if="announcement.content.trim()"
-          class="announcement-modal-content prose max-w-none text-sm dark:prose-invert sm:text-base"
-          v-html="announcement.content"
-        />
+        <div v-if="announcement.content.trim()" class="announcement-content-shell">
+          <div
+            class="announcement-modal-content prose max-w-none text-sm dark:prose-invert sm:text-base"
+            v-html="announcement.content"
+          />
+        </div>
         <div v-else class="flex min-h-[180px] items-center justify-center rounded-2xl border border-dashed border-stone-300 bg-stone-50/70 text-sm text-stone-500 dark:border-neutral-700 dark:bg-neutral-800/60 dark:text-stone-400">
           暂无公告内容
         </div>
@@ -116,8 +124,27 @@ defineExpose({
 </script>
 
 <style scoped>
+.announcement-content-shell {
+  border-radius: 1rem;
+  border: 1px solid rgb(231 229 228 / 0.85);
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.95), rgb(250 250 249 / 0.85));
+  overflow: hidden;
+}
+
+.dark .announcement-content-shell {
+  border-color: rgb(64 64 64 / 0.8);
+  background: linear-gradient(145deg, rgb(23 23 23 / 0.88), rgb(15 23 42 / 0.62));
+}
+
 .announcement-modal-content {
+  padding: 1rem 1.1rem;
   color: rgb(63 63 70);
+}
+
+@media (min-width: 640px) {
+  .announcement-modal-content {
+    padding: 1.2rem 1.35rem;
+  }
 }
 
 .dark .announcement-modal-content {
@@ -144,5 +171,20 @@ defineExpose({
 .announcement-modal-content:deep(a) {
   text-decoration: underline;
   text-underline-offset: 0.15em;
+}
+
+.announcement-modal-content:deep(img),
+.announcement-modal-content:deep(video),
+.announcement-modal-content:deep(iframe),
+.announcement-modal-content:deep(pre),
+.announcement-modal-content:deep(blockquote),
+.announcement-modal-content:deep(table) {
+  border-radius: 0.8rem;
+  overflow: hidden;
+}
+
+.announcement-modal-content:deep(table) {
+  display: block;
+  width: 100%;
 }
 </style>

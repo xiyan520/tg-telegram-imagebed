@@ -225,6 +225,21 @@ export const useTokenStore = defineStore('token', {
       this.syncActiveFromVault()
     },
 
+    removeBoundTokens() {
+      const retained = this.vault.items.filter(item => !item.tokenInfo?.tg_user_id)
+      const removed = this.vault.items.length - retained.length
+      if (removed <= 0) return 0
+
+      const activeRemoved = !!this.vault.activeId && !retained.some(item => item.id === this.vault.activeId)
+      this.vault.items = retained
+      if (activeRemoved) {
+        this.vault.activeId = retained[0]?.id || null
+      }
+      this.persistVault()
+      this.syncActiveFromVault()
+      return removed
+    },
+
     async addTokenToVault(token: string, opts?: { albumName?: string; makeActive?: boolean; verify?: boolean }) {
       const t = (token || '').trim()
       if (!t) throw new Error('Token不能为空')
@@ -235,7 +250,8 @@ export const useTokenStore = defineStore('token', {
         const config = useRuntimeConfig()
         const response = await $fetch<any>(`${config.public.apiBase}/api/auth/token/verify`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${t}` }
+          headers: { Authorization: `Bearer ${t}` },
+          credentials: 'include'
         })
         if (!response?.success || !response?.valid) {
           const err: any = new Error(response?.reason || 'Token无效或不存在')
@@ -343,7 +359,8 @@ export const useTokenStore = defineStore('token', {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${this.token}`
-          }
+          },
+          credentials: 'include'
         })
 
         if (response.success && response.valid) {
@@ -426,6 +443,7 @@ export const useTokenStore = defineStore('token', {
           headers: {
             'Authorization': `Bearer ${this.token}`
           },
+          credentials: 'include',
           params: { page, limit, _t: Date.now() }
         })
 
@@ -464,7 +482,8 @@ export const useTokenStore = defineStore('token', {
         try {
           await $fetch(`${config.public.apiBase}/api/auth/token${qs}`, {
             method: 'DELETE',
-            headers: { Authorization: `Bearer ${item.token}` }
+            headers: { Authorization: `Bearer ${item.token}` },
+            credentials: 'include'
           })
         } catch {
           // 静默忽略单个删除失败（Token 可能已失效）
@@ -486,7 +505,8 @@ export const useTokenStore = defineStore('token', {
       const qs = opts?.deleteImages ? '?delete_images=true' : ''
       await $fetch(`${config.public.apiBase}/api/auth/token${qs}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${item.token}` }
+        headers: { Authorization: `Bearer ${item.token}` },
+        credentials: 'include'
       })
 
       // 后端删除成功后，从本地 vault 移除
@@ -500,6 +520,7 @@ export const useTokenStore = defineStore('token', {
       const response = await $fetch<ApiResponse<{ token: string; description: string }>>(`${config.public.apiBase}/api/auth/token`, {
         method: 'PATCH',
         headers: { Authorization: `Bearer ${this.token}` },
+        credentials: 'include',
         body: { description }
       })
       if (!response?.success) throw new Error(response?.error || '更新失败')

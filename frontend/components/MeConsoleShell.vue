@@ -80,7 +80,15 @@
 </template>
 
 <script setup lang="ts">
-export type MeNavKey = 'overview' | 'tokens' | 'uploads' | 'galleries' | 'tg'
+export type MeNavKey =
+  | 'overview'
+  | 'assets'
+  | 'sessions'
+  | 'security'
+  | 'tokens'
+  | 'uploads'
+  | 'galleries'
+  | 'tg'
 
 export interface MeNavItem {
   key: MeNavKey

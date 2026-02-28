@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import type { ApiResponse } from '~/types/api'
+import type { TgSessionItem, TgSessionListData } from '~/types/tg-session'
+import { getClientDeviceFingerprint } from '~/utils/deviceFingerprint'
 
 interface TgUser {
   tg_user_id: number
@@ -7,11 +9,49 @@ interface TgUser {
   first_name: string
   token_count: number
   max_tokens: number
+  current_session_id?: string
+  online_sessions_count?: number
 }
 
-// 从 $fetch 错误中提取后端返回的 error 字段
 function extractError(e: any, fallback: string): string {
   return e?.data?.error || e?.message || fallback
+}
+
+function getTgDeviceFingerprint() {
+  return getClientDeviceFingerprint({
+    deviceIdKey: 'tg_device_id',
+    deviceIdPrefix: 'dev'
+  })
+}
+
+function buildClientHeaders() {
+  return getTgDeviceFingerprint().headers
+}
+
+function buildCurrentBrowserFallbackSession(currentSessionId?: string): TgSessionItem {
+  const fp = getTgDeviceFingerprint()
+  const now = new Date().toISOString()
+  const deviceId = fp.deviceId || ''
+  const platform = fp.platform || 'web'
+  const deviceName = fp.deviceLabel
+  const fallbackSessionId = currentSessionId || (deviceId ? `local-${deviceId.slice(0, 12)}` : `local-${Date.now().toString(36)}`)
+
+  return {
+    session_id: fallbackSessionId,
+    device_id: deviceId,
+    device_name: deviceName || platform || 'Current Browser',
+    device_label: fp.deviceLabel,
+    os_name: fp.osName,
+    browser_name: fp.browserName,
+    browser_version: fp.browserVersion,
+    platform: platform || 'web',
+    ip_address: '',
+    user_agent: import.meta.client ? (navigator.userAgent || '') : '',
+    created_at: now,
+    last_seen_at: now,
+    expires_at: '',
+    is_current: true
+  }
 }
 
 export const useTgAuthStore = defineStore('tgAuth', {
@@ -19,6 +59,9 @@ export const useTgAuthStore = defineStore('tgAuth', {
     user: null as TgUser | null,
     isLoggedIn: false,
     loading: false,
+    sessions: [] as TgSessionItem[],
+    currentSessionId: '' as string,
+    onlineSessionCount: 0,
   }),
 
   actions: {
@@ -27,17 +70,26 @@ export const useTgAuthStore = defineStore('tgAuth', {
       try {
         const res = await $fetch<ApiResponse<TgUser>>(`${config.public.apiBase}/api/auth/tg/session`, {
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (res.success && res.data) {
           this.user = res.data
           this.isLoggedIn = true
+          this.currentSessionId = res.data.current_session_id || ''
+          this.onlineSessionCount = res.data.online_sessions_count || 0
         } else {
           this.user = null
           this.isLoggedIn = false
+          this.currentSessionId = ''
+          this.onlineSessionCount = 0
+          this.sessions = []
         }
       } catch {
         this.user = null
         this.isLoggedIn = false
+        this.currentSessionId = ''
+        this.onlineSessionCount = 0
+        this.sessions = []
       }
     },
 
@@ -48,6 +100,7 @@ export const useTgAuthStore = defineStore('tgAuth', {
           method: 'POST',
           body: { tg_username: username },
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (!res.success) throw new Error(res.error || '发送验证码失败')
         return res.data
@@ -63,6 +116,7 @@ export const useTgAuthStore = defineStore('tgAuth', {
           method: 'POST',
           body: { tg_username: username, code },
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (!res.success) throw new Error(res.error || '验证码无效')
         await this.checkSession()
@@ -79,6 +133,7 @@ export const useTgAuthStore = defineStore('tgAuth', {
           method: 'POST',
           body: { code },
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (!res.success) throw new Error(res.error || '登录链接无效')
         await this.checkSession()
@@ -94,10 +149,14 @@ export const useTgAuthStore = defineStore('tgAuth', {
         await $fetch<ApiResponse>(`${config.public.apiBase}/api/auth/tg/logout`, {
           method: 'POST',
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
       } catch { /* 忽略 */ }
       this.user = null
       this.isLoggedIn = false
+      this.currentSessionId = ''
+      this.onlineSessionCount = 0
+      this.sessions = []
     },
 
     async getMyTokens() {
@@ -105,6 +164,7 @@ export const useTgAuthStore = defineStore('tgAuth', {
       try {
         const res = await $fetch<ApiResponse<{ tokens: any[] }>>(`${config.public.apiBase}/api/auth/tg/tokens`, {
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (!res.success) throw new Error(res.error || '获取 Token 列表失败')
         return res.data?.tokens || []
@@ -113,17 +173,13 @@ export const useTgAuthStore = defineStore('tgAuth', {
       }
     },
 
-    /**
-     * TG 登录/绑定后，自动同步该用户下所有 Token 到本地 vault。
-     * 调用 /api/auth/tg/sync-tokens 获取完整 token 字符串 + tokenInfo，
-     * 逐个添加到 tokenStore vault（已存在则跳过），并填充 tokenInfo。
-     */
     async syncTokensToVault() {
       const config = useRuntimeConfig()
       const tokenStore = useTokenStore()
       try {
         const res = await $fetch<ApiResponse<{ tokens: any[] }>>(`${config.public.apiBase}/api/auth/tg/sync-tokens`, {
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (!res.success || !res.data?.tokens?.length) return
 
@@ -134,7 +190,6 @@ export const useTgAuthStore = defineStore('tgAuth', {
             makeActive: false,
             verify: false,
           })
-          // 用后端返回的数据填充 tokenInfo，避免需要逐个 verify
           if (vaultId) {
             const item = tokenStore.vaultItems.find(i => i.id === vaultId)
             if (item) {
@@ -154,15 +209,13 @@ export const useTgAuthStore = defineStore('tgAuth', {
           }
         }
         tokenStore.persistVault()
-        // 如果当前没有激活的 Token，自动选择第一个
         if (!tokenStore.hasToken && tokenStore.vaultItems.length > 0) {
           await tokenStore.setActiveTokenById(tokenStore.vaultItems[0].id, { verify: true })
         } else {
-          // 激活的 Token 可能 tokenInfo 也被更新了，同步到顶层状态
           tokenStore.syncActiveFromVault()
         }
       } catch {
-        // 同步失败静默忽略，不影响主流程
+        // 同步失败不阻断主流程
       }
     },
 
@@ -172,6 +225,7 @@ export const useTgAuthStore = defineStore('tgAuth', {
         const res = await $fetch<ApiResponse<{ code: string; bot_username: string }>>(`${config.public.apiBase}/api/auth/tg/web-code`, {
           method: 'POST',
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (!res.success || !res.data) throw new Error(res.error || '生成验证码失败')
         return res.data
@@ -186,15 +240,81 @@ export const useTgAuthStore = defineStore('tgAuth', {
         const res = await $fetch<ApiResponse<{ status: 'pending' | 'ok' | 'expired' }>>(`${config.public.apiBase}/api/auth/tg/code-status`, {
           params: { code },
           credentials: 'include',
+          headers: buildClientHeaders(),
         })
         if (!res.success || !res.data) throw new Error(res.error || '查询状态失败')
-        // 登录成功时 Cookie 已由后端设置，刷新会话状态
         if (res.data.status === 'ok') {
           await this.checkSession()
         }
         return res.data
       } catch (e: any) {
         throw new Error(extractError(e, '查询状态失败'))
+      }
+    },
+
+    async fetchSessions() {
+      const config = useRuntimeConfig()
+      try {
+        const res = await $fetch<ApiResponse<TgSessionListData>>(`${config.public.apiBase}/api/auth/tg/sessions`, {
+          credentials: 'include',
+          headers: buildClientHeaders(),
+        })
+        if (!res.success || !res.data) throw new Error(res.error || '获取在线会话失败')
+        const currentSessionId = res.data.current_session_id || this.currentSessionId
+        let sessions = Array.isArray(res.data.sessions) ? [...res.data.sessions] : []
+        if (!sessions.some(s => s.is_current)) {
+          sessions.unshift(buildCurrentBrowserFallbackSession(currentSessionId))
+        } else if (currentSessionId) {
+          sessions = sessions.map(s => ({
+            ...s,
+            is_current: Boolean(s.is_current || s.session_id === currentSessionId)
+          }))
+        }
+
+        this.sessions = sessions
+        this.currentSessionId = currentSessionId || sessions.find(s => s.is_current)?.session_id || ''
+        this.onlineSessionCount = Math.max(Number(res.data.count || 0), sessions.length)
+        if (this.user) {
+          this.user.online_sessions_count = this.onlineSessionCount
+          this.user.current_session_id = this.currentSessionId
+        }
+        return this.sessions
+      } catch (e: any) {
+        throw new Error(extractError(e, '获取在线会话失败'))
+      }
+    },
+
+    async revokeSession(sessionId: string) {
+      const config = useRuntimeConfig()
+      try {
+        const res = await $fetch<ApiResponse<{ revoked_session_id: string }>>(`${config.public.apiBase}/api/auth/tg/sessions/revoke`, {
+          method: 'POST',
+          body: { session_id: sessionId },
+          credentials: 'include',
+          headers: buildClientHeaders(),
+        })
+        if (!res.success) throw new Error(res.error || '下线失败')
+        this.sessions = this.sessions.filter(s => s.session_id !== sessionId)
+        this.onlineSessionCount = Math.max(0, this.onlineSessionCount - 1)
+        if (this.user) this.user.online_sessions_count = this.onlineSessionCount
+        return res.data
+      } catch (e: any) {
+        throw new Error(extractError(e, '下线失败'))
+      }
+    },
+
+    async heartbeat() {
+      const config = useRuntimeConfig()
+      try {
+        const res = await $fetch<ApiResponse<{ server_time: number }>>(`${config.public.apiBase}/api/auth/tg/sessions/heartbeat`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: buildClientHeaders(),
+        })
+        if (!res.success) throw new Error(res.error || '会话心跳失败')
+        return res.data
+      } catch (e: any) {
+        throw new Error(extractError(e, '会话心跳失败'))
       }
     },
   }

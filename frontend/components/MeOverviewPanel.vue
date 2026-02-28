@@ -10,7 +10,7 @@
         </div>
       </template>
 
-      <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+      <div class="grid grid-cols-2 xl:grid-cols-5 gap-3">
         <div class="rounded-xl border border-stone-200 dark:border-stone-700 p-3 bg-stone-50/70 dark:bg-neutral-800/70">
           <p class="text-xs text-stone-500 dark:text-stone-400">Token 数量</p>
           <p class="text-xl font-semibold text-stone-900 dark:text-white mt-1">{{ tokenCount }}</p>
@@ -28,6 +28,10 @@
           <p class="text-sm font-semibold mt-2" :class="isTgLoggedIn ? 'text-blue-600 dark:text-blue-400' : 'text-stone-700 dark:text-stone-300'">
             {{ isTgLoggedIn ? '已绑定 Telegram' : '未绑定 Telegram' }}
           </p>
+        </div>
+        <div class="rounded-xl border border-stone-200 dark:border-stone-700 p-3 bg-stone-50/70 dark:bg-neutral-800/70">
+          <p class="text-xs text-stone-500 dark:text-stone-400">在线会话</p>
+          <p class="text-xl font-semibold text-stone-900 dark:text-white mt-1">{{ sessionCount }}</p>
         </div>
       </div>
 
@@ -57,28 +61,31 @@
         <UButton color="gray" variant="soft" icon="heroicons:clock" @click="emit('open-history')">
           上传历史
         </UButton>
-        <UButton color="gray" variant="soft" icon="heroicons:key" @click="emit('navigate', 'tokens')">
-          管理 Token
+        <UButton color="gray" variant="soft" icon="heroicons:squares-2x2" @click="emit('navigate', 'assets')">
+          资产中心
         </UButton>
-        <UButton color="gray" variant="soft" icon="heroicons:cloud-arrow-up" @click="emit('navigate', 'uploads')">
-          我的上传
-        </UButton>
-        <UButton color="gray" variant="soft" icon="heroicons:photo" @click="emit('navigate', 'galleries')">
-          画集管理
+        <UButton
+          v-if="showSessionAction"
+          color="gray"
+          variant="soft"
+          icon="heroicons:signal"
+          @click="emit('navigate', 'sessions')"
+        >
+          在线会话
         </UButton>
         <UButton
           v-if="showTgAction"
           color="gray"
           variant="soft"
-          icon="heroicons:chat-bubble-left-right"
-          @click="emit('navigate', 'tg')"
+          icon="heroicons:shield-check"
+          @click="emit('navigate', 'security')"
         >
-          TG 绑定
+          安全中心
         </UButton>
       </div>
 
       <div v-if="hasUnboundTokens" class="mt-3 p-3 rounded-xl border border-blue-200 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20">
-        <p class="text-xs text-blue-700 dark:text-blue-300">检测到未绑定的 Token，可在 TG 绑定中完成关联。</p>
+        <p class="text-xs text-blue-700 dark:text-blue-300">检测到未绑定的 Token，可在安全中心完成关联。</p>
       </div>
     </UCard>
   </div>
@@ -94,7 +101,9 @@ const props = defineProps<{
   uploadCount: number
   uploadLimit: number
   remainingUploads: number
+  sessionCount: number
   hasUnboundTokens: boolean
+  showSessionAction?: boolean
   showTgAction?: boolean
 }>()
 

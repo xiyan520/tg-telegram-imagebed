@@ -2,13 +2,12 @@
 # -*- coding: utf-8 -*-
 """TG 认证数据访问层"""
 import secrets
-import string
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 
 from ..config import logger
 from .connection import get_connection, db_retry
-from .settings import get_system_setting, get_system_setting_int
+from .settings import get_system_setting_int
 
 
 # ===================== TG 用户管理 =====================
@@ -147,29 +146,106 @@ def verify_login_code(code: str, code_type: str = 'verify') -> Optional[Dict]:
 
 # ===================== TG 会话管理 =====================
 
-@db_retry()
-def create_tg_session(tg_user_id: int, ip_address: str = None,
-                      user_agent: str = None) -> Optional[str]:
-    """创建 TG 登录会话
+def _new_session_id() -> str:
+    """生成对外会话 ID（避免暴露 session_token）"""
+    return secrets.token_urlsafe(12)
 
-    Returns:
-        session_token 字符串，失败返回 None
-    """
+
+def _upsert_session_device(
+    cursor,
+    session_token: str,
+    *,
+    device_id: str = None,
+    device_name: str = None,
+    platform: str = None,
+    ip_address: str = None,
+    user_agent: str = None,
+    revoke_reason: str = None,
+    revoked: bool = False,
+) -> None:
+    """维护 tg_session_devices 记录"""
+    cursor.execute(
+        "SELECT id FROM tg_session_devices WHERE session_token = ?",
+        (session_token,)
+    )
+    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    row = cursor.fetchone()
+    if row:
+        if revoked:
+            cursor.execute(
+                '''
+                UPDATE tg_session_devices
+                SET revoked_at = CURRENT_TIMESTAMP,
+                    revoke_reason = COALESCE(?, revoke_reason)
+                WHERE session_token = ?
+                ''',
+                (revoke_reason, session_token)
+            )
+            return
+        cursor.execute(
+            '''
+            UPDATE tg_session_devices
+            SET device_id = COALESCE(NULLIF(?, ''), device_id),
+                device_name = COALESCE(NULLIF(?, ''), device_name),
+                platform = COALESCE(NULLIF(?, ''), platform),
+                ip_address = COALESCE(NULLIF(?, ''), ip_address),
+                user_agent = COALESCE(NULLIF(?, ''), user_agent),
+                last_seen_at = ?
+            WHERE session_token = ?
+            ''',
+            (device_id, device_name, platform, ip_address, user_agent, now, session_token)
+        )
+    else:
+        cursor.execute(
+            '''
+            INSERT INTO tg_session_devices (
+                session_token, device_id, device_name, platform, ip_address, user_agent, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (session_token, device_id, device_name, platform, ip_address, user_agent, now)
+        )
+
+
+@db_retry()
+def create_tg_session(
+    tg_user_id: int,
+    ip_address: str = None,
+    user_agent: str = None,
+    device_id: str = None,
+    device_name: str = None,
+    platform: str = None,
+) -> Optional[str]:
+    """创建 TG 登录会话"""
     try:
         expire_days = get_system_setting_int('tg_session_expire_days', 30, minimum=1, maximum=365)
         expires_at = datetime.utcnow() + timedelta(days=expire_days)
         session_token = secrets.token_urlsafe(48)  # 64 字符
+        session_id = _new_session_id()
+        now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
 
         with get_connection() as conn:
             cursor = conn.cursor()
-            # 惰性清理过期会话
             cursor.execute('DELETE FROM tg_sessions WHERE expires_at < CURRENT_TIMESTAMP')
-
-            cursor.execute('''
-                INSERT INTO tg_sessions (session_token, tg_user_id, expires_at, ip_address, user_agent)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (session_token, tg_user_id, expires_at.strftime('%Y-%m-%d %H:%M:%S'),
-                  ip_address, user_agent))
+            cursor.execute(
+                '''
+                INSERT INTO tg_sessions (
+                    session_token, session_id, tg_user_id, expires_at, last_seen_at, status, ip_address, user_agent
+                ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+                ''',
+                (
+                    session_token, session_id, tg_user_id, expires_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    now, ip_address, user_agent
+                )
+            )
+            _upsert_session_device(
+                cursor,
+                session_token,
+                device_id=device_id,
+                device_name=device_name,
+                platform=platform,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
             return session_token
     except Exception as e:
         logger.error(f"create_tg_session 失败: {e}")
@@ -178,22 +254,24 @@ def create_tg_session(tg_user_id: int, ip_address: str = None,
 
 @db_retry()
 def verify_tg_session(session_token: str) -> Optional[Dict]:
-    """验证 TG 会话
-
-    Returns:
-        成功返回 {'tg_user_id', 'username', 'first_name', ...}，失败返回 None
-    """
+    """验证 TG 会话，返回会话与用户信息"""
     if not session_token:
         return None
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-                SELECT s.tg_user_id, s.expires_at, u.username, u.first_name, u.last_name, u.is_blocked
+            cursor.execute(
+                '''
+                SELECT s.session_id, s.session_token, s.tg_user_id, s.created_at, s.expires_at, s.last_seen_at,
+                       s.ip_address, s.user_agent, u.username, u.first_name, u.last_name, u.is_blocked
                 FROM tg_sessions s
                 JOIN tg_users u ON s.tg_user_id = u.tg_user_id
-                WHERE s.session_token = ? AND s.expires_at > CURRENT_TIMESTAMP
-            ''', (session_token,))
+                WHERE s.session_token = ?
+                  AND s.expires_at > CURRENT_TIMESTAMP
+                  AND COALESCE(s.status, 'active') = 'active'
+                ''',
+                (session_token,)
+            )
             row = cursor.fetchone()
             if not row:
                 return None
@@ -203,6 +281,166 @@ def verify_tg_session(session_token: str) -> Optional[Dict]:
     except Exception as e:
         logger.error(f"verify_tg_session 失败: {e}")
         return None
+
+
+@db_retry()
+def touch_tg_session(
+    session_token: str,
+    *,
+    ip_address: str = None,
+    user_agent: str = None,
+    device_id: str = None,
+    device_name: str = None,
+    platform: str = None,
+    min_interval_seconds: int = 30,
+) -> bool:
+    """刷新会话活跃时间并维护设备信息（节流）"""
+    if not session_token:
+        return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT created_at, last_seen_at, status
+                FROM tg_sessions
+                WHERE session_token = ? AND expires_at > CURRENT_TIMESTAMP
+                ''',
+                (session_token,)
+            )
+            row = cursor.fetchone()
+            if not row or (row['status'] or 'active') != 'active':
+                return False
+
+            now = datetime.utcnow()
+            can_update = True
+            last_seen_raw = row['last_seen_at'] or row['created_at']
+            if last_seen_raw and min_interval_seconds > 0:
+                try:
+                    last_seen_dt = datetime.strptime(last_seen_raw, '%Y-%m-%d %H:%M:%S')
+                    can_update = (now - last_seen_dt).total_seconds() >= min_interval_seconds
+                except Exception:
+                    can_update = True
+
+            if can_update:
+                now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+                cursor.execute(
+                    '''
+                    UPDATE tg_sessions
+                    SET last_seen_at = ?,
+                        ip_address = COALESCE(NULLIF(?, ''), ip_address),
+                        user_agent = COALESCE(NULLIF(?, ''), user_agent)
+                    WHERE session_token = ?
+                    ''',
+                    (now_str, ip_address, user_agent, session_token)
+                )
+                _upsert_session_device(
+                    cursor,
+                    session_token,
+                    device_id=device_id,
+                    device_name=device_name,
+                    platform=platform,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                )
+            return True
+    except Exception as e:
+        logger.error(f"touch_tg_session 失败: {e}")
+        return False
+
+
+@db_retry()
+def list_tg_sessions(tg_user_id: int, current_session_token: str = '') -> List[Dict]:
+    """列出当前用户活跃会话（按最近活跃倒序）"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT s.session_id, s.session_token, s.created_at, s.expires_at,
+                       s.last_seen_at, s.ip_address, s.user_agent,
+                       d.device_id, d.device_name, d.platform, d.last_seen_at AS device_last_seen_at
+                FROM tg_sessions s
+                LEFT JOIN tg_session_devices d ON d.session_token = s.session_token
+                WHERE s.tg_user_id = ?
+                  AND s.expires_at > CURRENT_TIMESTAMP
+                  AND COALESCE(s.status, 'active') = 'active'
+                ORDER BY COALESCE(s.last_seen_at, s.created_at) DESC, s.created_at DESC
+                ''',
+                (tg_user_id,)
+            )
+            items = []
+            for row in cursor.fetchall():
+                item = dict(row)
+                item['is_current'] = bool(current_session_token and row['session_token'] == current_session_token)
+                items.append(item)
+            return items
+    except Exception as e:
+        logger.error(f"list_tg_sessions 失败: {e}")
+        return []
+
+
+@db_retry()
+def count_tg_sessions(tg_user_id: int) -> int:
+    """统计当前用户活跃会话数量"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM tg_sessions
+                WHERE tg_user_id = ?
+                  AND expires_at > CURRENT_TIMESTAMP
+                  AND COALESCE(status, 'active') = 'active'
+                ''',
+                (tg_user_id,)
+            )
+            row = cursor.fetchone()
+            return int(row[0]) if row else 0
+    except Exception as e:
+        logger.error(f"count_tg_sessions 失败: {e}")
+        return 0
+
+
+@db_retry()
+def revoke_tg_session(session_id: str, tg_user_id: int, reason: str = 'manual') -> bool:
+    """撤销指定会话（仅本人）"""
+    if not session_id:
+        return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                UPDATE tg_sessions
+                SET status = 'revoked',
+                    revoked_at = CURRENT_TIMESTAMP,
+                    revoke_reason = ?
+                WHERE session_id = ?
+                  AND tg_user_id = ?
+                  AND COALESCE(status, 'active') = 'active'
+                ''',
+                (reason, session_id, tg_user_id)
+            )
+            updated = cursor.rowcount > 0
+            if updated:
+                cursor.execute(
+                    "SELECT session_token FROM tg_sessions WHERE session_id = ? AND tg_user_id = ?",
+                    (session_id, tg_user_id)
+                )
+                row = cursor.fetchone()
+                if row:
+                    _upsert_session_device(
+                        cursor,
+                        row['session_token'],
+                        revoke_reason=reason,
+                        revoked=True,
+                    )
+            return updated
+    except Exception as e:
+        logger.error(f"revoke_tg_session 失败: {e}")
+        return False
 
 
 @db_retry()

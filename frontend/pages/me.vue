@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="space-y-4 me-workbench">
     <UCard v-if="!tokenStore.hasToken && !tgAuth.isLoggedIn" class="shadow-sm">
       <div class="text-center py-8 space-y-4">
         <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
@@ -31,35 +31,73 @@
         :upload-count="tokenStore.uploadCount"
         :upload-limit="tokenStore.uploadLimit"
         :remaining-uploads="tokenStore.remainingUploads"
+        :session-count="tgAuth.onlineSessionCount || tgAuth.sessions.length"
         :has-unbound-tokens="hasUnboundTokens"
+        :show-session-action="publicSettings.tgAuthEnabled"
         :show-tg-action="tgEffective"
         @navigate="navigatePanel"
         @generate-token="handleQuickGenerate"
         @open-history="historyOpen = true"
       />
 
-      <MeTokenPanel v-else-if="activePanel === 'tokens'" />
+      <template v-else-if="activePanel === 'assets'">
+        <UCard class="asset-tab-shell">
+          <div class="flex flex-wrap items-center gap-2">
+            <UButton
+              size="xs"
+              :color="assetTab === 'tokens' ? 'primary' : 'gray'"
+              :variant="assetTab === 'tokens' ? 'solid' : 'soft'"
+              icon="heroicons:key"
+              @click="assetTab = 'tokens'"
+            >
+              Token
+            </UButton>
+            <UButton
+              size="xs"
+              :color="assetTab === 'uploads' ? 'primary' : 'gray'"
+              :variant="assetTab === 'uploads' ? 'solid' : 'soft'"
+              icon="heroicons:cloud-arrow-up"
+              @click="assetTab = 'uploads'"
+            >
+              上传
+            </UButton>
+            <UButton
+              size="xs"
+              :color="assetTab === 'galleries' ? 'primary' : 'gray'"
+              :variant="assetTab === 'galleries' ? 'solid' : 'soft'"
+              icon="heroicons:photo"
+              @click="assetTab = 'galleries'"
+            >
+              画集
+            </UButton>
+          </div>
+        </UCard>
 
-      <template v-else-if="activePanel === 'uploads'">
-        <AlbumMyUploads :key="'uploads-' + refreshKey" @view-image="openLightbox" @navigate="() => {}" />
+        <MeTokenPanel v-if="assetTab === 'tokens'" />
+
+        <template v-else-if="assetTab === 'uploads'">
+          <AlbumMyUploads :key="'uploads-' + refreshKey" @view-image="openLightbox" @navigate="() => {}" />
+        </template>
+
+        <template v-else-if="assetTab === 'galleries'">
+          <AlbumGalleryList
+            v-if="galleryView === 'list'"
+            :key="'gallery-list-' + refreshKey"
+            @navigate="handleGalleryNavigate"
+          />
+          <AlbumGalleryDetail
+            v-else-if="galleryView === 'detail' && activeGalleryId"
+            :key="'gallery-detail-' + activeGalleryId + '-' + refreshKey"
+            :gallery-id="activeGalleryId"
+            @navigate="handleGalleryNavigate"
+            @view-image="openLightbox"
+          />
+        </template>
       </template>
 
-      <template v-else-if="activePanel === 'galleries'">
-        <AlbumGalleryList
-          v-if="galleryView === 'list'"
-          :key="'gallery-list-' + refreshKey"
-          @navigate="handleGalleryNavigate"
-        />
-        <AlbumGalleryDetail
-          v-else-if="galleryView === 'detail' && activeGalleryId"
-          :key="'gallery-detail-' + activeGalleryId + '-' + refreshKey"
-          :gallery-id="activeGalleryId"
-          @navigate="handleGalleryNavigate"
-          @view-image="openLightbox"
-        />
-      </template>
+      <MeSessionPanel v-else-if="activePanel === 'sessions'" />
 
-      <MeTgBindPanel v-else-if="activePanel === 'tg'" />
+      <MeTgIdentityPanel v-else-if="activePanel === 'security'" />
     </MeConsoleShell>
 
     <HomeUploadHistory v-model:open="historyOpen" />
@@ -77,6 +115,7 @@ const { publicSettings, tgEffective, loadSettings, logout } = useGuestAuth()
 const toast = useLightToast()
 
 const activePanel = ref<MeNavKey>('overview')
+const assetTab = ref<'tokens' | 'uploads' | 'galleries'>('tokens')
 const refreshKey = ref(0)
 const historyOpen = ref(false)
 const generatingToken = ref(false)
@@ -95,13 +134,18 @@ const hasUnboundTokens = computed(() =>
 const navItems = computed<MeNavItem[]>(() => {
   const items: MeNavItem[] = [
     { key: 'overview', label: '总览', icon: 'heroicons:home-modern' },
-    { key: 'tokens', label: 'Token 管理', icon: 'heroicons:key' },
-    { key: 'uploads', label: '我的上传', icon: 'heroicons:cloud-arrow-up' },
-    { key: 'galleries', label: '画集', icon: 'heroicons:photo' },
+    { key: 'assets', label: '资产中心', icon: 'heroicons:squares-2x2' },
     {
-      key: 'tg',
-      label: 'TG 绑定',
-      icon: 'heroicons:chat-bubble-left-right',
+      key: 'sessions',
+      label: '在线会话',
+      icon: 'heroicons:signal',
+      hidden: !publicSettings.value.tgAuthEnabled,
+      badge: tgAuth.onlineSessionCount > 0 ? tgAuth.onlineSessionCount : undefined
+    },
+    {
+      key: 'security',
+      label: '安全中心',
+      icon: 'heroicons:shield-check',
       hidden: !tgEffective.value,
       badge: hasUnboundTokens.value ? true : undefined
     },
@@ -111,21 +155,21 @@ const navItems = computed<MeNavItem[]>(() => {
 
 const panelTitle = computed(() => {
   if (tgAuth.isLoggedIn && tgAuth.user) {
-    return tgAuth.user.first_name || tgAuth.user.username || '游客控制台'
+    return tgAuth.user.first_name || tgAuth.user.username || '用户工作台'
   }
-  return '游客控制台'
+  return '用户工作台'
 })
 
 const panelSubtitle = computed(() => {
   const tokenPart = `${tokenStore.vaultItems.length} 个 Token`
   const uploadPart = `${tokenStore.uploadCount} 次上传`
-  const tgPart = tgAuth.isLoggedIn ? '已绑定 TG' : '未绑定 TG'
-  return `${tokenPart} · ${uploadPart} · ${tgPart}`
+  const sessionPart = tgAuth.isLoggedIn ? `${tgAuth.onlineSessionCount || tgAuth.sessions.length} 台在线设备` : '未登录 TG'
+  return `${tokenPart} · ${uploadPart} · ${sessionPart}`
 })
 
 const navigatePanel = (target: MeNavKey) => {
   activePanel.value = target
-  if (target === 'galleries') {
+  if (target !== 'assets') {
     galleryView.value = 'list'
     activeGalleryId.value = null
   }
@@ -137,7 +181,8 @@ const handleQuickGenerate = async () => {
     await tokenStore.generateToken()
     await tgAuth.checkSession()
     toast.success('Token 已生成')
-    activePanel.value = 'tokens'
+    activePanel.value = 'assets'
+    assetTab.value = 'tokens'
   } catch (e: any) {
     toast.error(e.message || '生成 Token 失败')
   } finally {
@@ -166,6 +211,15 @@ const handleLogout = async () => {
   navigateTo('/')
 }
 
+const pruneBoundTokensIfSessionLost = () => {
+  if (tgAuth.isLoggedIn) return
+  if (!publicSettings.value.tgAuthEnabled) return
+  const removed = tokenStore.removeBoundTokens()
+  if (removed > 0) {
+    toast.info(`检测到 TG 会话失效，已移除 ${removed} 个绑定 Token`)
+  }
+}
+
 watch(() => tokenStore.token, (n, o) => {
   if (n === o) return
   galleryView.value = 'list'
@@ -174,7 +228,14 @@ watch(() => tokenStore.token, (n, o) => {
 })
 
 watch(activePanel, (panel) => {
-  if (panel !== 'galleries') {
+  if (panel !== 'assets') {
+    galleryView.value = 'list'
+    activeGalleryId.value = null
+  }
+})
+
+watch(assetTab, (tab) => {
+  if (tab !== 'galleries') {
     galleryView.value = 'list'
     activeGalleryId.value = null
   }
@@ -192,6 +253,12 @@ watch(() => tokenStore.hasToken, (has) => {
   }
 })
 
+watch(() => tgAuth.isLoggedIn, (loggedIn) => {
+  if (!loggedIn) {
+    pruneBoundTokensIfSessionLost()
+  }
+})
+
 onMounted(async () => {
   await tokenStore.restoreToken()
   await loadSettings()
@@ -199,6 +266,9 @@ onMounted(async () => {
     await tgAuth.checkSession()
     if (tgAuth.isLoggedIn) {
       await tgAuth.syncTokensToVault()
+      await tgAuth.fetchSessions().catch(() => {})
+    } else {
+      pruneBoundTokensIfSessionLost()
     }
   }
   if (!tokenStore.hasToken && !tgAuth.isLoggedIn) {
@@ -206,3 +276,13 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped lang="scss">
+.me-workbench :deep(.asset-tab-shell) {
+  background: linear-gradient(120deg, rgba(255, 255, 255, 0.94), rgba(246, 249, 252, 0.88));
+}
+
+.dark .me-workbench :deep(.asset-tab-shell) {
+  background: linear-gradient(120deg, rgba(24, 24, 27, 0.92), rgba(36, 36, 42, 0.88));
+}
+</style>

@@ -9,10 +9,16 @@ from flask import request, jsonify, make_response
 from . import auth_bp
 from ..config import logger
 from ..utils import add_cache_headers, get_client_ip
+from ..device_fingerprint import (
+    parse_user_agent,
+    build_device_label,
+    normalize_device_name,
+)
 from ..database import (
     get_system_setting, get_tg_user_by_username,
     create_login_code, verify_login_code,
     create_tg_session, verify_tg_session, delete_tg_session,
+    touch_tg_session, list_tg_sessions, count_tg_sessions, revoke_tg_session,
     get_user_token_count, get_user_tokens,
     get_system_setting_int,
     get_web_verify_status,
@@ -48,6 +54,8 @@ class SimpleRateLimiter:
 # 速率限制器实例
 _code_limiter = SimpleRateLimiter(max_requests=5, window_seconds=60)    # 验证码请求
 _verify_limiter = SimpleRateLimiter(max_requests=10, window_seconds=60)  # 验证码验证
+_sessions_limiter = SimpleRateLimiter(max_requests=60, window_seconds=60)  # 会话列表/心跳
+_revoke_limiter = SimpleRateLimiter(max_requests=20, window_seconds=60)  # 会话下线
 
 
 def _is_secure_request() -> bool:
@@ -61,6 +69,45 @@ def _is_secure_request() -> bool:
 def _get_client_ip() -> str:
     """提取客户端 IP"""
     return get_client_ip(request)
+
+
+def _safe_text(value: str, max_len: int = 128) -> str:
+    """清洗短文本，防止异常长头部值污染存储"""
+    return str(value or '').strip()[:max_len]
+
+
+def _get_device_id() -> str:
+    """从请求头读取设备 ID（由前端生成并持久化）"""
+    return _safe_text(request.headers.get('X-Device-Id', ''), 128)
+
+
+def _get_device_name() -> str:
+    """读取设备名称，允许前端覆盖默认解析"""
+    return _safe_text(request.headers.get('X-Device-Name', ''), 120)
+
+
+def _guess_platform(user_agent: str) -> str:
+    return parse_user_agent(user_agent).get('platform') or 'web'
+
+
+def _get_request_device_context() -> dict:
+    """抽取请求设备上下文"""
+    user_agent = _safe_text(request.headers.get('User-Agent', ''), 512)
+    parsed_ua = parse_user_agent(user_agent)
+    platform = _safe_text(request.headers.get('X-Platform', ''), 32) or parsed_ua.get('platform') or 'web'
+    device_name = normalize_device_name(_get_device_name(), parsed_ua)
+    device_label = build_device_label(parsed_ua.get('os_name'), parsed_ua.get('browser_name'))
+    return {
+        'ip_address': _get_client_ip(),
+        'user_agent': user_agent,
+        'device_id': _get_device_id(),
+        'device_name': device_name,
+        'platform': platform,
+        'os_name': parsed_ua.get('os_name') or 'Unknown OS',
+        'browser_name': parsed_ua.get('browser_name') or 'Unknown Browser',
+        'browser_version': parsed_ua.get('browser_version') or '',
+        'device_label': device_label,
+    }
 
 
 def _check_tg_auth_enabled():
@@ -77,7 +124,22 @@ def _get_tg_session_info():
     session_token = request.cookies.get('tg_session', '')
     if not session_token:
         return None
-    return verify_tg_session(session_token)
+    session_info = verify_tg_session(session_token)
+    if not session_info:
+        return None
+    ctx = _get_request_device_context()
+    # 节流刷新活跃时间，避免每次请求都写库
+    touch_tg_session(
+        session_token,
+        ip_address=ctx['ip_address'],
+        user_agent=ctx['user_agent'],
+        device_id=ctx['device_id'],
+        device_name=ctx['device_name'],
+        platform=ctx['platform'],
+        min_interval_seconds=30,
+    )
+    session_info['session_token'] = session_token
+    return session_info
 
 
 @auth_bp.route('/api/auth/tg/request-code', methods=['POST'])
@@ -178,10 +240,14 @@ def tg_verify_code():
         }), 'no-cache'), 401
 
     # 创建会话
+    ctx = _get_request_device_context()
     session_token = create_tg_session(
         tg_user_id=result['tg_user_id'],
-        ip_address=_get_client_ip(),
-        user_agent=request.headers.get('User-Agent', '')
+        ip_address=ctx['ip_address'],
+        user_agent=ctx['user_agent'],
+        device_id=ctx['device_id'],
+        device_name=ctx['device_name'],
+        platform=ctx['platform'],
     )
     if not session_token:
         return add_cache_headers(jsonify({
@@ -218,10 +284,14 @@ def tg_login_link():
             'success': False, 'error': '登录链接无效或已过期'
         }), 'no-cache'), 401
 
+    ctx = _get_request_device_context()
     session_token = create_tg_session(
         tg_user_id=result['tg_user_id'],
-        ip_address=_get_client_ip(),
-        user_agent=request.headers.get('User-Agent', '')
+        ip_address=ctx['ip_address'],
+        user_agent=ctx['user_agent'],
+        device_id=ctx['device_id'],
+        device_name=ctx['device_name'],
+        platform=ctx['platform'],
     )
     if not session_token:
         return add_cache_headers(jsonify({
@@ -255,6 +325,7 @@ def tg_session_info():
     tg_user_id = session_info['tg_user_id']
     max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
     token_count = get_user_token_count(tg_user_id)
+    online_sessions_count = count_tg_sessions(tg_user_id)
 
     return add_cache_headers(jsonify({
         'success': True,
@@ -264,6 +335,8 @@ def tg_session_info():
             'first_name': session_info.get('first_name'),
             'token_count': token_count,
             'max_tokens': max_tokens,
+            'current_session_id': session_info.get('session_id'),
+            'online_sessions_count': online_sessions_count,
         }
     }), 'no-cache')
 
@@ -332,6 +405,16 @@ def tg_code_status():
         }), 'no-cache')
 
     if result['status'] == 'ok' and result['session_token']:
+        ctx = _get_request_device_context()
+        touch_tg_session(
+            result['session_token'],
+            ip_address=ctx['ip_address'],
+            user_agent=ctx['user_agent'],
+            device_id=ctx['device_id'],
+            device_name=ctx['device_name'],
+            platform=ctx['platform'],
+            min_interval_seconds=0,
+        )
         # 验证码已被 Bot 消费，设置 Cookie
         expire_days = get_system_setting_int('tg_session_expire_days', 30, minimum=1)
         resp = make_response(jsonify({
@@ -347,6 +430,162 @@ def tg_code_status():
 
     return add_cache_headers(jsonify({
         'success': True, 'data': {'status': result['status']}
+    }), 'no-cache')
+
+
+@auth_bp.route('/api/auth/tg/sessions', methods=['GET'])
+def tg_sessions_list():
+    """获取当前 TG 用户的在线会话列表"""
+    err = _check_tg_auth_enabled()
+    if err:
+        return err
+
+    ip = _get_client_ip()
+    if not _sessions_limiter.is_allowed(ip):
+        return add_cache_headers(jsonify({'success': False, 'error': '请求过于频繁，请稍后再试'}), 'no-cache'), 429
+
+    session_info = _get_tg_session_info()
+    if not session_info:
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '未登录'
+        }), 'no-cache'), 401
+
+    current_session_id = session_info.get('session_id', '')
+    items = list_tg_sessions(session_info['tg_user_id'], current_session_token=session_info.get('session_token', ''))
+    sessions = []
+    for item in items:
+        ua = item.get('user_agent') or ''
+        parsed_ua = parse_user_agent(ua)
+        ip_addr = item.get('ip_address') or ''
+        device_name = normalize_device_name(item.get('device_name'), parsed_ua)
+        platform = item.get('platform') or parsed_ua.get('platform') or _guess_platform(ua)
+        sessions.append({
+            'session_id': item.get('session_id'),
+            'device_id': item.get('device_id') or '',
+            'device_name': device_name,
+            'device_label': build_device_label(parsed_ua.get('os_name'), parsed_ua.get('browser_name')),
+            'os_name': parsed_ua.get('os_name') or 'Unknown OS',
+            'browser_name': parsed_ua.get('browser_name') or 'Unknown Browser',
+            'browser_version': parsed_ua.get('browser_version') or '',
+            'platform': platform,
+            'ip_address': ip_addr,
+            'user_agent': ua,
+            'created_at': item.get('created_at'),
+            'last_seen_at': item.get('last_seen_at') or item.get('device_last_seen_at'),
+            'expires_at': item.get('expires_at'),
+            'is_current': bool(item.get('is_current')),
+        })
+
+    # 兜底：确保当前浏览器会话在列表中（避免历史数据缺失导致“当前设备”不显示）
+    has_current = any(s.get('is_current') for s in sessions)
+    if not has_current and current_session_id:
+        ctx = _get_request_device_context()
+        sessions.insert(0, {
+            'session_id': current_session_id,
+            'device_id': ctx.get('device_id') or '',
+            'device_name': ctx.get('device_name') or ctx.get('device_label') or 'current-browser',
+            'device_label': ctx.get('device_label') or build_device_label(ctx.get('os_name'), ctx.get('browser_name')),
+            'os_name': ctx.get('os_name') or 'Unknown OS',
+            'browser_name': ctx.get('browser_name') or 'Unknown Browser',
+            'browser_version': ctx.get('browser_version') or '',
+            'platform': ctx.get('platform') or _guess_platform(ctx.get('user_agent', '')),
+            'ip_address': session_info.get('ip_address') or ctx.get('ip_address') or '',
+            'user_agent': session_info.get('user_agent') or ctx.get('user_agent') or '',
+            'created_at': session_info.get('created_at') or session_info.get('last_seen_at') or '',
+            'last_seen_at': session_info.get('last_seen_at') or '',
+            'expires_at': session_info.get('expires_at') or '',
+            'is_current': True,
+        })
+
+    return add_cache_headers(jsonify({
+        'success': True,
+        'data': {
+            'sessions': sessions,
+            'current_session_id': current_session_id,
+            'count': len(sessions),
+        }
+    }), 'no-cache')
+
+
+@auth_bp.route('/api/auth/tg/sessions/revoke', methods=['POST'])
+def tg_sessions_revoke():
+    """撤销指定会话（不允许撤销当前会话）"""
+    err = _check_tg_auth_enabled()
+    if err:
+        return err
+
+    ip = _get_client_ip()
+    if not _revoke_limiter.is_allowed(ip):
+        return add_cache_headers(jsonify({'success': False, 'error': '操作过于频繁，请稍后再试'}), 'no-cache'), 429
+
+    session_info = _get_tg_session_info()
+    if not session_info:
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '未登录'
+        }), 'no-cache'), 401
+
+    data = request.get_json(silent=True) or {}
+    target_session_id = _safe_text(data.get('session_id', ''), 64)
+    if not target_session_id:
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '缺少 session_id'
+        }), 'no-cache'), 400
+    if target_session_id == session_info.get('session_id'):
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '不能下线当前会话'
+        }), 'no-cache'), 400
+
+    ok = revoke_tg_session(target_session_id, session_info['tg_user_id'], reason='manual')
+    if not ok:
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '会话不存在或已失效'
+        }), 'no-cache'), 404
+
+    return add_cache_headers(jsonify({
+        'success': True,
+        'data': {
+            'revoked_session_id': target_session_id
+        }
+    }), 'no-cache')
+
+
+@auth_bp.route('/api/auth/tg/sessions/heartbeat', methods=['POST'])
+def tg_sessions_heartbeat():
+    """刷新当前会话活跃状态"""
+    err = _check_tg_auth_enabled()
+    if err:
+        return err
+
+    ip = _get_client_ip()
+    if not _sessions_limiter.is_allowed(ip):
+        return add_cache_headers(jsonify({'success': False, 'error': '请求过于频繁，请稍后再试'}), 'no-cache'), 429
+
+    session_info = _get_tg_session_info()
+    if not session_info:
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '未登录'
+        }), 'no-cache'), 401
+
+    ctx = _get_request_device_context()
+    ok = touch_tg_session(
+        session_info.get('session_token', ''),
+        ip_address=ctx['ip_address'],
+        user_agent=ctx['user_agent'],
+        device_id=ctx['device_id'],
+        device_name=ctx['device_name'],
+        platform=ctx['platform'],
+        min_interval_seconds=0,
+    )
+    if not ok:
+        return add_cache_headers(jsonify({
+            'success': False, 'error': '会话已失效'
+        }), 'no-cache'), 401
+
+    return add_cache_headers(jsonify({
+        'success': True,
+        'data': {
+            'server_time': int(time.time())
+        }
     }), 'no-cache')
 
 

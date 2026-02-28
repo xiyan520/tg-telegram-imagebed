@@ -1,24 +1,24 @@
 <template>
-  <div class="relative overflow-hidden">
-    <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_12%_20%,rgba(251,191,36,0.18),transparent_35%),radial-gradient(circle_at_88%_8%,rgba(249,115,22,0.14),transparent_38%),radial-gradient(circle_at_50%_100%,rgba(245,158,11,0.1),transparent_50%)]" />
+  <div class="relative isolate overflow-hidden rounded-[2rem]">
+    <div class="pointer-events-none absolute inset-0 rounded-[2rem] bg-[radial-gradient(circle_at_12%_20%,rgba(251,191,36,0.18),transparent_35%),radial-gradient(circle_at_88%_8%,rgba(249,115,22,0.14),transparent_38%),radial-gradient(circle_at_50%_100%,rgba(245,158,11,0.1),transparent_50%)]" />
 
-    <div class="relative mx-auto max-w-7xl space-y-8 px-3 pb-14 pt-6 sm:px-4 md:space-y-10">
+    <div class="relative mx-auto max-w-7xl space-y-8 overflow-x-clip px-3 pb-14 pt-6 sm:px-4 md:space-y-10">
       <section class="relative overflow-hidden rounded-3xl border border-amber-200/70 bg-gradient-to-br from-amber-50 via-white to-orange-50 p-4 shadow-sm dark:border-amber-400/30 dark:from-stone-900 dark:via-stone-900 dark:to-stone-800 sm:p-6 md:p-10">
         <div class="absolute -right-24 -top-28 h-56 w-56 rounded-full bg-amber-300/30 blur-3xl dark:bg-amber-500/20" />
         <div class="absolute -bottom-28 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-orange-300/25 blur-3xl dark:bg-orange-500/20" />
 
         <div class="relative grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-          <div class="space-y-6">
+          <div class="min-w-0 space-y-6">
             <div class="flex flex-wrap items-center gap-2">
               <UBadge color="amber" variant="subtle" size="sm">Developer Docs</UBadge>
               <UBadge color="gray" variant="soft" size="sm">Version {{ docsVersion }}</UBadge>
             </div>
 
-            <div class="space-y-3">
-              <h1 class="text-3xl font-bold leading-tight text-stone-900 dark:text-white md:text-5xl">
-                TG 图床 API 文档中心
+            <div class="min-w-0 space-y-3">
+              <h1 class="break-words text-2xl font-bold leading-tight text-stone-900 dark:text-white sm:text-3xl md:text-5xl">
+                {{ docsCenterTitle }}
               </h1>
-              <p class="max-w-2xl text-sm leading-6 text-stone-600 dark:text-stone-300 md:text-base">
+              <p class="max-w-2xl break-words text-sm leading-6 text-stone-600 dark:text-stone-300 md:text-base">
                 这套文档按真实接入流程重排：先跑通上传，再扩展 Token 与资源查询。你可以直接从右侧指标预估接入规模，下面每个模块都支持快速跳转。
               </p>
             </div>
@@ -35,16 +35,16 @@
               </UButton>
             </div>
 
-            <div class="rounded-2xl border border-stone-200/80 bg-white/85 p-4 dark:border-stone-700 dark:bg-stone-900/85">
-              <div class="mb-3 flex items-center justify-between gap-3">
+            <div class="min-w-0 rounded-2xl border border-stone-200/80 bg-white/85 p-4 dark:border-stone-700 dark:bg-stone-900/85">
+              <div class="mb-3 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
                 <span class="text-xs font-semibold uppercase tracking-[0.2em] text-stone-400">Base URL</span>
-                <code class="rounded-md bg-stone-100 px-2 py-1 font-mono text-xs text-amber-600 dark:bg-stone-800 dark:text-amber-300">{{ baseUrl }}</code>
+                <code class="max-w-full break-all rounded-md bg-stone-100 px-2 py-1 font-mono text-xs text-amber-600 dark:bg-stone-800 dark:text-amber-300">{{ baseUrl }}</code>
               </div>
               <DocsCodeBlock :code="heroCurlExample" language="bash" />
             </div>
           </div>
 
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <div class="min-w-0 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
             <div
               v-for="stat in heroStats"
               :key="stat.label"
@@ -62,10 +62,10 @@
       </section>
 
       <section id="quickstart" class="scroll-mt-24 space-y-4 rounded-2xl border border-stone-200 bg-white/80 p-4 dark:border-stone-700 dark:bg-stone-900/80 sm:p-5 md:p-6">
-        <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 class="text-2xl font-bold text-stone-900 dark:text-white">场景化快速开始</h2>
-            <p class="text-sm text-stone-600 dark:text-stone-400">先选策略再写代码，匿名上传和 Token 上传各有使用场景。</p>
+        <div class="flex min-w-0 flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div class="min-w-0">
+            <h2 class="break-words text-2xl font-bold text-stone-900 dark:text-white">场景化快速开始</h2>
+            <p class="break-words text-sm text-stone-600 dark:text-stone-400">先选策略再写代码，匿名上传和 Token 上传各有使用场景。</p>
           </div>
           <span class="text-xs text-stone-500 dark:text-stone-400">最后更新：{{ docsUpdatedAt }}</span>
         </div>
@@ -74,17 +74,17 @@
           <article
             v-for="scenario in quickStartScenarios"
             :key="scenario.id"
-            class="rounded-xl border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-700 dark:bg-stone-800/40"
+            class="min-w-0 rounded-xl border border-stone-200 bg-stone-50/70 p-4 dark:border-stone-700 dark:bg-stone-800/40"
           >
             <div class="mb-3 flex flex-wrap items-center gap-2">
               <UBadge :color="scenario.badgeColor" variant="soft">{{ scenario.badge }}</UBadge>
-              <code class="rounded-md bg-white px-2 py-1 font-mono text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">{{ scenario.endpoint }}</code>
+              <code class="max-w-full break-all rounded-md bg-white px-2 py-1 font-mono text-xs text-stone-600 dark:bg-stone-900 dark:text-stone-300">{{ scenario.endpoint }}</code>
             </div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-white">{{ scenario.title }}</h3>
-            <p class="mb-3 mt-1 text-sm text-stone-600 dark:text-stone-400">{{ scenario.description }}</p>
+            <h3 class="break-words text-lg font-semibold text-stone-900 dark:text-white">{{ scenario.title }}</h3>
+            <p class="mb-3 mt-1 break-words text-sm text-stone-600 dark:text-stone-400">{{ scenario.description }}</p>
             <DocsCodeBlock :code="scenario.code" language="bash" />
-            <div class="mt-3 flex justify-end">
-              <UButton size="xs" color="gray" variant="ghost" icon="heroicons:clipboard-document" @click="copySnippet(scenario.code)">
+            <div class="mt-3 flex min-w-0 justify-end">
+              <UButton size="xs" color="gray" variant="ghost" icon="heroicons:clipboard-document" class="w-full justify-center sm:w-auto" @click="copySnippet(scenario.code)">
                 复制命令
               </UButton>
             </div>
@@ -287,6 +287,10 @@ const config = useRuntimeConfig()
 const requestUrl = useRequestURL()
 const toast = useLightToast()
 const { copy: clipboardCopy } = useClipboardCopy()
+const { displayName } = useSeoSettings()
+
+const docsSiteName = computed(() => displayName.value.trim() || '图床 Pro')
+const docsCenterTitle = computed(() => `${docsSiteName.value} API 文档中心`)
 
 const baseUrl = computed(() => (config.public.apiBase || requestUrl.origin).replace(/\/$/, ''))
 

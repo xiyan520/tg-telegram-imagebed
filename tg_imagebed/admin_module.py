@@ -91,6 +91,19 @@ except ImportError:
         return req.remote_addr or '127.0.0.1'
     get_image_domain = get_domain
 
+try:
+    from .device_fingerprint import (
+        parse_user_agent,
+        build_device_label,
+        normalize_device_name,
+    )
+except ImportError:
+    from device_fingerprint import (  # type: ignore
+        parse_user_agent,
+        build_device_label,
+        normalize_device_name,
+    )
+
 # 从 config.py 导入配置
 try:
     from .config import (
@@ -254,6 +267,91 @@ def _get_session_lifetime(remember_me: bool = False) -> int:
     return REMEMBER_ME_LIFETIME if remember_me else SESSION_LIFETIME
 
 
+def _safe_text(value: str, max_len: int = 128) -> str:
+    return str(value or '').strip()[:max_len]
+
+
+def _new_admin_session_id() -> str:
+    return secrets.token_urlsafe(12)
+
+
+def _guess_platform(user_agent: str) -> str:
+    return parse_user_agent(user_agent).get('platform') or 'web'
+
+
+def _get_admin_device_context(req) -> dict:
+    ua = _safe_text(req.headers.get('User-Agent', ''), 512)
+    parsed = parse_user_agent(ua)
+    platform = _safe_text(req.headers.get('X-Platform', ''), 32) or parsed.get('platform') or 'web'
+    device_name = normalize_device_name(_safe_text(req.headers.get('X-Device-Name', ''), 120), parsed)
+    device_label = build_device_label(parsed.get('os_name'), parsed.get('browser_name'))
+    device_id = _safe_text(req.headers.get('X-Device-Id', ''), 128)
+    return {
+        'user_agent': ua,
+        'platform': platform,
+        'device_name': device_name,
+        'device_id': device_id,
+        'os_name': parsed.get('os_name') or 'Unknown OS',
+        'browser_name': parsed.get('browser_name') or 'Unknown Browser',
+        'browser_version': parsed.get('browser_version') or '',
+        'device_label': device_label,
+    }
+
+
+def _prune_and_migrate_sessions(sessions: list[dict], now: float | None = None) -> list[dict]:
+    """清理过期项并补齐历史字段"""
+    current = now if now is not None else time.time()
+    normalized: list[dict] = []
+    for raw in sessions or []:
+        token = str(raw.get('token') or '').strip()
+        if not token:
+            continue
+        try:
+            login_time = float(raw.get('login_time') or current)
+        except Exception:
+            login_time = current
+        remember_me = bool(raw.get('remember_me', False))
+        lifetime = _get_session_lifetime(remember_me)
+        if current - login_time >= lifetime:
+            continue
+
+        try:
+            last_active = float(raw.get('last_active') or login_time)
+        except Exception:
+            last_active = login_time
+
+        user_agent = _safe_text(raw.get('user_agent', ''), 512)
+        parsed = parse_user_agent(user_agent)
+        platform = _safe_text(raw.get('platform', ''), 32) or parsed.get('platform') or _guess_platform(user_agent)
+        device_name = normalize_device_name(_safe_text(raw.get('device_name', ''), 120), parsed)
+        device_id = _safe_text(raw.get('device_id', ''), 128)
+        os_name = _safe_text(raw.get('os_name', ''), 64) or parsed.get('os_name') or 'Unknown OS'
+        browser_name = _safe_text(raw.get('browser_name', ''), 64) or parsed.get('browser_name') or 'Unknown Browser'
+        browser_version = _safe_text(raw.get('browser_version', ''), 32) or parsed.get('browser_version') or ''
+        device_label = _safe_text(raw.get('device_label', ''), 120) or build_device_label(os_name, browser_name)
+
+        normalized.append({
+            'session_id': _safe_text(raw.get('session_id', ''), 64) or _new_admin_session_id(),
+            'token': token,
+            'ip': _safe_text(raw.get('ip', ''), 64),
+            'login_time': login_time,
+            'last_active': last_active,
+            'remember_me': remember_me,
+            'user_agent': user_agent,
+            'platform': platform,
+            'device_name': device_name,
+            'device_id': device_id,
+            'os_name': os_name,
+            'browser_name': browser_name,
+            'browser_version': browser_version,
+            'device_label': device_label,
+        })
+
+    # 并发控制基于登录时间，从旧到新排序
+    normalized.sort(key=lambda s: s.get('login_time', 0))
+    return normalized
+
+
 def _get_active_sessions() -> list[dict]:
     """从数据库读取活跃 session 列表"""
     try:
@@ -261,7 +359,8 @@ def _get_active_sessions() -> list[dict]:
             cursor = conn.cursor()
             cursor.execute("SELECT value FROM admin_config WHERE key = 'active_sessions'")
             row = cursor.fetchone()
-            return json.loads(row[0]) if row else []
+            raw = json.loads(row[0]) if row else []
+            return _prune_and_migrate_sessions(raw)
     except Exception:
         return []
 
@@ -279,16 +378,23 @@ def _save_active_sessions(sessions: list[dict]):
         logger.debug(f"保存活跃 session 失败: {e}")
 
 
-def _register_session(token: str, ip: str, remember_me: bool = False):
+def _register_session(
+    token: str,
+    ip: str,
+    remember_me: bool = False,
+    *,
+    user_agent: str = '',
+    platform: str = '',
+    device_name: str = '',
+    device_id: str = '',
+    os_name: str = '',
+    browser_name: str = '',
+    browser_version: str = '',
+    device_label: str = '',
+):
     """注册新 session，超出并发限制时踢掉最早的"""
     now = time.time()
-    sessions = _get_active_sessions()
-
-    # 清理过期 session（根据各自的 remember_me 标记使用对应的 lifetime）
-    sessions = [
-        s for s in sessions
-        if now - s.get('login_time', 0) < _get_session_lifetime(s.get('remember_me', False))
-    ]
+    sessions = _prune_and_migrate_sessions(_get_active_sessions(), now)
 
     # 踢掉最早的 session（如果超出限制）
     kicked = []
@@ -298,59 +404,115 @@ def _register_session(token: str, ip: str, remember_me: bool = False):
 
     # 记录被踢出的 session
     for s in kicked:
-        _log_security_event('session_kicked', s.get('ip', ''), detail=f"token={s.get('token', '')[:8]}...")
+        _log_security_event(
+            'session_kicked',
+            s.get('ip', ''),
+            detail=f"session_id={s.get('session_id', '')}, token={s.get('token', '')[:8]}..."
+        )
 
     # 添加新 session
     sessions.append({
+        'session_id': _new_admin_session_id(),
         'token': token,
-        'ip': ip,
+        'ip': _safe_text(ip, 64),
         'login_time': now,
         'last_active': now,
         'remember_me': remember_me,
+        'user_agent': _safe_text(user_agent, 512),
+        'platform': _safe_text(platform, 32) or _guess_platform(user_agent),
+        'device_name': _safe_text(device_name, 120),
+        'device_id': _safe_text(device_id, 128),
+        'os_name': _safe_text(os_name, 64),
+        'browser_name': _safe_text(browser_name, 64),
+        'browser_version': _safe_text(browser_version, 32),
+        'device_label': _safe_text(device_label, 120),
     })
 
     _save_active_sessions(sessions)
 
 
-def _update_session_activity(token: str):
+def _update_session_activity(
+    token: str,
+    *,
+    ip: str | None = None,
+    user_agent: str | None = None,
+    platform: str | None = None,
+    device_name: str | None = None,
+    device_id: str | None = None,
+    os_name: str | None = None,
+    browser_name: str | None = None,
+    browser_version: str | None = None,
+    device_label: str | None = None,
+):
     """更新 session 的最后活跃时间，若不存在则自动补注册"""
     now = time.time()
-    sessions = _get_active_sessions()
-    # 清理过期 session（根据各自的 remember_me 标记使用对应的 lifetime）
-    sessions = [
-        s for s in sessions
-        if now - s.get('login_time', 0) < _get_session_lifetime(s.get('remember_me', False))
-    ]
+    sessions = _prune_and_migrate_sessions(_get_active_sessions(), now)
 
     found = False
     for s in sessions:
         if s.get('token') == token:
             s['last_active'] = now
+            if ip:
+                s['ip'] = _safe_text(ip, 64)
+            if user_agent:
+                s['user_agent'] = _safe_text(user_agent, 512)
+            if platform:
+                s['platform'] = _safe_text(platform, 32)
+            if device_name:
+                s['device_name'] = _safe_text(device_name, 120)
+            if device_id:
+                s['device_id'] = _safe_text(device_id, 128)
+            if os_name:
+                s['os_name'] = _safe_text(os_name, 64)
+            if browser_name:
+                s['browser_name'] = _safe_text(browser_name, 64)
+            if browser_version:
+                s['browser_version'] = _safe_text(browser_version, 32)
+            if device_label:
+                s['device_label'] = _safe_text(device_label, 120)
             found = True
             break
 
     if not found:
         # 当前 session 不在列表中（功能上线前已登录），自动补注册
-        ip = '0.0.0.0'
+        fallback_ip = '0.0.0.0'
         try:
-            ip = _get_client_ip(request)
+            fallback_ip = _get_client_ip(request)
         except Exception:
             pass
         sessions.append({
+            'session_id': _new_admin_session_id(),
             'token': token,
-            'ip': ip,
+            'ip': _safe_text(ip or fallback_ip, 64),
             'login_time': now,
             'last_active': now,
+            'remember_me': False,
+            'user_agent': _safe_text(user_agent, 512),
+            'platform': _safe_text(platform, 32) or _guess_platform(user_agent or ''),
+            'device_name': _safe_text(device_name, 120),
+            'device_id': _safe_text(device_id, 128),
+            'os_name': _safe_text(os_name, 64),
+            'browser_name': _safe_text(browser_name, 64),
+            'browser_version': _safe_text(browser_version, 32),
+            'device_label': _safe_text(device_label, 120),
         })
 
     _save_active_sessions(sessions)
 
 
-def _remove_session(token: str):
-    """移除指定 session"""
+def _remove_session(token: str = '', session_id: str = '') -> int:
+    """移除指定 session（按 token 或 session_id）"""
     sessions = _get_active_sessions()
-    sessions = [s for s in sessions if s.get('token') != token]
-    _save_active_sessions(sessions)
+    if not token and not session_id:
+        return 0
+    new_sessions = [
+        s for s in sessions
+        if not ((token and s.get('token') == token) or (session_id and s.get('session_id') == session_id))
+    ]
+    removed = len(sessions) - len(new_sessions)
+    if removed > 0:
+        _save_active_sessions(new_sessions)
+    return removed
 
 
 def _get_config_status_from_db() -> dict:
@@ -532,7 +694,19 @@ def login_required(f):
                 if request.path.startswith('/api/'):
                     return jsonify({'error': 'Session revoked', 'kicked': True}), 401
                 return redirect(url_for('admin_login'))
-            _update_session_activity(token)
+            device_ctx = _get_admin_device_context(request)
+            _update_session_activity(
+                token,
+                ip=_get_client_ip(request),
+                user_agent=device_ctx['user_agent'],
+                platform=device_ctx['platform'],
+                device_name=device_ctx['device_name'],
+                device_id=device_ctx['device_id'],
+                os_name=device_ctx['os_name'],
+                browser_name=device_ctx['browser_name'],
+                browser_version=device_ctx['browser_version'],
+                device_label=device_ctx['device_label'],
+            )
 
         return f(*args, **kwargs)
     return decorated_function
@@ -655,7 +829,20 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             session['admin_token'] = token
 
             # 注册 session（并发控制），传递 remember_me 标记
-            _register_session(token, ip, remember_me=remember_me)
+            device_ctx = _get_admin_device_context(request)
+            _register_session(
+                token,
+                ip,
+                remember_me=remember_me,
+                user_agent=device_ctx['user_agent'],
+                platform=device_ctx['platform'],
+                device_name=device_ctx['device_name'],
+                device_id=device_ctx['device_id'],
+                os_name=device_ctx['os_name'],
+                browser_name=device_ctx['browser_name'],
+                browser_version=device_ctx['browser_version'],
+                device_label=device_ctx['device_label'],
+            )
 
             _log_security_event('login_success', ip, username)
             logger.info(f"管理员登录成功: {username}")
@@ -1313,52 +1500,183 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
     def admin_active_sessions():
         """获取当前活跃 Session 列表"""
         try:
-            now = time.time()
-            sessions = _get_active_sessions()
-            # 清理过期 session（根据各自的 remember_me 标记使用对应的 lifetime）
-            sessions = [
-                s for s in sessions
-                if now - s.get('login_time', 0) < _get_session_lifetime(s.get('remember_me', False))
-            ]
             current_token = session.get('admin_token', '')
+            if current_token:
+                # 兜底刷新当前会话，避免历史数据缺失导致“当前设备”不显示
+                ctx = _get_admin_device_context(request)
+                _update_session_activity(
+                    current_token,
+                    ip=_get_client_ip(request),
+                    user_agent=ctx['user_agent'],
+                    platform=ctx['platform'],
+                    device_name=ctx['device_name'],
+                    device_id=ctx['device_id'],
+                    os_name=ctx['os_name'],
+                    browser_name=ctx['browser_name'],
+                    browser_version=ctx['browser_version'],
+                    device_label=ctx['device_label'],
+                )
+                sessions = _get_active_sessions()
+            else:
+                sessions = _get_active_sessions()
+                _save_active_sessions(sessions)
+
+            current_session_id = ''
 
             result = []
-            for s in sessions:
+            for s in sorted(sessions, key=lambda item: item.get('last_active', 0), reverse=True):
                 login_ts = s.get('login_time', 0)
                 last_ts = s.get('last_active', 0)
+                user_agent = s.get('user_agent', '')
+                parsed = parse_user_agent(user_agent)
+                os_name = s.get('os_name') or parsed.get('os_name') or 'Unknown OS'
+                browser_name = s.get('browser_name') or parsed.get('browser_name') or 'Unknown Browser'
+                browser_version = s.get('browser_version') or parsed.get('browser_version') or ''
+                device_label = s.get('device_label') or build_device_label(os_name, browser_name)
+                is_current = s.get('token', '') == current_token
+                if is_current:
+                    current_session_id = s.get('session_id', '')
                 result.append({
+                    'session_id': s.get('session_id', ''),
                     'token_prefix': s.get('token', '')[:8] + '...',
-                    'ip': s.get('ip', ''),
+                    'ip_address': s.get('ip', ''),
+                    'device_name': normalize_device_name(s.get('device_name'), parsed),
+                    'device_label': device_label,
+                    'os_name': os_name,
+                    'browser_name': browser_name,
+                    'browser_version': browser_version,
+                    'platform': s.get('platform') or parsed.get('platform') or 'unknown',
+                    'user_agent': user_agent,
+                    'device_id': s.get('device_id', ''),
                     'login_time': datetime.fromtimestamp(login_ts).strftime('%Y-%m-%d %H:%M:%S') if login_ts else '',
                     'last_active': datetime.fromtimestamp(last_ts).strftime('%Y-%m-%d %H:%M:%S') if last_ts else '',
-                    'is_current': s.get('token', '') == current_token,
+                    'is_current': is_current,
+                    'remember_me': bool(s.get('remember_me', False)),
                 })
-            return jsonify({'success': True, 'data': result})
+
+            if current_token and not any(item.get('is_current') for item in result):
+                ctx = _get_admin_device_context(request)
+                fallback_session_id = f"current-{current_token[:8]}"
+                result.insert(0, {
+                    'session_id': fallback_session_id,
+                    'token_prefix': current_token[:8] + '...',
+                    'ip_address': _get_client_ip(request),
+                    'device_name': ctx.get('device_name') or ctx.get('device_label') or 'current-browser',
+                    'device_label': ctx.get('device_label') or build_device_label(ctx.get('os_name'), ctx.get('browser_name')),
+                    'os_name': ctx.get('os_name') or 'Unknown OS',
+                    'browser_name': ctx.get('browser_name') or 'Unknown Browser',
+                    'browser_version': ctx.get('browser_version') or '',
+                    'platform': ctx.get('platform') or 'web',
+                    'user_agent': ctx.get('user_agent') or '',
+                    'device_id': ctx.get('device_id') or '',
+                    'login_time': '',
+                    'last_active': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'is_current': True,
+                    'remember_me': bool(session.get('remember_me')),
+                })
+                current_session_id = fallback_session_id
+            return jsonify({
+                'success': True,
+                'data': {
+                    'sessions': result,
+                    'count': len(result),
+                    'current_session_id': current_session_id
+                }
+            })
         except Exception as e:
             logger.error(f"获取活跃 Session 失败: {e}")
             return jsonify({'success': False, 'error': '获取失败'}), 500
 
+    @app.route('/api/admin/session-heartbeat', methods=['POST'])
+    @login_required
+    def admin_session_heartbeat():
+        """刷新管理员当前会话活跃时间"""
+        try:
+            token = session.get('admin_token', '')
+            if not token:
+                return jsonify({'success': False, 'error': '未登录'}), 401
+            ctx = _get_admin_device_context(request)
+            _update_session_activity(
+                token,
+                ip=_get_client_ip(request),
+                user_agent=ctx['user_agent'],
+                platform=ctx['platform'],
+                device_name=ctx['device_name'],
+                device_id=ctx['device_id'],
+                os_name=ctx['os_name'],
+                browser_name=ctx['browser_name'],
+                browser_version=ctx['browser_version'],
+                device_label=ctx['device_label'],
+            )
+            return jsonify({'success': True, 'data': {'server_time': int(time.time())}})
+        except Exception as e:
+            logger.error(f"管理员会话心跳失败: {e}")
+            return jsonify({'success': False, 'error': '刷新失败'}), 500
+
+    @app.route('/api/admin/revoke-session', methods=['POST'])
+    @login_required
+    def admin_revoke_session():
+        """按 session_id 精确踢出指定会话"""
+        data = request.get_json(silent=True) or {}
+        session_id = _safe_text(data.get('session_id', ''), 64)
+        if not session_id:
+            return jsonify({'success': False, 'error': '缺少 session_id'}), 400
+        try:
+            sessions = _get_active_sessions()
+            current_token = session.get('admin_token', '')
+            target = next((s for s in sessions if s.get('session_id') == session_id), None)
+            if not target:
+                return jsonify({'success': False, 'error': '会话不存在'}), 404
+            if target.get('token') == current_token:
+                return jsonify({'success': False, 'error': '不能踢出当前会话'}), 400
+            removed = _remove_session(session_id=session_id)
+            if removed > 0:
+                ip = _get_client_ip(request)
+                _log_security_event(
+                    'session_kicked',
+                    ip,
+                    session.get('admin_username', ''),
+                    detail=f"手动踢出 session_id={session_id}"
+                )
+            return jsonify({'success': True, 'kicked': removed, 'session_id': session_id})
+        except Exception as e:
+            logger.error(f"按 session_id 踢出失败: {e}")
+            return jsonify({'success': False, 'error': '操作失败'}), 500
+
     @app.route('/api/admin/kick-session', methods=['POST'])
     @login_required
     def admin_kick_session():
-        """踢出指定 Session"""
+        """踢出指定 Session（兼容旧接口：优先 token_prefix，可选 session_id）"""
         data = request.get_json(silent=True) or {}
-        token_prefix = data.get('token_prefix', '')
-        if not token_prefix:
+        token_prefix = _safe_text(data.get('token_prefix', ''), 32)
+        session_id = _safe_text(data.get('session_id', ''), 64)
+        if not token_prefix and not session_id:
             return jsonify({'success': False, 'error': '缺少参数'}), 400
 
         try:
             sessions = _get_active_sessions()
-            target = token_prefix.rstrip('.')
-            new_sessions = [s for s in sessions if not s.get('token', '').startswith(target)]
-            kicked = len(sessions) - len(new_sessions)
-            _save_active_sessions(new_sessions)
+            current_token = session.get('admin_token', '')
+
+            target_session = None
+            if session_id:
+                target_session = next((s for s in sessions if s.get('session_id') == session_id), None)
+            elif token_prefix:
+                target = token_prefix.rstrip('.')
+                target_session = next((s for s in sessions if s.get('token', '').startswith(target)), None)
+                session_id = target_session.get('session_id', '') if target_session else ''
+
+            if not target_session:
+                return jsonify({'success': False, 'error': '会话不存在'}), 404
+            if target_session.get('token') == current_token:
+                return jsonify({'success': False, 'error': '不能踢出当前会话'}), 400
+
+            kicked = _remove_session(session_id=session_id)
 
             if kicked > 0:
                 ip = _get_client_ip(request)
                 _log_security_event('session_kicked', ip, session.get('admin_username', ''),
-                                    detail=f"手动踢出 token={target}...")
-            return jsonify({'success': True, 'kicked': kicked})
+                                    detail=f"手动踢出 session_id={session_id}")
+            return jsonify({'success': True, 'kicked': kicked, 'session_id': session_id})
         except Exception as e:
             logger.error(f"踢出 Session 失败: {e}")
             return jsonify({'success': False, 'error': '操作失败'}), 500

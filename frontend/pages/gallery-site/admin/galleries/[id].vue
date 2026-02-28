@@ -24,12 +24,13 @@
         <div class="flex flex-wrap items-center gap-2 lg:justify-end">
           <UButton
             icon="heroicons:share"
-            :color="gallery?.share_enabled ? 'green' : 'gray'"
+            :color="isShareEnabled ? 'green' : 'gray'"
             variant="outline"
             size="sm"
+            :disabled="sharingAction"
             @click="shareOpen = true"
           >
-            {{ gallery?.share_enabled ? '已分享' : '分享' }}
+            {{ isShareEnabled ? '已分享' : '分享' }}
           </UButton>
           <UButton icon="heroicons:cog-6-tooth" color="gray" variant="outline" size="sm" @click="openSettings">
             设置
@@ -253,12 +254,12 @@
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold text-stone-900 dark:text-white">单独分享链接</h3>
-            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" @click="shareOpen = false" />
+            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" :disabled="sharingAction" @click="shareOpen = false" />
           </div>
         </template>
         <div class="space-y-4">
           <p class="text-sm text-stone-600 dark:text-stone-400">单独分享链接仅分享这一个画集。如需分享全部画集，请使用管理后台的"全部分享"功能。</p>
-          <div v-if="gallery?.share_enabled && gallery?.share_url" class="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
+          <div v-if="isShareEnabled && gallery?.share_url" class="rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-800 dark:bg-green-900/20">
             <p class="text-sm font-medium text-green-800 dark:text-green-200 mb-2">分享链接已开启</p>
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               <code class="flex-1 break-all rounded bg-white p-2 text-xs dark:bg-neutral-900">{{ gallery.share_url }}</code>
@@ -271,10 +272,27 @@
         </div>
         <template #footer>
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <UButton v-if="gallery?.share_enabled" color="red" variant="soft" :loading="sharingAction" @click="handleDisableShare">关闭分享</UButton>
+            <UButton
+              v-if="isShareEnabled"
+              color="red"
+              variant="soft"
+              :loading="sharingAction"
+              :disabled="sharingAction"
+              @click="handleToggleShare(false)"
+            >
+              关闭分享
+            </UButton>
             <div v-else></div>
-            <UButton v-if="!gallery?.share_enabled" color="primary" :loading="sharingAction" @click="handleEnableShare">开启分享</UButton>
-            <UButton v-else color="gray" variant="ghost" @click="shareOpen = false">关闭</UButton>
+            <UButton
+              v-if="!isShareEnabled"
+              color="primary"
+              :loading="sharingAction"
+              :disabled="sharingAction"
+              @click="handleToggleShare(true)"
+            >
+              开启分享
+            </UButton>
+            <UButton v-else color="gray" variant="ghost" :disabled="sharingAction" @click="shareOpen = false">关闭</UButton>
           </div>
         </template>
       </UCard>
@@ -846,24 +864,41 @@ const handleRevokeToken = async (token: string) => {
 // ===================== 分享模态框 =====================
 const shareOpen = ref(false)
 const sharingAction = ref(false)
+const shareActionSeq = ref(0)
+const isShareEnabled = computed(() => Boolean(Number(gallery.value?.share_enabled ?? 0)))
 
-const handleEnableShare = async () => {
+const handleToggleShare = async (nextEnabled: boolean) => {
+  if (sharingAction.value) return
+
+  const actionId = ++shareActionSeq.value
   sharingAction.value = true
   try {
-    gallery.value = await enableShare(galleryId.value)
-    notification.success('已开启', '分享链接已生成')
-  } catch (e: any) { notification.error('操作失败', e.message) }
-  finally { sharingAction.value = false }
-}
+    const updatedGallery = nextEnabled
+      ? await enableShare(galleryId.value)
+      : await disableShare(galleryId.value)
 
-const handleDisableShare = async () => {
-  sharingAction.value = true
-  try {
-    gallery.value = await disableShare(galleryId.value)
-    notification.success('已关闭', '分享链接已关闭')
-    shareOpen.value = false
-  } catch (e: any) { notification.error('操作失败', e.message) }
-  finally { sharingAction.value = false }
+    if (actionId !== shareActionSeq.value) return
+    gallery.value = updatedGallery
+
+    const freshDetail = await getGalleryDetail(galleryId.value, 1, 1)
+    if (actionId !== shareActionSeq.value) return
+    gallery.value = freshDetail.gallery
+
+    if (nextEnabled) {
+      notification.success('已开启', '分享链接已生成')
+    } else {
+      notification.success('已关闭', '分享链接已关闭')
+      shareOpen.value = false
+    }
+  } catch (e: any) {
+    if (actionId === shareActionSeq.value) {
+      notification.error('操作失败', e.message)
+    }
+  } finally {
+    if (actionId === shareActionSeq.value) {
+      sharingAction.value = false
+    }
+  }
 }
 
 const copyShareUrl = async () => {

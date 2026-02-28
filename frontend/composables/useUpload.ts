@@ -114,6 +114,8 @@ export const useUpload = () => {
     if (tokenStore.hasToken) {
       url = `${config.public.apiBase}/api/auth/upload`
       headers = { Authorization: `Bearer ${tokenStore.token}` }
+      // 绑定 TG 的 Token 需要携带 tg_session cookie 才能通过后端会话校验
+      withCredentials = true
       mode = 'token'
     } else if (authStore.isAuthenticated) {
       url = `${config.public.apiBase}/api/admin/upload`
