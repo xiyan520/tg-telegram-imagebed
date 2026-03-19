@@ -51,9 +51,12 @@ Thumbs.db
 
 # Claude Code
 .claude/
+.serena/
 
 # 任务文件
 tasks/
+docs/
+tests/
 
 # 临时文件
 tmp/

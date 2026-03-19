@@ -75,8 +75,17 @@ class StorageRouter:
             effective_token, _ = get_effective_bot_token()
             bot_token = str(cfg2.get("bot_token") or effective_token or "")
             chat_id = int(cfg2.get("chat_id") or 0)
+            api_id = str(cfg2.get("api_id") or "")
+            api_hash = str(cfg2.get("api_hash") or "")
             proxy_url = str(cfg2.get("proxy_url") or get_proxy_url() or "").strip() or None
-            return TelegramBackend(name=name, bot_token=bot_token, chat_id=chat_id, proxy_url=proxy_url)
+            return TelegramBackend(
+                name=name,
+                bot_token=bot_token,
+                chat_id=chat_id,
+                api_id=api_id,
+                api_hash=api_hash,
+                proxy_url=proxy_url,
+            )
 
         if driver == "local":
             root_dir = str(cfg2.get("root_dir") or os.path.join(os.getcwd(), "data", "uploads"))

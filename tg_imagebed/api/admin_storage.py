@@ -18,12 +18,26 @@ from ..storage.router import get_storage_router, reload_storage_router, _load_st
 from .. import admin_module
 
 # 敏感字段列表（需要掩码）
-_SENSITIVE_FIELDS = {'bot_token', 'secret_key', 'access_key'}
+_SENSITIVE_FIELDS = {'bot_token', 'api_hash', 'secret_key', 'access_key'}
 _MASKED_VALUE = '__MASKED__'
 # 允许的驱动类型
 _ALLOWED_DRIVERS = {'telegram', 'local', 's3', 'rclone'}
 # 后端名称正则（字母、数字、下划线、连字符，1-32字符）
 _BACKEND_NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,32}$')
+
+
+def _validate_backend_config(driver: str, cfg: dict) -> None:
+    """校验不同驱动的关键配置字段"""
+    if driver != 'telegram':
+        return
+
+    api_id = str(cfg.get('api_id') or '').strip()
+    api_hash = str(cfg.get('api_hash') or '').strip()
+    if api_id or api_hash:
+        if not api_id or not api_hash:
+            raise ValueError('Telegram MTProto 上传需要同时填写 API ID 和 API Hash')
+        if not api_id.isdigit():
+            raise ValueError('Telegram API ID 必须是数字')
 
 
 def _mask_sensitive(cfg: dict) -> dict:
@@ -299,6 +313,7 @@ def add_storage_backend():
 
         if driver not in _ALLOWED_DRIVERS:
             return _admin_json({'success': False, 'error': f"不支持的驱动类型: {driver}，允许: {', '.join(_ALLOWED_DRIVERS)}"}, 400)
+        _validate_backend_config(driver, backend_config)
 
         config = _load_storage_config()
         backends = config.get('backends') or {}
@@ -383,6 +398,7 @@ def modify_storage_backend(name: str):
 
         old_config = backends[name]
         merged_config = _merge_sensitive(new_config, old_config)
+        _validate_backend_config(driver, merged_config)
 
         backends[name] = merged_config
         config['backends'] = backends

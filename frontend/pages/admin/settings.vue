@@ -786,11 +786,11 @@
               v-model.number="settings.max_file_size_mb"
               type="number"
               min="1"
-              max="100"
-              placeholder="20"
+              max="1024"
+              placeholder="100"
             />
             <template #hint>
-              <span class="text-xs text-stone-500">单个文件的最大上传大小，范围 1-100 MB</span>
+              <span class="text-xs text-stone-500">单个文件的最大上传大小，范围 1-1024 MB。超过 20 MB 需先在 Telegram 存储中配置 API ID / API Hash 才能走 Kurigram 通道。</span>
             </template>
           </UFormGroup>
 
@@ -1439,7 +1439,7 @@ const settings = ref<AdminSystemSettings>({
   guest_existing_tokens_policy: 'keep',
   guest_token_max_upload_limit: 1000,
   guest_token_max_expires_days: 365,
-  max_file_size_mb: 20,
+  max_file_size_mb: 100,
   daily_upload_limit: 0,
   // CDN 配置
   cdn_enabled: false,

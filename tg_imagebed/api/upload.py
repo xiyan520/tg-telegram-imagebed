@@ -76,7 +76,7 @@ def validate_upload_file(file) -> tuple:
     file_size = file.tell()
     file.seek(0)
 
-    max_size_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
+    max_size_mb = get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
     max_size_bytes = max_size_mb * 1024 * 1024
 
     if file_size > max_size_bytes:

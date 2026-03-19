@@ -5,16 +5,16 @@
       eyebrow="Resources"
       icon="heroicons:key"
       :description="`共 ${metrics.total || total} 个 Token`"
-    >
-      <template #actions>
-        <UButton icon="heroicons:arrow-path" color="gray" variant="outline" :loading="loading || metricsLoading" @click="refreshAll">
-          刷新
-        </UButton>
-        <UButton icon="heroicons:plus" color="primary" @click="openCreateModal">
-          创建 Token
-        </UButton>
-      </template>
-    </AdminPageHeader>
+    />
+
+    <div class="flex flex-wrap items-center justify-end gap-2">
+      <UButton icon="heroicons:arrow-path" color="gray" variant="outline" :loading="loading || metricsLoading" @click="refreshAll">
+        刷新
+      </UButton>
+      <UButton icon="heroicons:plus" color="primary" @click="openCreateModal">
+        创建 Token
+      </UButton>
+    </div>
 
     <AdminTokensTokenStatsBar
       :loading="metricsLoading"

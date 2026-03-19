@@ -18,6 +18,7 @@ import threading
 from flask import Flask, jsonify
 from flask_cors import CORS
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import RequestEntityTooLarge
 
 # 导入配置
 from tg_imagebed.config import (
@@ -68,6 +69,21 @@ except (OSError, AttributeError):
 def create_app() -> Flask:
     """创建并配置 Flask 应用"""
     app = Flask(__name__, static_folder=None)
+
+    def _get_max_upload_mb() -> int:
+        """动态读取当前上传大小限制"""
+        try:
+            from tg_imagebed.database import get_system_setting_int
+            return get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
+        except Exception:
+            return 100
+
+    def _apply_request_limit() -> int:
+        """将数据库中的上传限制同步到 Flask 请求体限制"""
+        max_mb = _get_max_upload_mb()
+        # 额外留 2MB 余量给表单字段和 multipart 边界
+        app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
+        return max_mb
 
     # 应用 ProxyFix 中间件
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -170,14 +186,27 @@ def create_app() -> Flask:
     app.secret_key = SECRET_KEY
 
     # 设置 Flask 请求体大小上限（防止超大请求耗尽内存）
-    # 动态读取系统设置，回退到 100MB 硬上限
-    try:
-        from tg_imagebed.database import get_system_setting_int
-        max_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
-    except Exception:
-        max_mb = 20
-    # 额外留 2MB 余量给表单字段和 multipart 边界
-    app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
+    _apply_request_limit()
+
+    @app.before_request
+    def _refresh_request_limit():
+        """
+        每次请求前同步上传限制。
+
+        不然管理员在后台把 max_file_size_mb 调大以后，当前进程还是抱着启动时
+        的旧值不撒手，上传直接 413，纯属自己给自己下绊子。
+        """
+        _apply_request_limit()
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def handle_request_entity_too_large(error):
+        """统一返回更清晰的上传过大错误"""
+        max_mb = _get_max_upload_mb()
+        response = jsonify({
+            'success': False,
+            'error': f'文件大小超过当前 {max_mb}MB 上传限制，请在管理后台调高“最大文件大小（MB）”后重试'
+        })
+        return add_cache_headers(response, 'no-cache'), 413
 
     # 配置管理员会话
     admin_module.configure_admin_session(app)

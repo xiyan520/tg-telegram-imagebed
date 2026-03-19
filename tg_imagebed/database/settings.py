@@ -84,7 +84,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     'guest_upload_policy': 'open',  # open/token_only/admin_only
     'guest_token_generation_enabled': '1',  # 0/1
     'guest_existing_tokens_policy': 'keep',  # keep/disable_guest/disable_all
-    'max_file_size_mb': '20',
+    'max_file_size_mb': '100',
     'daily_upload_limit': '0',  # 0=无限制
     'guest_token_max_upload_limit': '1000',
     'guest_token_max_expires_days': '365',
@@ -359,7 +359,7 @@ def get_public_settings() -> Dict[str, Any]:
     return {
         'guest_upload_policy': settings.get('guest_upload_policy', 'open'),
         'guest_token_generation_enabled': settings.get('guest_token_generation_enabled', '1') == '1',
-        'max_file_size_mb': max(1, _safe_int(settings.get('max_file_size_mb', '20'), 20)),
+        'max_file_size_mb': max(1, _safe_int(settings.get('max_file_size_mb', '100'), 100)),
         'daily_upload_limit': max(0, _safe_int(settings.get('daily_upload_limit', '0'), 0)),
         'guest_token_max_upload_limit': max(1, _safe_int(settings.get('guest_token_max_upload_limit', '1000'), 1000)),
         'guest_token_max_expires_days': max(1, _safe_int(settings.get('guest_token_max_expires_days', '365'), 365)),

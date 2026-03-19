@@ -77,6 +77,18 @@
                   <UFormGroup label="Chat ID" hint="留空使用环境变量 STORAGE_CHAT_ID">
                     <UInput v-model="localForm.chat_id" placeholder="例如: -1001234567890" />
                   </UFormGroup>
+                  <UFormGroup label="API ID" hint="配置后，大于 20 MB 的文件会切换到 Kurigram 上传">
+                    <UInput v-model="localForm.api_id" placeholder="例如: 12345678" />
+                  </UFormGroup>
+                  <UFormGroup label="API Hash" hint="和 API ID 配套，支持 env:TELEGRAM_API_HASH">
+                    <UInput v-model="localForm.api_hash" type="password" :placeholder="isEditing ? '留空保持不变' : '留空表示不启用 Kurigram 大文件通道'" />
+                    <p v-if="maskedState.api_hash && !localForm.api_hash" class="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                      已配置（留空保持不变）
+                    </p>
+                  </UFormGroup>
+                </div>
+                <div class="rounded-xl border border-blue-200/70 bg-blue-50/70 p-3 text-xs text-blue-700 dark:border-blue-800/70 dark:bg-blue-900/20 dark:text-blue-200">
+                  只填 Bot Token / Chat ID 时继续走旧 Bot API；补齐 API ID + API Hash 后，超出 20 MB 的文件会自动改走 Kurigram。
                 </div>
               </template>
 
@@ -232,6 +244,8 @@
                   <template v-if="localForm.driver === 'telegram'">
                     <p>Bot Token：{{ maskedState.bot_token && !localForm.bot_token ? '保持原配置' : (localForm.bot_token ? '已填写新值' : '未填写') }}</p>
                     <p>Chat ID：{{ localForm.chat_id || '留空' }}</p>
+                    <p>API ID：{{ localForm.api_id || '未填写（不启用 Kurigram）' }}</p>
+                    <p>API Hash：{{ maskedState.api_hash && !localForm.api_hash ? '保持原配置' : (localForm.api_hash ? '已填写新值' : '未填写') }}</p>
                   </template>
                   <template v-else-if="localForm.driver === 'local'">
                     <p>存储目录：{{ localForm.root_dir || '留空' }}</p>
@@ -362,6 +376,7 @@ const localGroupUpload = ref<StorageGroupUploadForm>(clonePlain(props.groupUploa
 const localPrivateUpload = ref<StoragePrivateUploadForm>(clonePlain(props.privateUpload))
 const maskedState = ref({
   bot_token: false,
+  api_hash: false,
   access_key: false,
   secret_key: false,
 })
@@ -373,11 +388,13 @@ const resetLocalState = () => {
   const nextForm = clonePlain(props.form)
   maskedState.value = {
     bot_token: nextForm.bot_token === '__MASKED__',
+    api_hash: nextForm.api_hash === '__MASKED__',
     access_key: nextForm.access_key === '__MASKED__',
     secret_key: nextForm.secret_key === '__MASKED__',
   }
 
   if (maskedState.value.bot_token) nextForm.bot_token = ''
+  if (maskedState.value.api_hash) nextForm.api_hash = ''
   if (maskedState.value.access_key) nextForm.access_key = ''
   if (maskedState.value.secret_key) nextForm.secret_key = ''
 
@@ -422,6 +439,23 @@ const validateStep = (): boolean => {
   }
 
   if (currentStep.value.key === 'driver') {
+    if (form.driver === 'telegram') {
+      const hasMtprotoIntent = Boolean(form.api_id.trim() || form.api_hash.trim() || maskedState.value.api_hash)
+      if (hasMtprotoIntent) {
+        if (!form.api_id.trim()) {
+          stepError.value = '启用 Kurigram 大文件上传时必须填写 API ID'
+          return false
+        }
+        if (!/^\d+$/.test(form.api_id.trim())) {
+          stepError.value = 'API ID 必须是纯数字'
+          return false
+        }
+        if (!form.api_hash.trim() && !maskedState.value.api_hash) {
+          stepError.value = '启用 Kurigram 大文件上传时必须填写 API Hash'
+          return false
+        }
+      }
+    }
     if (form.driver === 'local' && !form.root_dir.trim()) {
       stepError.value = '本地存储请填写存储目录'
       return false
@@ -487,6 +521,7 @@ const submit = () => {
 
   const form = clonePlain(localForm.value)
   if (maskedState.value.bot_token && !form.bot_token.trim()) form.bot_token = '__MASKED__'
+  if (maskedState.value.api_hash && !form.api_hash.trim()) form.api_hash = '__MASKED__'
   if (maskedState.value.access_key && !form.access_key.trim()) form.access_key = '__MASKED__'
   if (maskedState.value.secret_key && !form.secret_key.trim()) form.secret_key = '__MASKED__'
 
