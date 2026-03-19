@@ -177,21 +177,40 @@ def create_app() -> Flask:
     app.secret_key = SECRET_KEY
 
     # 设置 Flask 请求体大小上限（防止超大请求耗尽内存）
-    # 动态读取系统设置，回退到 100MB 硬上限
-    try:
-        max_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
-    except Exception:
-        max_mb = 20
-    # 预留2MB冗余空间以容纳multipart请求头
-    app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
+    def _get_max_upload_mb() -> int:
+        """动态读取当前上传大小限制"""
+        try:
+            return get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
+        except Exception:
+            return 100
+
+    def _apply_request_limit() -> int:
+        """将数据库中的上传限制同步到 Flask 请求体限制"""
+        max_mb = _get_max_upload_mb()
+        app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
+        return max_mb
+
+    _apply_request_limit()
 
     @app.before_request
     def refresh_request_size_limit():
-        try:
-            max_request_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
-        except Exception:
-            max_request_mb = 20
-        app.config['MAX_CONTENT_LENGTH'] = (max_request_mb + 2) * 1024 * 1024
+        """
+        每次请求前同步上传限制。
+
+        不然管理员在后台把 max_file_size_mb 调大以后，当前进程还是抱着启动时
+        的旧值不撒手，上传直接 413。
+        """
+        _apply_request_limit()
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def handle_request_entity_too_large(error):
+        """统一返回更清晰的上传过大错误"""
+        max_mb = _get_max_upload_mb()
+        response = jsonify({
+            'success': False,
+            'error': f'文件大小超过当前 {max_mb}MB 上传限制，请在管理后台调高"最大文件大小（MB）"后重试'
+        })
+        return add_cache_headers(response, 'no-cache'), 413
 
     # 配置管理员会话
     admin_module.configure_admin_session(app)

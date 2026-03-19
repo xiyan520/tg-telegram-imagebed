@@ -81,8 +81,17 @@ class StorageRouter:
                 chat_id = 0
             if chat_id <= 0:
                 logger.warning(f"Telegram 后端 '{name}' 缺少有效的 chat_id，上传将失败")
+            api_id = str(cfg2.get("api_id") or "")
+            api_hash = str(cfg2.get("api_hash") or "")
             proxy_url = str(cfg2.get("proxy_url") or get_proxy_url() or "").strip() or None
-            return TelegramBackend(name=name, bot_token=bot_token, chat_id=chat_id, proxy_url=proxy_url)
+            return TelegramBackend(
+                name=name,
+                bot_token=bot_token,
+                chat_id=chat_id,
+                api_id=api_id,
+                api_hash=api_hash,
+                proxy_url=proxy_url,
+            )
 
         if driver == "local":
             root_dir = str(cfg2.get("root_dir") or os.path.join(os.getcwd(), "data", "uploads"))

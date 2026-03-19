@@ -18,6 +18,8 @@ export interface StorageBackendForm {
   driver: StorageDriverType
   bot_token: string
   chat_id: string
+  api_id: string
+  api_hash: string
   root_dir: string
   endpoint: string
   bucket: string

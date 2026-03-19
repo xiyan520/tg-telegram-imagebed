@@ -293,7 +293,7 @@ const createDefaultPolicy = (): StoragePolicy => ({ guest: '', token: '', group:
 const createDefaultGroupUpload = (): StorageGroupUploadForm => ({ admin_only: false, admin_ids: '', tg_bound_only: false, reply: true, delete_delay: 0 })
 const createDefaultPrivateUpload = (): StoragePrivateUploadForm => ({ enabled: true, mode: 'open', admin_ids: '' })
 const createDefaultBackendForm = (): StorageBackendForm => ({
-  name: '', driver: 'telegram', bot_token: '', chat_id: '', root_dir: '', endpoint: '', bucket: '',
+  name: '', driver: 'telegram', bot_token: '', chat_id: '', api_id: '', api_hash: '', root_dir: '', endpoint: '', bucket: '',
   access_key: '', secret_key: '', region: '', public_url_prefix: '', path_style: false,
   remote: '', base_path: '', rclone_bin: '', config_path: '', use_as_bot: false,
 })
@@ -523,6 +523,7 @@ const openEditModal = (name: string) => {
   editingBackend.value = name
   backendDraftForm.value = {
     name, driver: cfg.driver || 'telegram', bot_token: cfg.bot_token || '', chat_id: cfg.chat_id || '',
+    api_id: cfg.api_id || '', api_hash: cfg.api_hash || '',
     root_dir: cfg.root_dir || '', endpoint: cfg.endpoint || '', bucket: cfg.bucket || '', access_key: cfg.access_key || '',
     secret_key: cfg.secret_key || '', region: cfg.region || '', public_url_prefix: cfg.public_url_prefix || '',
     path_style: cfg.path_style || false, remote: cfg.remote || '', base_path: cfg.base_path || '', rclone_bin: cfg.rclone_bin || '',
@@ -535,7 +536,12 @@ const openEditModal = (name: string) => {
 
 const buildBackendConfig = (form: StorageBackendForm) => {
   const config: Record<string, any> = { driver: form.driver }
-  if (form.driver === 'telegram') { if (form.bot_token) config.bot_token = form.bot_token; if (form.chat_id) config.chat_id = form.chat_id }
+  if (form.driver === 'telegram') {
+    if (form.bot_token) config.bot_token = form.bot_token
+    if (form.chat_id) config.chat_id = form.chat_id
+    if (form.api_id) config.api_id = form.api_id
+    if (form.api_hash) config.api_hash = form.api_hash
+  }
   if (form.driver === 'local') { if (form.root_dir) config.root_dir = form.root_dir }
   if (form.driver === 's3') {
     if (form.endpoint) config.endpoint = form.endpoint

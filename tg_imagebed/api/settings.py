@@ -57,7 +57,7 @@ def _format_settings_for_response(settings: dict) -> dict:
         'guest_existing_tokens_policy': settings.get('guest_existing_tokens_policy', 'keep'),
         'guest_token_max_upload_limit': _safe_int(settings.get('guest_token_max_upload_limit'), 1000, 1),
         'guest_token_max_expires_days': _safe_int(settings.get('guest_token_max_expires_days'), 365, 1),
-        'max_file_size_mb': _safe_int(settings.get('max_file_size_mb'), 20, 1, 100),
+        'max_file_size_mb': _safe_int(settings.get('max_file_size_mb'), 100, 1, 1024),
         'daily_upload_limit': _safe_int(settings.get('daily_upload_limit'), 0, 0),
         # CDN 配置
         'cdn_enabled': settings.get('cdn_enabled', '0') == '1',
@@ -269,8 +269,8 @@ def admin_system_settings():
 
             if 'max_file_size_mb' in data:
                 size = _safe_int(data['max_file_size_mb'], -1)
-                if size < 1 or size > 100:
-                    errors.append('文件大小限制必须在 1-100 MB 之间')
+                if size < 1 or size > 1024:
+                    errors.append('文件大小限制必须在 1-1024 MB 之间')
                 else:
                     settings_to_update['max_file_size_mb'] = str(size)
 

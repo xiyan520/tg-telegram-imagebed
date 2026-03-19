@@ -110,7 +110,7 @@ def validate_upload_file(file) -> Tuple[Optional[tuple], Optional[ValidatedUploa
     if content_type and not content_type.startswith("image/"):
         return _error("只允许上传图片文件", 400), None
 
-    max_size_mb = get_system_setting_int("max_file_size_mb", 20, minimum=1, maximum=1024)
+    max_size_mb = get_system_setting_int("max_file_size_mb", 100, minimum=1, maximum=1024)
     max_size_bytes = max_size_mb * 1024 * 1024
 
     tmp = tempfile.NamedTemporaryFile(prefix="tg-imagebed-upload-", suffix=".tmp", delete=False)
