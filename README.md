@@ -1,475 +1,325 @@
-# Telegram 云图床 Pro
+# tg-telegram-imagebed
 
-<div align="center">
+基于 Telegram 存储的单进程图床服务，后端使用 Flask，前端使用 Nuxt 静态构建，支持管理后台、Token 上传、TG 认证、画集分享、Cloudflare CDN，以及按场景切换的多存储后端。
 
-基于 Telegram 云存储 + Cloudflare CDN 的现代化图床解决方案
+项目当前的核心是“内建存储驱动 + 后台配置 + 第三方生态适配”，不是运行时自动发现的通用插件平台。也就是说，项目本身提供的是内建驱动和社区生态接入点，而不是可随意热插拔的 Python 插件总线。
 
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue)](https://hub.docker.com/)
-[![Python](https://img.shields.io/badge/Python-3.11+-green)](https://www.python.org/)
-[![Nuxt](https://img.shields.io/badge/Nuxt-3.13-00DC82)](https://nuxt.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+## 你先看这个
 
-[功能特性](#-功能特性) • [快速开始](#-快速开始) • [部署指南](#-部署指南) • [配置说明](#-配置说明)
+> [!IMPORTANT]
+> - 业务配置默认走管理后台和数据库，不是传统 `.env` 驱动模式。
+> - 当前上传入口只接受图片文件，不是任意文件床。
+> - Telegram 存储默认可用，但超过约 `20 MB` 的大文件想走稳，建议补齐 `API ID + API Hash` 让后端自动切到 Kurigram / MTProto。
+> - 如果你前面挂了 Nginx、宝塔、Ingress、CDN 回源之类的反向代理，出现 `413 Request Entity Too Large`，大概率不是项目炸了，是你的网关体积限制没放开。相关社区反馈见 [Issue #19](https://github.com/xiyan520/tg-telegram-imagebed/issues/19)。
 
-</div>
+## 功能概览
 
----
+- Telegram 图床主链路，支持 Bot API 和 Kurigram / MTProto 双通道。
+- 内建 4 种存储驱动：`telegram`、`local`、`s3`、`rclone`。
+- 上传场景路由：可分别为 `guest / token / group / admin` 指定不同后端。
+- 管理后台：系统设置、存储配置、Token 管理、CDN 配置、画集管理、应用更新。
+- 游客上传、Token 上传、TG 登录绑定、TG 用户限额与会话控制。
+- Telegram Bot：轮询 / Webhook、群组上传、私聊上传、上传历史、删除控制。
+- Cloudflare CDN：缓存监控、重定向、延迟回源、图片专用域名限制。
+- 画集系统：公开 / 私有 / Token / 密码访问模式。
+- 前端内置 `/docs` 文档页和 `/api/health` 健康检查。
 
-## 📸 界面预览
+## 架构说明
 
-### 前端界面
-![Frontend](https://img.jivon.de/image/QWdBQ0FnVUFBeGtEbe68687b)
+项目运行形态比较直接：
 
-### 管理后台
-![Backend](https://img.jivon.de/image/QWdBQ0FnVUFBeGtEd13739b4)
+- Flask 提供 API 和图片访问。
+- Nuxt 前端构建为静态文件后，由 Flask 同端口托管。
+- Telegram Bot 在线程中运行，不影响 Web 服务主流程。
+- 存储由 `StorageRouter` 按配置选择后端，并把每条文件记录绑定到具体后端。
 
----
+这意味着两件事：
 
-## ✨ 功能特性
+1. 旧文件不会因为你切换了活跃后端就“失忆”，因为每条记录都记着自己的 `storage_backend`。
+2. README 里凡是写“插件”的地方，都应该区分清楚“项目内建存储驱动”和“社区外部客户端 / CMS 适配插件”。
 
-### 核心功能
-- 🚀 **Telegram 云存储** — 利用 Telegram 无限存储空间，零成本图片托管
-- ⚡ **Cloudflare CDN** — 全球加速，智能路由，缓存预热
-- 🎨 **现代化前端** — Nuxt 3 + Vue 3 + Nuxt UI，拖拽/粘贴/点击上传
-- 📱 **响应式设计** — 完美适配桌面端和移动端
-- 🌙 **深色模式** — 内置深色主题支持
+## 快速开始
 
-### 存储与分发
-- 🗄️ **多存储后端** — Telegram / S3 / 本地 / Rclone 四种存储驱动，按场景路由
-- 🔄 **CDN 智能路由** — 自动选择最优节点，ETag/304 缓存，Range 分片传输
-- 🔥 **缓存预热** — 多地域主动预热 CDN 缓存，实时监控缓存状态
-
-### Token 与相册
-- 🎫 **Token 系统** — 游客 Token 上传，支持配额和有效期管理
-- 🔑 **Token Vault** — 多 Token 本地管理，一键切换，自动验证与无效清理
-- 🖼️ **画集系统** — 创建画集、管理图片、设置封面，支持四种访问模式
-- 🔗 **分享链接** — 单画集分享 / 全部分享，支持密码保护和 Token 授权
-
-### 管理与安全
-- 🔐 **管理后台** — 完整的管理员功能，首次启动引导式设置
-- 📈 **数据统计** — 实时统计和监控仪表板
-- 👥 **群组上传** — 支持 Telegram 群组/频道上传，自动回复链接
-- 📚 **交互式 API 文档** — 内置 `/docs` 页面，多语言代码示例
-- 📢 **系统公告** — 管理员可发布公告通知用户
-- 🛡️ **登录安全** — 渐进式锁定（5次失败 → 5/15/30分钟锁定）
-
----
-
-## 🚀 快速开始
-
-### 前置要求
-
-- Docker & Docker Compose（推荐）
-- 或 Python 3.11+ & Node.js 20+
-- Telegram Bot Token + 频道 ID
-
-### 3 分钟快速部署
-
-#### 1. 创建 docker-compose.yml
-
-```yaml
-services:
-  telegram-imagebed:
-    image: xiyan520/tg-telegram-imagebed:latest
-    container_name: telegram-imagebed
-    ports:
-      - "18793:18793"
-    volumes:
-      - ./data:/app/data
-    restart: unless-stopped
-```
-
-#### 2. 启动服务
+### 方式一：直接用仓库自带 Docker Compose
 
 ```bash
-docker-compose up -d
-```
-
-#### 3. 首次设置
-
-访问 `http://你的服务器IP:18793`，系统自动跳转到设置页面：
-
-1. **设置管理员账号** — 输入用户名和密码（≥8字符，含大小写/数字/特殊字符）
-2. **配置 Telegram Bot** — 在管理后台 → Bot 配置中填入 Bot Token 和频道 ID
-3. **开始使用** — 返回首页即可上传图片
-
-> 所有业务配置（Bot Token、CDN、存储、上传策略等）均通过管理后台设置，无需 `.env` 文件。
-
----
-
-## 📦 部署指南
-
-### Docker 部署（推荐）
-
-#### 使用 Docker Compose
-
-```yaml
-services:
-  telegram-imagebed:
-    image: xiyan520/tg-telegram-imagebed:latest
-    container_name: telegram-imagebed
-    ports:
-      - "18793:18793"
-    volumes:
-      - ./data:/app/data
-    restart: unless-stopped
-```
-
-```bash
-docker-compose up -d
-```
-
-#### 使用 Docker 命令
-
-```bash
-docker run -d \
-  --name telegram-imagebed \
-  -p 18793:18793 \
-  -v ./data:/app/data \
-  --restart unless-stopped \
-  xiyan520/tg-telegram-imagebed:latest
-```
-
-### 手动部署
-
-#### 后端部署
-
-```bash
-# 1. 克隆项目
 git clone https://github.com/xiyan520/tg-telegram-imagebed.git
 cd tg-telegram-imagebed
+docker compose up -d --build
+```
 
-# 2. 安装依赖
+默认对外端口是 `18793`，启动后访问：
+
+```text
+http://127.0.0.1:18793
+```
+
+首次进入会进入管理员初始化流程。完成后按下面顺序配置最稳：
+
+1. 创建管理员账号。
+2. 进入“存储配置”，先把 Telegram 后端配起来。
+3. 填入 `Bot Token` 和目标 `chat_id`。
+4. 如果你要稳定处理 `20 MB+` 图片，顺手把 `API ID`、`API Hash` 也补上。
+5. 按需配置游客上传策略、Token、TG 认证、CDN、画集站点等。
+
+### 方式二：本地手动运行
+
+要求：
+
+- Python `3.11`
+- Node.js `20`
+- npm
+
+后端：
+
+```bash
 pip install -r requirements.txt
-
-# 3. 启动后端
 python main.py
 ```
 
-#### 前端部署
+前端静态构建：
 
 ```bash
-# 1. 进入前端目录
 cd frontend
-
-# 2. 安装依赖
 npm install
+npm run generate
+```
 
-# 3. 构建静态文件
+注意：前端构建产物必须在 `frontend/.output/public`。你要是只跑了 `python main.py`，没构建前端，后端能起来，但首页会直接告诉你“前端文件未找到”。
+
+## 配置模型
+
+### 1. 业务配置
+
+绝大多数配置都保存在数据库 `admin_config` 表里，通过管理后台修改，包括：
+
+- Telegram Bot 配置
+- 存储后端与上传路由策略
+- 最大文件大小
+- 游客上传策略与 Token 限制
+- TG 认证
+- 群组 / 私聊上传
+- Cloudflare CDN
+- 画集站点
+- SEO / 应用更新
+
+### 2. 环境变量
+
+环境变量不是完全没用，但现在主要承担“基础设施兜底”角色：
+
+| 变量名 | 用途 | 说明 |
+| --- | --- | --- |
+| `ALLOWED_ORIGINS` | 管理后台 / TG 认证跨域白名单 | 默认 `*` 仅对公共 API 宽松，管理员接口仍会退回本地白名单 |
+| `HTTP_PROXY` / `HTTPS_PROXY` | 系统代理 | 后端请求 Telegram / 外部服务时可复用 |
+| `BOT_TOKEN` / `TELEGRAM_BOT_TOKEN` | Bot Token 兜底 | 数据库未配置时才会回退读取 |
+
+另外，存储配置 JSON 里支持 `env:VAR_NAME` 形式引用环境变量。
+
+### 3. 数据目录
+
+请务必持久化 `./data`，里面至少有这些关键文件：
+
+| 路径 | 说明 |
+| --- | --- |
+| `data/telegram_imagebed.db` | SQLite 数据库 |
+| `data/telegram_imagebed.log` | 运行日志 |
+| `data/.secret_key` | 会话与密钥持久化文件 |
+| `data/uploads/` | 使用 `local` 后端时的本地存储目录 |
+| `data/tmp/` | Kurigram 大文件下载的临时目录 |
+
+## 存储后端
+
+### 已内建的驱动
+
+| 驱动 | 标识 | 说明 | 额外注意 |
+| --- | --- | --- | --- |
+| Telegram | `telegram` | 默认主链路，支持 Bot API / Kurigram | `chat_id` 必填；大文件建议配置 `api_id + api_hash` |
+| Local | `local` | 保存到服务器本地目录 | 需要保证路径可写 |
+| S3 Compatible | `s3` | 适配 AWS S3、MinIO、R2、OSS 等 | 仓库默认依赖里**没有** `boto3`，需额外安装 |
+| rclone | `rclone` | 复用 rclone 支持的远程存储 | 运行环境内必须已有 `rclone` 二进制和 remote 配置 |
+
+### Telegram 大文件说明
+
+Telegram 后端实际有两条通道：
+
+- 小文件优先走 Bot API。
+- 文件大于约 `20 MB` 且你配置了 `API ID + API Hash` 时，后端会自动切到 Kurigram / MTProto。
+
+如果你只配置了 `Bot Token + chat_id`：
+
+- 项目仍然能正常工作。
+- 但大文件上传能力会受 Bot API 限制影响，稳定性和上限不如 MTProto 通道。
+
+### 上传场景路由
+
+后台可分别为以下场景指定目标后端：
+
+- `guest`
+- `token`
+- `group`
+- `admin`
+
+管理员上传还可以在允许列表内手动选后端，这个设计比“全局只有一个存储桶”灵活得多。
+
+## 支持的图片格式
+
+当前上传链路会做扩展名白名单和魔数校验，默认支持：
+
+```text
+jpg, jpeg, png, gif, webp, bmp, avif, tiff, tif, ico
+```
+
+注意：
+
+- 项目当前不是任意文件托管方案。
+- 默认也不接受 `svg`。
+- 反代和 Telegram 配额是两码事，别看后台把大小调大了，就以为外层网关也会自动放行。
+
+## API 与页面入口
+
+| 路径 | 说明 |
+| --- | --- |
+| `/` | 前端首页 |
+| `/docs` | 内置 API 文档页 |
+| `/api/health` | 健康检查 |
+| `/api/upload` | 匿名上传 |
+| `/api/auth/upload` | Token 上传 |
+| `/api/admin/upload` | 管理员上传 |
+| `/image/<encrypted_id>` | 图片访问入口 |
+
+更多接口请直接查看站内 `/docs` 页面，并以页面内容为准。
+
+## Cloudflare CDN
+
+项目支持 Cloudflare CDN，但不是只填个域名就算完事。要想用顺手，至少得搞明白三层逻辑：
+
+1. 后台里要开启 CDN 并填对域名 / Token。
+2. Cloudflare 侧要给 `/image/*` 做缓存规则。
+3. 如果开启了 CDN 重定向，项目会根据缓存状态、新上传延迟时间等条件决定是否 302 到 CDN 域名。
+
+建议你额外注意：
+
+- 新上传文件默认会有一段短缓存 / 延迟回源窗口。
+- 图片域名限制和管理后台域名不是一个概念，别配串了。
+- 如果你前面还有反代，上传失败优先检查网关体积限制而不是瞎怀疑 Cloudflare。
+
+## 第三方生态与适配插件
+
+### 1. Typecho 插件：PicUp
+
+社区已经有现成的 Typecho 适配插件，可直接把本项目当作上传后端之一使用。
+
+- 仓库：<https://github.com/lhl77/Typecho-Plugin-PicUp>
+- 文档：<https://blog.lhl.one/artical/1026.html>
+- 相关讨论：<https://github.com/xiyan520/tg-telegram-imagebed/issues/20>
+
+根据 issue 和作者文档，`PicUp` 已支持 `tgimagebed` 驱动，覆盖匿名上传和 Token 上传场景。
+
+### 2. GioPic / fileup.dev
+
+`fileup.dev` 对应的是 GioPic 浏览器端生态，定位是“多节点上传 + 自定义插件”的客户端方案：
+
+- 官网：<https://fileup.dev/>
+
+目前更合适的表述是：
+
+- 它属于第三方客户端生态。
+- 它支持自定义插件 / 节点扩展。
+- 是否内置了针对 `tg-telegram-imagebed` 的现成适配，取决于 GioPic 侧的发布版本和插件实现。
+
+因此，更准确的描述是“可作为第三方适配入口”，而不是“本项目官方内置插件”。
+
+## 注意事项
+
+### 1. `413 Request Entity Too Large`
+
+这个报错通常有 3 个来源：
+
+- 项目后台设置里的 `max_file_size_mb`
+- Telegram 上传链路本身的限制
+- 你前面的 Nginx / Ingress / 面板网关体积限制
+
+如果你用了 Nginx，至少确认类似配置已放开：
+
+```nginx
+client_max_body_size 100M;
+```
+
+### 2. `ALLOWED_ORIGINS`
+
+默认 `*` 只对公共 API 比较宽松。管理员接口和 TG 认证接口带 Cookie，生产环境如果前后端跨域部署，记得显式设置 `ALLOWED_ORIGINS`，否则容易出现跨域和会话问题。
+
+### 3. S3 与 rclone 不是默认即插即用
+
+- `s3` 后端需要额外安装 `boto3`
+- `rclone` 后端需要宿主机或镜像内存在 `rclone` 命令
+
+如果你用的是仓库默认 Dockerfile，这俩都不是自动带上的。
+
+### 4. 单实例运行
+
+项目有锁文件机制，不建议同一份数据目录同时启动多个实例，否则 SQLite、Bot 线程和会话状态都可能发生冲突。
+
+### 5. 切换后端不会迁移旧文件
+
+后台切换“活跃后端”只影响新上传文件。旧文件仍按数据库里记录的 `storage_backend` 去取，所以不会自动搬迁，也不会替你做数据迁移。
+
+## 开发说明
+
+### 目录结构
+
+```text
+.
+├─ main.py
+├─ tg_imagebed/
+│  ├─ api/
+│  ├─ bot/
+│  ├─ database/
+│  ├─ services/
+│  └─ storage/
+├─ frontend/
+├─ data/
+└─ tests/
+```
+
+### 常用命令
+
+```bash
+# 后端
+pip install -r requirements.txt
+python main.py
+
+# 前端
+cd frontend
+npm install
 npm run generate
 
-# 4. 将 .output/public/ 下的文件部署到后端 static/ 目录
+# Docker
+docker compose up -d --build
 ```
 
-> Docker 多阶段构建会自动完成前端构建和集成，手动部署仅用于开发调试。
+## 常见问题
 
-### 数据持久化
+### 没有配置 Telegram Bot，网站能不能先跑起来？
 
-所有数据存储在 `./data/` 目录下：
+能。Web 服务可以先起来，Bot 会等待后续配置。
 
-| 文件 | 说明 |
-|------|------|
-| `telegram_imagebed.db` | SQLite 数据库（WAL 模式） |
-| `telegram_imagebed.log` | 运行日志 |
-| `.secret_key` | 加密密钥（首次自动生成） |
-| `.instance_lock` | 单实例锁文件 |
+### 为什么我把最大文件大小调大了，上传还是 413？
 
----
+大概率是你的反向代理没放开体积限制，应用内设置和 Nginx / Ingress 不是同一个东西。
 
-## ⚙️ 配置说明
+### 为什么我配置了 S3，结果后端说不可用？
 
-### 配置方式
+先检查是不是没安装 `boto3`。仓库默认依赖里不带它。
 
-本项目采用 **管理后台配置** 模式，所有业务配置通过 Web 界面管理，存储在数据库 `system_settings` 表中。无需 `.env` 文件。
+### 为什么我配置了 rclone 还是报错？
 
-首次启动后，在管理后台中配置以下内容：
+先确认运行环境里真有 `rclone` 命令，而且 remote 配置也能读到。
 
-### 1. Telegram Bot 配置
+### 为什么首页打开提示前端文件未找到？
 
-1. 在 Telegram 中与 [@BotFather](https://t.me/BotFather) 对话，发送 `/newbot` 创建机器人
-2. 获取 Bot Token
-3. 创建一个 Telegram 频道，将 Bot 添加为管理员
-4. 通过 [@VersaToolsBot](https://t.me/VersaToolsBot) 获取频道 ID
-5. 在管理后台 → Bot 配置中填入 Bot Token 和频道 ID
+你没构建前端，或者构建产物不在 `frontend/.output/public`。
 
-![BotFather Token](https://github.com/user-attachments/assets/04f01289-205c-43e0-ba03-d9ab3465e349)
+## 许可证
 
-### 2. Cloudflare CDN 配置（可选）
-
-在管理后台 → 系统设置中启用 CDN 并填入：
-- CDN 域名（不含 `https://`）
-- Cloudflare API Token（需要 Cache Purge + Zone Read 权限）
-
-#### Cloudflare 缓存规则
-
-在 Cloudflare Dashboard 中配置缓存规则，确保 `/image/*` 路径被缓存：
-
-**方法一：Page Rules**
-- URL 模式：`你的域名/image/*`
-- Cache Level: Cache Everything
-- Edge Cache TTL: 1 month
-
-**方法二：Cache Rules（新版）**
-```
-When: URI Path contains "/image/"
-Then: Eligible for cache, Edge TTL 30 days
-```
-
-#### DNS 配置
-
-添加 A 记录指向服务器 IP，确保 Proxy status 为橙色云朵（已代理）。
-
-### 3. 管理后台可配置项
-
-| 分类 | 配置项 | 默认值 | 说明 |
-|------|--------|--------|------|
-| Bot | Telegram Bot Token | — | Bot Token |
-| Bot | 存储频道 ID | — | 频道/群组 ID |
-| 上传策略 | 游客上传策略 | `open` | `open` / `token_only` / `admin_only` |
-| 上传策略 | 最大文件大小 | 20 MB | 1–1024 MB |
-| 上传策略 | 每日上传限制 | 0（无限） | 按来源或 Token 统计 |
-| Token | Token 生成开关 | 开启 | 是否允许游客创建 Token |
-| Token | 最大上传数 | 1000 | 单个 Token 最大上传次数 |
-| Token | 最大有效期 | 365 天 | 单个 Token 最大有效天数 |
-| 存储 | 活跃存储后端 | telegram | telegram / s3 / local / rclone |
-| 存储 | 上传场景路由 | — | 游客/Token/群组/管理员 → 不同后端 |
-| CDN | CDN 开关 | 关闭 | Cloudflare CDN |
-| CDN | CDN 域名 | — | 不含 `https://` |
-| CDN | CDN 重定向 | 关闭 | 自动重定向到 CDN |
-| 群组 | 群组上传仅管理员 | 否 | 限制群组上传权限 |
-| 群组 | 管理员 ID 列表 | — | 逗号分隔 |
-| 同步 | 删除同步 TG 消息 | 开启 | 删除图片时同步删除 TG 消息 |
-
-### 4. 环境变量（仅基础设施）
-
-项目仅使用少量环境变量用于基础设施配置：
-
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `HTTP_PROXY` / `HTTPS_PROXY` | — | 系统代理（可选） |
-
-> 所有业务配置（Bot Token、CDN、存储、上传策略等）均通过管理后台设置，不通过环境变量。
-
-### 5. 多存储配置
-
-系统支持四种存储驱动，在管理后台 → 存储配置中可视化管理：
-
-| 驱动 | 说明 | 必需参数 |
-|------|------|----------|
-| `telegram` | Telegram 频道存储（默认） | Bot Token, 频道 ID |
-| `s3` | S3 兼容存储（AWS/MinIO 等） | endpoint, bucket, access_key, secret_key |
-| `local` | 本地文件系统 | root_dir |
-| `rclone` | Rclone 远程存储 | remote |
-
-支持按上传场景路由到不同后端（游客 → Telegram，管理员 → S3 等）。
-
----
-
-## 🏗️ 技术栈
-
-### 后端
-| 组件 | 技术 | 版本 |
-|------|------|------|
-| 框架 | Flask + Flask-CORS | 3.0 |
-| 生产服务器 | waitress | 3.0 |
-| 数据库 | SQLite3（WAL 模式） | 内置 |
-| Bot SDK | python-telegram-bot | 21.0.1 |
-| HTTP | requests + aiohttp | 2.31 / 3.9 |
-| 语言 | Python | 3.11+ |
-
-### 前端
-| 组件 | 技术 | 版本 |
-|------|------|------|
-| 框架 | Nuxt 3（SPA, ssr=false） | 3.13 |
-| UI 库 | Nuxt UI（Tailwind CSS） | 2.18 |
-| 状态管理 | Pinia | 2.2 |
-| 工具库 | VueUse | 11.0 |
-| 语言 | TypeScript | — |
-
-### 部署
-- Docker 多阶段构建：node:20-alpine（前端 generate）→ python:3.11-slim（后端）
-- 单容器多线程，端口 18793，waitress 4 线程
-- 健康检查：`GET /api/health`（30 秒间隔）
-
----
-
-## 📖 API 文档
-
-完整的交互式 API 文档请访问：`http://your-domain/docs`
-
-### 主要接口
-
-#### 匿名上传
-
-```bash
-curl -X POST http://your-domain/api/upload \
-  -F "file=@image.jpg"
-```
-
-#### Token 上传
-
-```bash
-curl -X POST http://your-domain/api/auth/upload \
-  -H "Authorization: Bearer <token>" \
-  -F "file=@image.jpg"
-```
-
-#### 创建 Token
-
-```bash
-curl -X POST http://your-domain/api/auth/token/generate \
-  -H "Content-Type: application/json" \
-  -d '{"upload_limit": 100, "expires_days": 30, "description": "my album"}'
-```
-
-#### 验证 Token
-
-```bash
-curl -X POST http://your-domain/api/auth/token/verify \
-  -H "Authorization: Bearer <token>"
-```
-
-#### 获取图片
-
-```bash
-curl http://your-domain/image/<encrypted_id>
-```
-
-#### 获取统计信息
-
-```bash
-curl http://your-domain/api/stats
-```
-
-#### 画集相关
-
-```bash
-# 获取 Token 的画集列表
-curl http://your-domain/api/auth/galleries \
-  -H "Authorization: Bearer <token>"
-
-# 创建画集
-curl -X POST http://your-domain/api/auth/galleries \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "我的画集", "access_mode": "public"}'
-
-# 访问分享画集
-curl http://your-domain/api/shared/galleries/<share_token>
-```
-
-**响应格式：**
-```json
-{
-  "success": true,
-  "data": {
-    "url": "https://your-domain.com/image/xxx",
-    "filename": "image.jpg",
-    "size": "1.2 MB",
-    "upload_time": "2025-01-01 12:00:00",
-    "remaining_uploads": 99
-  }
-}
-```
-
----
-
-## 🔧 常见问题
-
-### Q: 首次启动后如何配置？
-A: 访问 `http://服务器IP:18793`，系统自动跳转到设置页面。设置管理员账号后，在管理后台配置 Bot Token 和频道 ID。
-
-### Q: 图片无法访问？
-A: 检查 Telegram Bot 是否有频道管理员权限，在管理后台确认 Bot Token 和频道 ID 配置正确。
-
-### Q: CDN 不生效？
-A:
-1. 确认管理后台已启用 CDN 并填入正确的域名
-2. 检查 Cloudflare 缓存规则是否已配置（`/image/*` 路径）
-3. 验证 API Token 权限是否足够（Cache Purge + Zone Read）
-4. 查看后端日志确认 CDN 状态
-
-### Q: 如何修改管理员密码？
-A: 登录管理后台，在系统设置页面修改密码。
-
-### Q: Docker 容器无法启动？
-A:
-1. 确保端口 18793 未被占用
-2. 确保 `./data` 目录有写入权限
-3. 查看容器日志：`docker logs telegram-imagebed`
-
-### Q: 群组上传不工作？
-A:
-1. 确保 Bot 已添加到群组并有管理员权限
-2. 在管理后台检查群组上传是否已启用
-3. 如果设置了仅管理员上传，确认用户 ID 在管理员列表中
-
-### Q: Token 上传记录不显示？
-A: 确保上传时使用的是 Token 模式（Bearer Token 认证）。当同时登录管理员和持有 Token 时，系统优先使用 Token 模式上传以确保记录关联正确。
-
----
-
-## 📝 更新日志
-
-### 最新更新
-
-#### 首页组件重构
-- ✅ `pages/index.vue` 从 846 行精简为 ~70 行容器组件
-- ✅ 拆分为 4 个子组件：HomeUploadZone / HomeUploadResults / HomeUploadHistory / HomeImagePreview
-- ✅ 新增 `useClipboardCopy` composable，兼容非 HTTPS 环境
-- ✅ 上传模式优先级修正：Token 优先于 Admin，确保上传记录正确关联
-
-#### Token Vault 多 Token 管理
-- ✅ 支持多个 Token 本地管理，localStorage 持久化
-- ✅ 一键切换活跃 Token，自动验证有效性
-- ✅ 旧版单 Token 自动迁移到 Vault
-- ✅ 智能清理：仅在后端确认无效时移除，网络错误不移除
-
-#### 画集表重构
-- ✅ `galleries` 表新增 `owner_type` 列（`admin` / `token`），移除 FK 约束
-- ✅ 管理员画集直接 `owner_type='admin'`，无需虚拟 token
-- ✅ 自动迁移：旧表重建 + admin token 行转换 + 清理虚拟记录
-
-#### 数据库模块重构
-- ✅ `database.py`（2800行）拆分为 `database/` 包结构（6 个子模块）
-- ✅ 按职责划分：连接管理、文件 CRUD、Token、系统设置、画集、管理员画集
-- ✅ 通过 `__init__.py` 重导出，外部 import 零改动
-
-#### 多存储支持
-- ✅ 支持 Telegram / S3 / 本地 / Rclone 四种存储驱动
-- ✅ 管理后台可视化配置存储
-- ✅ 支持上传场景路由（游客/Token/群组/管理员 → 不同后端）
-- ✅ 存储健康状态监控
-
-#### Token 系统
-- ✅ 游客可创建上传 Token，支持配额和有效期
-- ✅ Token 上传记录查询
-- ✅ 管理后台 Token 管理（批量操作 + 影响范围查询 + 级联删除）
-
-#### API 文档重构
-- ✅ 数据驱动的组件化文档页面
-- ✅ 多语言代码示例（cURL / JavaScript / Python / PHP）
-- ✅ 侧边栏导航与滚动定位
-
-#### 群组上传功能
-- ✅ 支持 Telegram 群组/频道直接上传
-- ✅ 可配置仅管理员上传
-- ✅ 自动回复 CDN 链接
-
----
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
----
-
-## 📄 许可证
-
-MIT License
-
----
-
-## 📮 联系方式
-
-如有问题，请提交 [Issue](https://github.com/xiyan520/tg-telegram-imagebed/issues)
+MIT
