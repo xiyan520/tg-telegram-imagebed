@@ -269,6 +269,52 @@ class RcloneBackend(StorageBackend):
 
         return None
 
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """浠庢湰鍦版殏瀛樻枃浠朵笂浼犲埌 rclone remote"""
+        key = self._generate_key(filename)
+        obj = self._object_path(key)
+
+        last_err = ""
+        for attempt in range(max(1, self._retries) + 1):
+            try:
+                args = self._base_cmd() + ["copyto", file_path, obj]
+                cp = self._run_capture(args=args, timeout_seconds=self._upload_timeout)
+                if cp.returncode == 0:
+                    logger.info(f"rclone 瀛樺偍涓婁紶鎴愬姛: {key}")
+                    return PutResult(
+                        file_id=key,
+                        file_path=key,
+                        file_size=file_size,
+                        storage_backend=self.name,
+                        storage_key=key,
+                        storage_meta={
+                            "driver": "rclone",
+                            "remote": self._remote,
+                            "base_path": self._base_path,
+                            "content_type": content_type,
+                        },
+                    )
+
+                last_err = (cp.stderr or b"").decode("utf-8", errors="replace")
+                logger.error(f"rclone upload failed (attempt {attempt}): {last_err}")
+            except Exception as e:
+                last_err = str(e)
+                logger.error(f"rclone upload exception (attempt {attempt}): {e}")
+
+            time.sleep(min(1.0 * attempt, 3.0))
+
+        return None
+
     def download(
         self,
         *,

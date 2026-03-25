@@ -116,6 +116,51 @@ class LocalBackend(StorageBackend):
             logger.error(f"本地存储上传失败: {e}")
             return None
 
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """浠庢湰鍦版殏瀛樻枃浠舵祦寮忓啓鍏ュ埌鏈湴瀛樺偍鐩綍"""
+        try:
+            key = self._generate_key(filename)
+            target = (self._root / key).resolve()
+
+            if not target.is_relative_to(self._root.resolve()):
+                logger.error(f"璺緞瀹夊叏妫€鏌ュけ璐? {target}")
+                return None
+
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'rb') as src, open(target, 'wb') as dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+
+            logger.info(f"鏈湴瀛樺偍涓婁紶鎴愬姛: {key} ({file_size} bytes)")
+            return PutResult(
+                file_id=key,
+                file_path=key,
+                file_size=file_size,
+                storage_backend=self.name,
+                storage_key=key,
+                storage_meta={
+                    'root_dir': str(self._root),
+                    'content_type': content_type,
+                    'original_filename': filename,
+                },
+            )
+        except Exception as e:
+            logger.error(f"鏈湴瀛樺偍涓婁紶澶辫触: {e}")
+            return None
+
     def download(
         self,
         *,

@@ -144,6 +144,16 @@ def _init_core_tables(cursor) -> None:
         )
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS upload_reservations (
+            reservation_key TEXT PRIMARY KEY,
+            auth_token TEXT,
+            source TEXT,
+            created_day TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
 
 def _migrate_file_storage_columns(cursor) -> None:
     """file_storage 表列迁移（增量 ALTER TABLE）"""
@@ -303,6 +313,7 @@ def _migrate_auth_tokens_columns(cursor) -> None:
     """auth_tokens 表列迁移（增量 ALTER TABLE）"""
     cursor.execute("PRAGMA table_info(auth_tokens)")
     auth_columns = [column[1] for column in cursor.fetchall()]
+    upload_limit_added = False
 
     auth_new_columns = [
         ('created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
@@ -323,12 +334,15 @@ def _migrate_auth_tokens_columns(cursor) -> None:
             logger.info(f"添加 {col_name} 列到 auth_tokens")
             cursor.execute(f'ALTER TABLE auth_tokens ADD COLUMN {col_name} {col_type}')
             auth_columns.append(col_name)
+            if col_name == 'upload_limit':
+                upload_limit_added = True
 
     # 为历史记录回填默认值，避免 NULL 导致排序/展示异常
     try:
         cursor.execute("UPDATE auth_tokens SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
         cursor.execute("UPDATE auth_tokens SET upload_count = 0 WHERE upload_count IS NULL")
-        cursor.execute("UPDATE auth_tokens SET upload_limit = 100 WHERE upload_limit IS NULL")
+        if upload_limit_added:
+            cursor.execute("UPDATE auth_tokens SET upload_limit = 100 WHERE upload_limit IS NULL")
         cursor.execute("UPDATE auth_tokens SET is_active = 1 WHERE is_active IS NULL")
     except Exception as e:
         logger.debug(f"回填 auth_tokens 字段失败（可忽略）: {e}")
@@ -711,6 +725,9 @@ def _create_indexes(cursor) -> None:
         ('idx_tg_session_devices_device_id', 'tg_session_devices(device_id)'),
         ('idx_tg_session_devices_last_seen', 'tg_session_devices(last_seen_at)'),
         ('idx_auth_tokens_tg_user', 'auth_tokens(tg_user_id)'),
+        ('idx_upload_reservations_token_day', 'upload_reservations(auth_token, created_day)'),
+        ('idx_upload_reservations_source_day', 'upload_reservations(source, created_day)'),
+        ('idx_upload_reservations_created_at', 'upload_reservations(created_at)'),
         ('idx_custom_domains_domain', 'custom_domains(domain)'),
         ('idx_custom_domains_type', 'custom_domains(domain_type)'),
         ('idx_custom_domains_active', 'custom_domains(is_active)'),

@@ -4,10 +4,10 @@
 import sqlite3
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from ..config import logger
-from .connection import get_connection
+from .connection import get_connection, db_retry
 
 
 # ===================== 内部辅助 =====================
@@ -83,6 +83,18 @@ def _token_row_to_dict(row: sqlite3.Row, *, include_full_token: bool = False) ->
 
 # 过期判断 SQL 表达式（避免重复）
 _EXPIRED_EXPR = "(expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)"
+_ACTIVE_EXPR = f"(is_active = 1 AND NOT {_EXPIRED_EXPR})"
+
+
+def _cleanup_stale_reservations(cursor, *, max_age_minutes: int = 120) -> None:
+    """娓呯悊杩囨湡鐨勪笂浼犻绾﹁褰曪紝閬垮厤寮傚父涓柇鍚庨暱鏈熷崰鐢ㄩ厤棰?"""
+    cursor.execute(
+        """
+        DELETE FROM upload_reservations
+        WHERE created_at < datetime('now', ?)
+        """,
+        (f"-{int(max_age_minutes)} minutes",)
+    )
 
 
 # ===================== 用户侧 Token =====================
@@ -118,6 +130,218 @@ def create_auth_token(
     except Exception as e:
         logger.error(f"创建auth_token失败: {e}")
         return None
+
+
+@db_retry()
+def create_auth_token_with_ip_limit(
+    *,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    description: Optional[str] = None,
+    upload_limit: int = 100,
+    expires_days: int = 30,
+    max_tokens_for_ip: int,
+) -> Tuple[Optional[str], Optional[str]]:
+    """鍦ㄤ簨鍔′腑鍘熷瓙鍦板垱寤?Token锛岄伩鍏嶅悓涓?IP 骞跺彂瓒呰繃涓婇檺"""
+    if not ip_address:
+        return create_auth_token(
+            ip_address=ip_address,
+            user_agent=user_agent,
+            description=description,
+            upload_limit=upload_limit,
+            expires_days=expires_days,
+        ), None
+
+    try:
+        token = generate_auth_token()
+        expires_at = datetime.now() + timedelta(days=expires_days)
+
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                f'''
+                SELECT COUNT(*)
+                FROM auth_tokens
+                WHERE ip_address = ? AND {_ACTIVE_EXPR}
+                ''',
+                (ip_address,)
+            )
+            current_count = int((cursor.fetchone() or (0,))[0] or 0)
+            if current_count >= int(max_tokens_for_ip):
+                return None, 'ip_limit'
+
+            cursor.execute(
+                '''
+                INSERT INTO auth_tokens
+                (token, expires_at, upload_limit, ip_address, user_agent, description)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (token, expires_at, upload_limit, ip_address, user_agent, description or '娓稿Token')
+            )
+
+        logger.info(f"鍒涘缓鏂扮殑auth_token: {token[:20]}... (闄愬埗: {upload_limit}寮? 鏈夋晥鏈? {expires_days}澶?)")
+        return token, None
+
+    except Exception as e:
+        logger.error(f"鍒涘缓auth_token澶辫触: {e}")
+        return None, 'error'
+
+
+@db_retry()
+def reserve_token_upload(token: str, *, daily_limit: int = 0) -> Dict[str, Any]:
+    """为当前 Token 预留一个上传名额，原子检查总配额和每日限制。"""
+    token = (token or '').strip()
+    if not token:
+        return {'ok': False, 'reason': 'Token为空'}
+
+    try:
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            _cleanup_stale_reservations(cursor)
+
+            cursor.execute('SELECT * FROM auth_tokens WHERE token = ?', (token,))
+            row = cursor.fetchone()
+            if not row:
+                return {'ok': False, 'reason': 'Token不存在'}
+
+            token_data = dict(row)
+            if not token_data.get('is_active', 1):
+                return {'ok': False, 'reason': 'Token已被禁用'}
+
+            if token_data.get('expires_at'):
+                try:
+                    expires_at = datetime.fromisoformat(
+                        str(token_data['expires_at']).replace('Z', '+00:00')
+                    )
+                    if expires_at.tzinfo is not None:
+                        expires_at = expires_at.astimezone().replace(tzinfo=None)
+                    if datetime.now() > expires_at:
+                        return {'ok': False, 'reason': 'Token已过期'}
+                except (ValueError, TypeError):
+                    return {'ok': False, 'reason': 'Token过期时间异常'}
+
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM upload_reservations
+                WHERE auth_token = ? AND created_day = date('now', 'localtime')
+                ''',
+                (token,)
+            )
+            reserved_slots = int((cursor.fetchone() or (0,))[0] or 0)
+
+            upload_count = int(token_data.get('upload_count') or 0)
+            upload_limit = token_data.get('upload_limit')
+            unlimited = upload_limit in (None, 0)
+            if not unlimited:
+                upload_limit_int = int(upload_limit)
+                remaining_before = upload_limit_int - upload_count - reserved_slots
+                if remaining_before <= 0:
+                    return {'ok': False, 'reason': f'已达到上传限制 {upload_limit} 次'}
+            else:
+                upload_limit_int = 0
+
+            if daily_limit > 0:
+                cursor.execute(
+                    '''
+                    SELECT COUNT(*)
+                    FROM file_storage
+                    WHERE auth_token = ? AND date(created_at) = date('now', 'localtime')
+                    ''',
+                    (token,)
+                )
+                uploaded_today = int((cursor.fetchone() or (0,))[0] or 0)
+                if uploaded_today + reserved_slots >= int(daily_limit):
+                    return {'ok': False, 'reason': f'已达到每日上传限制 {daily_limit} 次', 'status': 429}
+
+            reservation_key = secrets.token_urlsafe(24)
+            cursor.execute(
+                '''
+                INSERT INTO upload_reservations (reservation_key, auth_token, source, created_day)
+                VALUES (?, ?, NULL, date('now', 'localtime'))
+                ''',
+                (reservation_key, token)
+            )
+
+            remaining_after = -1 if unlimited else max(0, upload_limit_int - upload_count - reserved_slots - 1)
+            return {
+                'ok': True,
+                'reservation_key': reservation_key,
+                'token_data': token_data,
+                'remaining_uploads': remaining_after,
+            }
+
+    except Exception as e:
+        logger.error(f"预留 Token 上传名额失败: {e}")
+        return {'ok': False, 'reason': '验证失败'}
+
+
+@db_retry()
+def reserve_guest_upload(*, source: str, daily_limit: int) -> Dict[str, Any]:
+    """为访客上传预留一个当日名额。"""
+    source = (source or '').strip()
+    if not source or daily_limit <= 0:
+        return {'ok': True, 'reservation_key': None}
+
+    try:
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            _cleanup_stale_reservations(cursor)
+
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM upload_reservations
+                WHERE source = ? AND created_day = date('now', 'localtime')
+                ''',
+                (source,)
+            )
+            reserved_today = int((cursor.fetchone() or (0,))[0] or 0)
+
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM file_storage
+                WHERE source = ? AND date(created_at) = date('now', 'localtime')
+                ''',
+                (source,)
+            )
+            uploaded_today = int((cursor.fetchone() or (0,))[0] or 0)
+
+            if uploaded_today + reserved_today >= int(daily_limit):
+                return {'ok': False, 'reason': f'已达到每日上传限制 {daily_limit} 次', 'status': 429}
+
+            reservation_key = secrets.token_urlsafe(24)
+            cursor.execute(
+                '''
+                INSERT INTO upload_reservations (reservation_key, auth_token, source, created_day)
+                VALUES (?, NULL, ?, date('now', 'localtime'))
+                ''',
+                (reservation_key, source)
+            )
+            return {'ok': True, 'reservation_key': reservation_key}
+
+    except Exception as e:
+        logger.error(f"预留访客上传名额失败: {e}")
+        return {'ok': False, 'reason': '检查上传限制失败'}
+
+
+@db_retry()
+def release_upload_reservation(reservation_key: Optional[str]) -> None:
+    """释放未使用的上传预留名额。"""
+    reservation_key = (reservation_key or '').strip()
+    if not reservation_key:
+        return
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'DELETE FROM upload_reservations WHERE reservation_key = ?',
+            (reservation_key,)
+        )
 
 
 def _verify_token_core(token: str, *, check_quota: bool = True) -> Dict[str, Any]:
@@ -262,7 +486,7 @@ def count_tokens_by_ip(ip_address: str) -> int:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT COUNT(*) FROM auth_tokens WHERE ip_address = ? AND is_active = 1',
+                f'SELECT COUNT(*) FROM auth_tokens WHERE ip_address = ? AND {_ACTIVE_EXPR}',
                 (ip_address,)
             )
             row = cursor.fetchone()

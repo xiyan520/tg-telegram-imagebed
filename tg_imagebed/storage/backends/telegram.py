@@ -153,6 +153,84 @@ class TelegramBackend(StorageBackend):
             logger.error(f"Telegram 存储上传异常: {e}")
             return None
 
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """浠庢湰鍦版殏瀛樻枃浠朵笂浼犲埌 Telegram锛岄伩鍏嶅ぇ鏂囦欢鍏ㄩ儴鍔犺浇鍒板唴瀛?"""
+        if not self._bot_token or not self._chat_id:
+            logger.error("Telegram 瀛樺偍鍚庣鏈厤缃?bot_token 鎴?chat_id")
+            return None
+
+        try:
+            with open(file_path, 'rb') as handle:
+                if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
+                    files = {'photo': (filename, handle, content_type)}
+                    data = {'chat_id': self._chat_id, 'caption': caption or ''}
+                    resp = self._session.post(
+                        f"https://api.telegram.org/bot{self._bot_token}/sendPhoto",
+                        files=files,
+                        data=data,
+                        timeout=60,
+                    )
+                else:
+                    files = {'document': (filename, handle, content_type)}
+                    data = {'chat_id': self._chat_id, 'caption': caption or ''}
+                    resp = self._session.post(
+                        f"https://api.telegram.org/bot{self._bot_token}/sendDocument",
+                        files=files,
+                        data=data,
+                        timeout=120,
+                    )
+
+            if not resp.ok:
+                logger.error(f"Telegram 涓婁紶澶辫触: HTTP {resp.status_code}")
+                return None
+
+            payload = resp.json() or {}
+            if not payload.get('ok'):
+                logger.error(f"Telegram 涓婁紶澶辫触: {payload.get('description')}")
+                return None
+
+            result = payload.get('result') or {}
+            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
+                photos = result.get('photo') or []
+                if not photos:
+                    logger.error("Telegram 涓婁紶澶辫触: 鏃犳硶鑾峰彇 photo")
+                    return None
+                file_id = photos[-1].get('file_id')
+            else:
+                doc = result.get('document') or {}
+                file_id = doc.get('file_id')
+
+            if not file_id:
+                logger.error("Telegram 涓婁紶澶辫触: 鏃犳硶鑾峰彇 file_id")
+                return None
+
+            file_path_remote = self._get_file_path(file_id) or ''
+            return PutResult(
+                file_id=file_id,
+                file_path=file_path_remote,
+                file_size=file_size,
+                storage_backend=self.name,
+                storage_key=file_id,
+                storage_meta={
+                    'file_path': file_path_remote,
+                    'uploaded_at': int(time.time()),
+                    'message_id': result.get('message_id'),
+                },
+            )
+        except Exception as e:
+            logger.error(f"Telegram 瀛樺偍涓婁紶寮傚父: {e}")
+            return None
+
     def download(
         self,
         *,

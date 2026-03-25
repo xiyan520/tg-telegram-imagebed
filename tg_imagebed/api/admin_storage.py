@@ -16,6 +16,7 @@ from ..database import get_system_setting, update_system_setting
 from ..services.file_service import process_upload
 from ..storage.router import get_storage_router, reload_storage_router, _load_storage_config
 from .. import admin_module
+from .upload import validate_upload_file
 
 # 敏感字段列表（需要掩码）
 _SENSITIVE_FIELDS = {'bot_token', 'secret_key', 'access_key'}
@@ -191,43 +192,41 @@ def storage_upload_policy():
 @admin_bp.route('/api/admin/upload', methods=['POST', 'OPTIONS'])
 @admin_module.login_required
 def admin_upload():
-    """管理员上传（可选指定后端）"""
+    """Admin upload endpoint with optional backend selection."""
     if request.method == 'OPTIONS':
         return _admin_options('POST, OPTIONS')
 
     if 'file' not in request.files:
-        return _admin_json({'success': False, 'error': '未提供文件'}, 400)
+        return _admin_json({'success': False, 'error': 'Missing file'}, 400)
 
     f = request.files['file']
     if not f.filename:
-        return _admin_json({'success': False, 'error': '未选择文件'}, 400)
-
-    content_type = (f.content_type or '').strip()
-    if not content_type.startswith('image/'):
-        return _admin_json({'success': False, 'error': '只允许上传图片文件'}, 400)
+        return _admin_json({'success': False, 'error': 'Missing file'}, 400)
 
     backend = (request.form.get('backend') or '').strip()
-
-    f.seek(0, 2)
-    size = f.tell()
-    f.seek(0)
-    file_content = f.read()
+    err, validated = validate_upload_file(f)
+    if err:
+        return err
 
     try:
         result = process_upload(
-            file_content=file_content,
+            file_content=None,
             filename=f.filename,
-            content_type=content_type,
+            content_type=validated.detected_mime,
             username=session.get('admin_username', 'admin'),
             source='admin_upload',
             upload_scene='admin',
             requested_backend=backend or None,
+            staged_file_path=validated.temp_path,
         )
     except ValueError as e:
         return _admin_json({'success': False, 'error': str(e)}, 400)
+    finally:
+        if validated:
+            validated.cleanup()
 
     if not result:
-        return _admin_json({'success': False, 'error': '上传失败'}, 500)
+        return _admin_json({'success': False, 'error': 'Upload failed'}, 500)
 
     base_url = get_image_domain(request, scene='admin')
     url = f"{base_url}/image/{result['encrypted_id']}"
@@ -241,8 +240,6 @@ def admin_upload():
             'size': format_size(result['file_size']),
         }
     })
-
-
 @admin_bp.route('/api/admin/storage/config', methods=['GET', 'OPTIONS'])
 @admin_module.login_required
 def get_storage_config():
