@@ -157,6 +157,50 @@ class S3Backend(StorageBackend):
             logger.error(f"S3 存储上传失败: {e}")
             return None
 
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """浠庢湰鍦版殏瀛樻枃浠朵笂浼犲埌 S3锛岄伩鍏嶅ぇ鏂囦欢鍏ㄩ儴鍔犺浇鍒板唴瀛?"""
+        if not HAS_BOTO3 or not self._client:
+            logger.error("S3 瀹㈡埛绔笉鍙敤")
+            return None
+
+        try:
+            key = self._generate_key(filename)
+            with open(file_path, 'rb') as handle:
+                self._client.upload_fileobj(
+                    handle,
+                    self._bucket,
+                    key,
+                    ExtraArgs={'ContentType': content_type},
+                )
+
+            logger.info(f"S3 瀛樺偍涓婁紶鎴愬姛: {key}")
+            return PutResult(
+                file_id=key,
+                file_path=key,
+                file_size=file_size,
+                storage_backend=self.name,
+                storage_key=key,
+                storage_meta={
+                    "driver": "s3",
+                    "bucket": self._bucket,
+                    "endpoint": self._endpoint,
+                    "content_type": content_type,
+                },
+            )
+        except Exception as e:
+            logger.error(f"S3 瀛樺偍涓婁紶澶辫触: {e}")
+            return None
+
     def download(
         self,
         *,

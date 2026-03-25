@@ -1122,8 +1122,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                         where_clauses.append('fs.source LIKE ?')
                         where_params.append('%token%')
                     elif source == 'guest':
-                        where_clauses.append('(fs.source = ? OR fs.source = ? OR fs.source = ? OR fs.source LIKE ?)')
-                        where_params.extend(['guest', 'anonymous', 'web', 'guest_%'])
+                        where_clauses.append(
+                            '(fs.source = ? OR fs.source = ? OR fs.source = ? OR fs.source = ? OR fs.source LIKE ?)'
+                        )
+                        where_params.extend(['guest', 'anonymous', 'web', 'web_upload', 'guest_%'])
                     else:
                         where_clauses.append('fs.source = ?')
                         where_params.append(source)

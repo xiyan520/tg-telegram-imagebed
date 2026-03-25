@@ -67,6 +67,32 @@ class StorageBackend(abc.ABC):
         """
         raise NotImplementedError
 
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """
+        浠庢湰鍦版殏瀛樻枃浠朵笂浼狅紝榛樿鍥為€€鍒?put_bytes銆?
+        鍚庣鍙互瑕嗙洊姝ゆ柟娉曚互閬垮厤灏嗘暣涓枃浠跺姞杞藉埌鍐呭瓨銆?
+        """
+        with open(file_path, 'rb') as handle:
+            return self.put_bytes(
+                file_content=handle.read(),
+                filename=filename,
+                content_type=content_type,
+                file_size=file_size,
+                caption=caption,
+                source=source,
+                username=username,
+            )
+
     @abc.abstractmethod
     def download(
         self,

@@ -10,6 +10,9 @@ from .connection import get_connection, db_retry
 from .settings import get_system_setting_int
 
 
+_ACTIVE_TOKEN_WHERE = "is_active = 1 AND (expires_at IS NULL OR expires_at >= CURRENT_TIMESTAMP)"
+
+
 # ===================== TG 用户管理 =====================
 
 @db_retry()
@@ -480,7 +483,7 @@ def get_user_token_count(tg_user_id: int) -> int:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND is_active = 1',
+                f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',
                 (tg_user_id,)
             )
             row = cursor.fetchone()
@@ -552,7 +555,7 @@ def get_active_user_tokens(tg_user_id: int) -> List[Dict]:
             cursor.execute('''
                 SELECT token, description, is_default_upload
                 FROM auth_tokens
-                WHERE tg_user_id = ? AND is_active = 1
+                WHERE tg_user_id = ? AND ''' + _ACTIVE_TOKEN_WHERE + '''
                 ORDER BY is_default_upload DESC, last_used DESC
             ''', (tg_user_id,))
             return [dict(row) for row in cursor.fetchall()]
@@ -574,7 +577,7 @@ def get_default_upload_token(tg_user_id: int) -> Optional[str]:
             # 优先查找显式标记的默认 Token
             cursor.execute('''
                 SELECT token FROM auth_tokens
-                WHERE tg_user_id = ? AND is_active = 1 AND is_default_upload = 1
+                WHERE tg_user_id = ? AND ''' + _ACTIVE_TOKEN_WHERE + ''' AND is_default_upload = 1
                 LIMIT 1
             ''', (tg_user_id,))
             row = cursor.fetchone()
@@ -584,8 +587,8 @@ def get_default_upload_token(tg_user_id: int) -> Optional[str]:
             # 回退：最近使用的活跃 Token
             cursor.execute('''
                 SELECT token FROM auth_tokens
-                WHERE tg_user_id = ? AND is_active = 1
-                ORDER BY last_used DESC NULLS LAST, created_at DESC
+                WHERE tg_user_id = ? AND ''' + _ACTIVE_TOKEN_WHERE + '''
+                ORDER BY CASE WHEN last_used IS NULL THEN 1 ELSE 0 END, last_used DESC, created_at DESC
                 LIMIT 1
             ''', (tg_user_id,))
             row = cursor.fetchone()

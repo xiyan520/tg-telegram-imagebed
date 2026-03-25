@@ -38,7 +38,13 @@ from tg_imagebed.bot import start_telegram_bot_thread, _get_bot_status
 from tg_imagebed.utils import acquire_lock, release_lock, add_cache_headers, get_static_file_version
 
 # 导入数据库
-from tg_imagebed.database import init_database, get_all_files_count, get_total_size, init_system_settings
+from tg_imagebed.database import (
+    init_database,
+    get_all_files_count,
+    get_total_size,
+    init_system_settings,
+    get_system_setting_int,
+)
 
 # 导入服务
 from tg_imagebed.services.cdn_service import start_cdn_monitor, stop_cdn_monitor
@@ -82,15 +88,7 @@ def create_app() -> Flask:
         logger.warning("ALLOWED_ORIGINS 为 '*'，管理员 API 已限制为本地域名。生产环境请设置具体域名。")
 
     CORS(app, resources={
-        # 管理员 API - 需要 credentials，严格限制 origins
-        r"/api/admin/*": {
-            "origins": admin_origins,
-            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
-            "supports_credentials": True,
-            "vary_header": True,
-            "max_age": 3600
-        },
+
         # TG 认证 API - 需要 credentials（tg_session cookie）
         r"/api/auth/tg/*": {
             "origins": admin_origins,
@@ -181,12 +179,19 @@ def create_app() -> Flask:
     # 设置 Flask 请求体大小上限（防止超大请求耗尽内存）
     # 动态读取系统设置，回退到 100MB 硬上限
     try:
-        from tg_imagebed.database import get_system_setting_int
         max_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
     except Exception:
         max_mb = 20
-    # 额外留 2MB 余量给表单字段和 multipart 边界
+    # ?????2MB ???????????? multipart ???
     app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
+
+    @app.before_request
+    def refresh_request_size_limit():
+        try:
+            max_request_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
+        except Exception:
+            max_request_mb = 20
+        app.config['MAX_CONTENT_LENGTH'] = (max_request_mb + 2) * 1024 * 1024
 
     # 配置管理员会话
     admin_module.configure_admin_session(app)

@@ -21,7 +21,12 @@ def get_file_info(encrypted_id: str) -> Optional[Dict[str, Any]]:
 
 
 @db_retry(max_attempts=3, base_delay=0.1, max_delay=2.0)
-def save_file_info(encrypted_id: str, file_info: Dict[str, Any]) -> None:
+def save_file_info(
+    encrypted_id: str,
+    file_info: Dict[str, Any],
+    *,
+    reservation_key: Optional[str] = None,
+) -> None:
     """保存文件信息到数据库（带重试）"""
     from .settings import get_system_setting
 
@@ -86,6 +91,34 @@ def save_file_info(encrypted_id: str, file_info: Dict[str, Any]) -> None:
         ))
 
         logger.info(f"文件信息已保存: {encrypted_id}")
+
+        reservation_key = (reservation_key or '').strip()
+        if reservation_key:
+            cursor.execute(
+                '''
+                SELECT auth_token
+                FROM upload_reservations
+                WHERE reservation_key = ?
+                ''',
+                (reservation_key,)
+            )
+            reservation_row = cursor.fetchone()
+            if reservation_row:
+                auth_token = reservation_row['auth_token']
+                if auth_token:
+                    cursor.execute(
+                        '''
+                        UPDATE auth_tokens
+                        SET upload_count = upload_count + 1,
+                            last_used = CURRENT_TIMESTAMP
+                        WHERE token = ?
+                        ''',
+                        (auth_token,)
+                    )
+                cursor.execute(
+                    'DELETE FROM upload_reservations WHERE reservation_key = ?',
+                    (reservation_key,)
+                )
 
 
 def update_file_path_in_db(encrypted_id: str, new_file_path: str) -> None:

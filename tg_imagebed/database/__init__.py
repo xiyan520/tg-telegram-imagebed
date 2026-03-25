@@ -24,6 +24,8 @@ from .tokens import (
     generate_auth_token, create_auth_token, verify_auth_token,
     verify_auth_token_access, update_token_description,
     update_token_usage, get_token_info, get_token_uploads,
+    create_auth_token_with_ip_limit, reserve_token_upload,
+    reserve_guest_upload, release_upload_reservation,
     admin_list_tokens, admin_create_token,
     admin_update_token_status, admin_update_token, admin_delete_token,
     admin_get_token_detail, admin_get_token_overview, admin_get_token_uploads, admin_get_token_galleries,
@@ -109,6 +111,8 @@ __all__ = [
     'generate_auth_token', 'create_auth_token', 'verify_auth_token',
     'verify_auth_token_access', 'update_token_description',
     'update_token_usage', 'get_token_info', 'get_token_uploads',
+    'create_auth_token_with_ip_limit', 'reserve_token_upload',
+    'reserve_guest_upload', 'release_upload_reservation',
     # Token 管理（管理员后台）
     'admin_list_tokens', 'admin_create_token',
     'admin_update_token_status', 'admin_update_token', 'admin_delete_token',
