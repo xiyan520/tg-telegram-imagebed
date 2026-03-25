@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Telegram Cloud 存储后端
+Telegram Cloud storage backend.
 
-将文件上传到 Telegram 频道，通过 Bot API 获取和代理文件。
+Uploads files to Telegram and proxies them back through the app.
 """
 from __future__ import annotations
 
@@ -12,23 +12,14 @@ from typing import Any, Dict, Iterable, Optional
 
 import requests
 
-from ..base import StorageBackend, PutResult, DownloadResult
+from ..base import DownloadResult, PutResult, StorageBackend
 from ...config import logger
 
 
 class TelegramBackend(StorageBackend):
-    """Telegram Cloud 存储后端"""
+    """Telegram Cloud storage backend."""
 
     def __init__(self, *, name: str, bot_token: str, chat_id: int, proxy_url: Optional[str] = None):
-        """
-        初始化 Telegram 存储后端
-
-        Args:
-            name: 后端名称
-            bot_token: Telegram Bot Token
-            chat_id: 存储频道/群组 ID
-            proxy_url: 可选代理 URL
-        """
         self.name = name
         self._bot_token = bot_token
         self._chat_id = chat_id
@@ -39,34 +30,108 @@ class TelegramBackend(StorageBackend):
             if "://" not in proxy_url_norm:
                 proxy_url_norm = f"http://{proxy_url_norm}"
             self._session.proxies = {"http": proxy_url_norm, "https": proxy_url_norm}
-            # 掩码代理凭据避免日志泄露
             masked = proxy_url_norm
             if "@" in masked:
                 masked = masked.split("://")[0] + "://" + "***@" + masked.split("@")[-1]
-            logger.info(f"Telegram 存储后端初始化: chat_id={chat_id}, proxy={masked}")
+            logger.info(f"Telegram backend initialized: chat_id={chat_id}, proxy={masked}")
         else:
-            logger.info(f"Telegram 存储后端初始化: chat_id={chat_id}")
+            logger.info(f"Telegram backend initialized: chat_id={chat_id}")
+
+    @staticmethod
+    def _should_send_as_photo(*, content_type: str, file_size: int) -> bool:
+        """
+        Only JPEG images should go through sendPhoto.
+
+        Telegram may transcode photos, which strips transparency from PNG/WebP/GIF/AVIF.
+        To preserve original bytes we upload those formats as documents instead.
+        """
+        normalized = (content_type or "").strip().lower()
+        is_jpeg = normalized in {"image/jpeg", "image/jpg", "image/pjpeg"}
+        return is_jpeg and file_size <= 10 * 1024 * 1024
 
     def _get_file_path(self, file_id: str) -> Optional[str]:
-        """通过 Telegram API 获取文件路径"""
+        """Fetch the current file path from Telegram."""
         if not self._bot_token or not file_id:
             return None
         try:
             resp = self._session.get(
                 f"https://api.telegram.org/bot{self._bot_token}/getFile",
-                params={'file_id': file_id},
+                params={"file_id": file_id},
                 timeout=15,
             )
             if not resp.ok:
                 return None
             data = resp.json() or {}
-            if not data.get('ok'):
+            if not data.get("ok"):
                 return None
-            result = data.get('result') or {}
-            return result.get('file_path')
-        except Exception as e:
-            logger.error(f"获取 Telegram 文件路径失败: {e}")
+            result = data.get("result") or {}
+            return result.get("file_path")
+        except Exception as exc:
+            logger.error(f"Failed to fetch Telegram file path: {exc}")
             return None
+
+    def _upload_to_telegram(
+        self,
+        *,
+        file_obj,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+    ) -> Optional[PutResult]:
+        """Upload a file stream to Telegram using photo/document mode as appropriate."""
+        send_as_photo = self._should_send_as_photo(content_type=content_type, file_size=file_size)
+        field_name = "photo" if send_as_photo else "document"
+        endpoint = "sendPhoto" if send_as_photo else "sendDocument"
+        timeout = 60 if send_as_photo else 120
+
+        files = {field_name: (filename, file_obj, content_type)}
+        data = {"chat_id": self._chat_id, "caption": caption or ""}
+        resp = self._session.post(
+            f"https://api.telegram.org/bot{self._bot_token}/{endpoint}",
+            files=files,
+            data=data,
+            timeout=timeout,
+        )
+
+        if not resp.ok:
+            logger.error(f"Telegram upload failed: HTTP {resp.status_code}")
+            return None
+
+        payload = resp.json() or {}
+        if not payload.get("ok"):
+            logger.error(f"Telegram upload failed: {payload.get('description')}")
+            return None
+
+        result = payload.get("result") or {}
+        if send_as_photo:
+            photos = result.get("photo") or []
+            if not photos:
+                logger.error("Telegram upload failed: missing photo result")
+                return None
+            file_id = photos[-1].get("file_id")
+        else:
+            doc = result.get("document") or {}
+            file_id = doc.get("file_id")
+
+        if not file_id:
+            logger.error("Telegram upload failed: missing file_id")
+            return None
+
+        file_path = self._get_file_path(file_id) or ""
+        logger.info(f"Telegram storage upload complete: {file_id}")
+        return PutResult(
+            file_id=file_id,
+            file_path=file_path,
+            file_size=file_size,
+            storage_backend=self.name,
+            storage_key=file_id,
+            storage_meta={
+                "file_path": file_path,
+                "uploaded_at": int(time.time()),
+                "message_id": result.get("message_id"),
+            },
+        )
 
     def put_bytes(
         self,
@@ -79,78 +144,21 @@ class TelegramBackend(StorageBackend):
         source: str,
         username: str,
     ) -> Optional[PutResult]:
-        """上传文件到 Telegram"""
+        """Upload raw bytes to Telegram."""
         if not self._bot_token or not self._chat_id:
-            logger.error("Telegram 存储后端未配置 bot_token 或 chat_id")
+            logger.error("Telegram backend is missing bot_token or chat_id")
             return None
 
         try:
-            # 根据文件大小选择上传方式
-            # Telegram 对 sendPhoto 有 10MB 限制，超过使用 sendDocument
-            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
-                files = {'photo': (filename, file_content, content_type)}
-                data = {'chat_id': self._chat_id, 'caption': caption or ''}
-                resp = self._session.post(
-                    f"https://api.telegram.org/bot{self._bot_token}/sendPhoto",
-                    files=files,
-                    data=data,
-                    timeout=60,
-                )
-            else:
-                files = {'document': (filename, file_content, content_type)}
-                data = {'chat_id': self._chat_id, 'caption': caption or ''}
-                resp = self._session.post(
-                    f"https://api.telegram.org/bot{self._bot_token}/sendDocument",
-                    files=files,
-                    data=data,
-                    timeout=120,
-                )
-
-            if not resp.ok:
-                logger.error(f"Telegram 上传失败: HTTP {resp.status_code}")
-                return None
-
-            payload = resp.json() or {}
-            if not payload.get('ok'):
-                logger.error(f"Telegram 上传失败: {payload.get('description')}")
-                return None
-
-            result = payload.get('result') or {}
-
-            # 获取 file_id
-            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
-                photos = result.get('photo') or []
-                if not photos:
-                    logger.error("Telegram 上传失败: 无法获取 photo")
-                    return None
-                file_id = photos[-1].get('file_id')
-            else:
-                doc = result.get('document') or {}
-                file_id = doc.get('file_id')
-
-            if not file_id:
-                logger.error("Telegram 上传失败: 无法获取 file_id")
-                return None
-
-            # 获取 file_path
-            file_path = self._get_file_path(file_id) or ''
-
-            logger.info(f"Telegram 存储上传成功: {file_id}")
-
-            return PutResult(
-                file_id=file_id,
-                file_path=file_path,
+            return self._upload_to_telegram(
+                file_obj=file_content,
+                filename=filename,
+                content_type=content_type,
                 file_size=file_size,
-                storage_backend=self.name,
-                storage_key=file_id,
-                storage_meta={
-                    'file_path': file_path,
-                    'uploaded_at': int(time.time()),
-                    'message_id': result.get('message_id'),
-                },
+                caption=caption,
             )
-        except Exception as e:
-            logger.error(f"Telegram 存储上传异常: {e}")
+        except Exception as exc:
+            logger.error(f"Telegram storage upload failed: {exc}")
             return None
 
     def put_file(
@@ -164,71 +172,22 @@ class TelegramBackend(StorageBackend):
         source: str,
         username: str,
     ) -> Optional[PutResult]:
-        """浠庢湰鍦版殏瀛樻枃浠朵笂浼犲埌 Telegram锛岄伩鍏嶅ぇ鏂囦欢鍏ㄩ儴鍔犺浇鍒板唴瀛?"""
+        """Upload a file from disk to Telegram."""
         if not self._bot_token or not self._chat_id:
-            logger.error("Telegram 瀛樺偍鍚庣鏈厤缃?bot_token 鎴?chat_id")
+            logger.error("Telegram backend is missing bot_token or chat_id")
             return None
 
         try:
-            with open(file_path, 'rb') as handle:
-                if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
-                    files = {'photo': (filename, handle, content_type)}
-                    data = {'chat_id': self._chat_id, 'caption': caption or ''}
-                    resp = self._session.post(
-                        f"https://api.telegram.org/bot{self._bot_token}/sendPhoto",
-                        files=files,
-                        data=data,
-                        timeout=60,
-                    )
-                else:
-                    files = {'document': (filename, handle, content_type)}
-                    data = {'chat_id': self._chat_id, 'caption': caption or ''}
-                    resp = self._session.post(
-                        f"https://api.telegram.org/bot{self._bot_token}/sendDocument",
-                        files=files,
-                        data=data,
-                        timeout=120,
-                    )
-
-            if not resp.ok:
-                logger.error(f"Telegram 涓婁紶澶辫触: HTTP {resp.status_code}")
-                return None
-
-            payload = resp.json() or {}
-            if not payload.get('ok'):
-                logger.error(f"Telegram 涓婁紶澶辫触: {payload.get('description')}")
-                return None
-
-            result = payload.get('result') or {}
-            if file_size <= 10 * 1024 * 1024 and content_type.startswith('image/'):
-                photos = result.get('photo') or []
-                if not photos:
-                    logger.error("Telegram 涓婁紶澶辫触: 鏃犳硶鑾峰彇 photo")
-                    return None
-                file_id = photos[-1].get('file_id')
-            else:
-                doc = result.get('document') or {}
-                file_id = doc.get('file_id')
-
-            if not file_id:
-                logger.error("Telegram 涓婁紶澶辫触: 鏃犳硶鑾峰彇 file_id")
-                return None
-
-            file_path_remote = self._get_file_path(file_id) or ''
-            return PutResult(
-                file_id=file_id,
-                file_path=file_path_remote,
-                file_size=file_size,
-                storage_backend=self.name,
-                storage_key=file_id,
-                storage_meta={
-                    'file_path': file_path_remote,
-                    'uploaded_at': int(time.time()),
-                    'message_id': result.get('message_id'),
-                },
-            )
-        except Exception as e:
-            logger.error(f"Telegram 瀛樺偍涓婁紶寮傚父: {e}")
+            with open(file_path, "rb") as handle:
+                return self._upload_to_telegram(
+                    file_obj=handle,
+                    filename=filename,
+                    content_type=content_type,
+                    file_size=file_size,
+                    caption=caption,
+                )
+        except Exception as exc:
+            logger.error(f"Telegram storage file upload failed: {exc}")
             return None
 
     def download(
@@ -237,67 +196,61 @@ class TelegramBackend(StorageBackend):
         file_info: Dict[str, Any],
         range_header: Optional[str],
     ) -> DownloadResult:
-        """从 Telegram 下载文件"""
-        file_id = (
-            file_info.get('storage_key') or
-            file_info.get('file_id') or ''
-        ).strip()
-        file_path = (file_info.get('file_path') or '').strip()
+        """Download a file from Telegram."""
+        file_id = (file_info.get("storage_key") or file_info.get("file_id") or "").strip()
+        file_path = (file_info.get("file_path") or "").strip()
 
         if not file_id:
             return DownloadResult(
                 status_code=404,
-                content_type='text/plain',
+                content_type="text/plain",
                 headers={},
-                body=[b'not found']
+                body=[b"not found"],
             )
 
-        # 刷新 file_path（Telegram 的 file_path 会过期）
         fresh = self._get_file_path(file_id)
         updated_fields: Optional[Dict[str, Any]] = None
         if fresh and fresh != file_path:
             file_path = fresh
-            updated_fields = {'file_path': fresh}
+            updated_fields = {"file_path": fresh}
 
         if not file_path:
             return DownloadResult(
                 status_code=404,
-                content_type='text/plain',
+                content_type="text/plain",
                 headers={},
-                body=[b'file path not available'],
-                updated_fields=updated_fields
+                body=[b"file path not available"],
+                updated_fields=updated_fields,
             )
 
-        # 构建文件 URL
-        if file_path.startswith('https://'):
+        if file_path.startswith("https://"):
             file_url = file_path
         else:
             file_url = f"https://api.telegram.org/file/bot{self._bot_token}/{file_path}"
 
-        # 请求文件
         headers: Dict[str, str] = {}
         if range_header:
-            headers['Range'] = range_header
+            headers["Range"] = range_header
 
         try:
             resp = self._session.get(file_url, stream=True, timeout=60, headers=headers)
-        except Exception as e:
-            logger.error(f"Telegram 下载失败: {e}")
+        except Exception as exc:
+            logger.error(f"Telegram download failed: {exc}")
             return DownloadResult(
                 status_code=502,
-                content_type='text/plain',
+                content_type="text/plain",
                 headers={},
-                body=[b'upstream error'],
-                updated_fields=updated_fields
+                body=[b"upstream error"],
+                updated_fields=updated_fields,
             )
 
         if resp.status_code not in (200, 206):
             return DownloadResult(
                 status_code=resp.status_code,
-                content_type='text/plain',
+                content_type="text/plain",
                 headers={},
-                body=[b'upstream error'],
-                updated_fields=updated_fields
+                body=[b"upstream error"],
+                updated_fields=updated_fields,
             )
 
         def body() -> Iterable[bytes]:
@@ -308,29 +261,29 @@ class TelegramBackend(StorageBackend):
             finally:
                 resp.close()
 
-        out_headers: Dict[str, str] = {'Accept-Ranges': 'bytes'}
-        if 'content-length' in resp.headers:
-            out_headers['Content-Length'] = resp.headers['content-length']
-        if 'content-range' in resp.headers:
-            out_headers['Content-Range'] = resp.headers['content-range']
+        out_headers: Dict[str, str] = {"Accept-Ranges": "bytes"}
+        if "content-length" in resp.headers:
+            out_headers["Content-Length"] = resp.headers["content-length"]
+        if "content-range" in resp.headers:
+            out_headers["Content-Range"] = resp.headers["content-range"]
 
         return DownloadResult(
             status_code=resp.status_code,
-            content_type=file_info.get('mime_type') or resp.headers.get('content-type', 'application/octet-stream'),
+            content_type=file_info.get("mime_type") or resp.headers.get("content-type", "application/octet-stream"),
             headers=out_headers,
             body=body(),
             updated_fields=updated_fields,
         )
 
     def healthcheck(self) -> bool:
-        """检查 Bot Token 是否有效"""
+        """Check whether the bot token is valid."""
         if not self._bot_token:
             return False
         try:
             resp = self._session.get(
                 f"https://api.telegram.org/bot{self._bot_token}/getMe",
-                timeout=10
+                timeout=10,
             )
-            return resp.ok and resp.json().get('ok', False)
+            return resp.ok and resp.json().get("ok", False)
         except Exception:
             return False
