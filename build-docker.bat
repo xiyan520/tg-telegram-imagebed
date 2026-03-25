@@ -1,90 +1,91 @@
 @echo off
+setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
-REM Docker Build Script for Windows
 
-echo ==========================================
-echo   Telegram ImageBed - Docker Build
-echo ==========================================
+REM Windows launcher for build-docker.sh
+
+set "SCRIPT_DIR=%~dp0"
+if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+set "SCRIPT_SH=%SCRIPT_DIR%\build-docker.sh"
+
+echo =========================================
+echo Docker build launcher
+echo =========================================
 echo.
 
-REM Check .env file
-if not exist .env (
-    echo [WARNING] .env file not found
-    echo Please create .env file first
-    echo Reference: .env.example
-    pause
-    exit /b 1
+if not exist "%SCRIPT_SH%" (
+    echo [ERROR] Script not found: "%SCRIPT_SH%"
+    goto :fail
 )
 
-REM Build frontend
-echo [1/5] Building frontend...
-cd frontend
-if not exist node_modules (
-    echo Installing frontend dependencies...
-    call npm install
-    if errorlevel 1 (
-        echo [ERROR] Failed to install dependencies
-        cd ..
-        pause
-        exit /b 1
+docker version >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Docker is not available. Start Docker Desktop first.
+    goto :fail
+)
+
+set "GIT_BASH="
+for %%I in (
+    "%ProgramFiles%\Git\bin\bash.exe"
+    "%ProgramFiles%\Git\usr\bin\bash.exe"
+    "%LocalAppData%\Programs\Git\bin\bash.exe"
+    "%LocalAppData%\Programs\Git\usr\bin\bash.exe"
+) do (
+    if exist "%%~I" set "GIT_BASH=%%~I"
+)
+
+if defined GIT_BASH (
+    echo [INFO] Using Git Bash
+    echo [INFO] Bash: "%GIT_BASH%"
+    echo.
+    if /I "%DOCKER_LAUNCHER_DRY_RUN%"=="1" (
+        echo [DRY-RUN] Skipped actual execution
+        goto :success
     )
+    pushd "%SCRIPT_DIR%"
+    call "%GIT_BASH%" -lc "./build-docker.sh"
+    set "RUN_EXIT=%ERRORLEVEL%"
+    popd
+    if not "!RUN_EXIT!"=="0" goto :runner_fail
+    goto :success
 )
-echo Building frontend...
-call npm run build
-if errorlevel 1 (
-    echo [ERROR] Frontend build failed
-    cd ..
-    pause
-    exit /b 1
+
+where.exe wsl.exe >nul 2>&1
+if not errorlevel 1 (
+    for /f "usebackq delims=" %%I in (`powershell -NoProfile -Command "$p=[System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath('%SCRIPT_SH%')); $drive=$p.Substring(0,1).ToLower(); $rest=$p.Substring(2).Replace('\\','/'); Write-Output ('/mnt/' + $drive + $rest)"`) do set "WSL_DIR=%%I"
+    if not defined WSL_DIR (
+        echo [ERROR] Failed to convert the repository path for WSL
+        goto :fail
+    )
+    echo [INFO] Using WSL
+    echo [INFO] WSL dir: "%WSL_DIR%"
+    echo.
+    if /I "%DOCKER_LAUNCHER_DRY_RUN%"=="1" (
+        echo [DRY-RUN] Skipped actual execution
+        goto :success
+    )
+    wsl.exe bash -lc "cd '%WSL_DIR%' && ./build-docker.sh"
+    if errorlevel 1 goto :runner_fail
+    goto :success
 )
-cd ..
-echo [OK] Frontend build completed
-echo.
 
-REM Build Docker image
-echo [2/5] Building Docker image...
-docker build -t telegram-imagebed:latest .
-if errorlevel 1 (
-    echo [ERROR] Docker image build failed
-    pause
-    exit /b 1
-)
-echo [OK] Docker image build completed
-echo.
+echo [ERROR] Neither Git Bash nor WSL was found
+echo [HINT] Install Git for Windows or enable WSL and try again
+goto :fail
 
-REM Stop old container
-echo [3/5] Stopping old container...
-docker stop telegram-imagebed 2>nul
-docker rm telegram-imagebed 2>nul
-echo [OK] Old container cleaned
+:runner_fail
 echo.
+echo [ERROR] build-docker.sh failed
+goto :fail
 
-REM Start new container
-echo [4/5] Starting new container...
-docker-compose -p telegram-imagebed up -d
-if errorlevel 1 (
-    echo [ERROR] Failed to start container
-    pause
-    exit /b 1
-)
-echo [OK] Container started successfully
+:success
 echo.
+echo [OK] Launcher finished
+endlocal
+exit /b 0
 
-REM Show container status
-echo [5/5] Container status:
-docker-compose -p telegram-imagebed ps
+:fail
 echo.
-
-echo ==========================================
-echo   Build and Deploy Completed!
-echo ==========================================
-echo.
-echo Access URL: http://localhost:18793
-echo Admin Panel: http://localhost:18793/admin
-echo.
-echo View logs: docker-compose -p telegram-imagebed logs -f
-echo Stop container: docker-compose -p telegram-imagebed stop
-echo.
-
-
 pause
+endlocal
+exit /b 1
