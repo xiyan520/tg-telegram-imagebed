@@ -142,6 +142,7 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
+          provenance: false
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-amd64
             ${{ env.IMAGE_NAME }}:latest-amd64
@@ -178,6 +179,7 @@ jobs:
           context: .
           push: true
           platforms: linux/arm64
+          provenance: false
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-arm64
             ${{ env.IMAGE_NAME }}:latest-arm64
