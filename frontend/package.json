@@ -17,9 +17,13 @@
     "@iconify-json/lucide": "^1.1.192",
     "@nuxt/ui": "2.18.4",
     "@pinia/nuxt": "^0.5.1",
-    "nuxt": "^3.13.2",
+    "nuxt": "~3.13.2",
     "pinia": "^2.2.2",
     "vue": "^3.4.38"
+  },
+  "overrides": {
+    "jiti": "^2.0.0",
+    "jwt-decode": "^3.1.2"
   },
   "devDependencies": {
     "@nuxt/devtools": "^1.4.2",

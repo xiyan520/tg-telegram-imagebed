@@ -42,7 +42,15 @@ export default defineNuxtConfig({
 
   // Nitro 配置（静态生成）
   nitro: {
-    preset: 'static'
+    preset: 'static',
+    prerender: {
+      routes: ['/200.html', '/404.html']
+    }
+  },
+
+  routeRules: {
+    '/': { ssr: false },
+    '/**': { ssr: false }
   },
 
   // UI 配置

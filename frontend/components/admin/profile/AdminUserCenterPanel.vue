@@ -321,33 +321,32 @@
                 </UButton>
               </div>
             </UCard>
-          </div>
-
-          <!-- 禁用 TOTP 确认弹窗 -->
-          <UModal v-model="totpDisableModalOpen">
-            <UCard>
-              <template #header>
-                <h3 class="text-base font-semibold text-red-600 dark:text-red-400">禁用二次验证</h3>
-              </template>
-              <div class="space-y-3">
-                <p class="text-sm text-stone-600 dark:text-stone-300">
-                  禁用后登录时将不再需要动态验证码。请输入您的密码和当前验证码以确认操作。
-                </p>
-                <UFormGroup label="密码" required>
-                  <UInput v-model="totpDisablePassword" type="password" placeholder="请输入管理员密码" />
-                </UFormGroup>
-                <UFormGroup label="验证码" required>
-                  <UInput v-model="totpDisableCode" placeholder="输入 6 位验证码" maxlength="6" class="text-center tracking-widest" />
-                </UFormGroup>
-              </div>
-              <template #footer>
-                <div class="flex justify-end gap-2">
-                  <UButton color="gray" variant="ghost" @click="totpDisableModalOpen = false">取消</UButton>
-                  <UButton color="red" :loading="totpDisabling" @click="confirmDisableTotp">确认禁用</UButton>
+            <!-- 禁用 TOTP 确认弹窗 -->
+            <UModal v-model="totpDisableModalOpen">
+              <UCard>
+                <template #header>
+                  <h3 class="text-base font-semibold text-red-600 dark:text-red-400">禁用二次验证</h3>
+                </template>
+                <div class="space-y-3">
+                  <p class="text-sm text-stone-600 dark:text-stone-300">
+                    禁用后登录时将不再需要动态验证码。请输入您的密码和当前验证码以确认操作。
+                  </p>
+                  <UFormGroup label="密码" required>
+                    <UInput v-model="totpDisablePassword" type="password" placeholder="请输入管理员密码" />
+                  </UFormGroup>
+                  <UFormGroup label="验证码" required>
+                    <UInput v-model="totpDisableCode" placeholder="输入 6 位验证码" maxlength="6" class="text-center tracking-widest" />
+                  </UFormGroup>
                 </div>
-              </template>
-            </UCard>
-          </UModal>
+                <template #footer>
+                  <div class="flex justify-end gap-2">
+                    <UButton color="gray" variant="ghost" @click="totpDisableModalOpen = false">取消</UButton>
+                    <UButton color="red" :loading="totpDisabling" @click="confirmDisableTotp">确认禁用</UButton>
+                  </div>
+                </template>
+              </UCard>
+            </UModal>
+          </div>
 
           <div v-else-if="activeTab === 'logs'" class="space-y-3">
             <UCard class="panel-card">

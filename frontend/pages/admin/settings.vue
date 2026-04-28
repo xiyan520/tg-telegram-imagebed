@@ -1500,11 +1500,11 @@ const settings = ref<AdminSystemSettings>({
   image_domain_restriction_enabled: false,
   // 热更新（Release Artifact）
   app_update_source: 'release',
-  app_update_release_repo: 'xiyan520/tg-telegram-imagebed',
+  app_update_release_repo: 'lostiv/tg-telegram-imagebed',
   app_update_release_asset_name: 'tg-imagebed-release.zip',
   app_update_release_sha_name: 'tg-imagebed-release.zip.sha256',
   // 兼容旧字段
-  app_update_repo_url: 'https://github.com/xiyan520/tg-telegram-imagebed.git',
+  app_update_repo_url: 'https://github.com/lostiv/tg-telegram-imagebed.git',
   app_update_branch: 'main',
   app_update_last_status: 'idle',
   app_update_last_error: '',

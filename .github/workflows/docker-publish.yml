@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: xiyan520/tg-telegram-imagebed
+  IMAGE_NAME: lost4/tg-telegram-imagebed
   RELEASE_ASSET_NAME: tg-imagebed-release.zip
   RELEASE_SHA_NAME: tg-imagebed-release.zip.sha256
 
