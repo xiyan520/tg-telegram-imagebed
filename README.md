@@ -418,6 +418,12 @@ A: 确保上传时使用的是 Token 模式（Bearer Token 认证）。当同时
 
 ### 最新更新
 
+#### v2.0.7 — 修复 500 错误（Pinia 初始化失败）
+- ✅ 修复 jiti v2 覆盖导致 Nuxt 模块加载系统崩溃，Pinia 插件未注册
+- ✅ 修复 `useAuthStore()` 报错 `_s` undefined（删除 jiti override）
+- ✅ 锁定依赖版本：@nuxtjs/tailwindcss 6.12.1 + tailwindcss 3.4.17 + postcss 8.4.49
+- ✅ 修复 api-error-handler 插件中 Pinia store 提前引用导致的初始化顺序问题
+
 #### v2.0.5 — TOTP 二次验证与安全增强
 - ✅ 管理员后台增加 TOTP 二次验证功能（pyotp + qrcode）
 - ✅ 登录流程改为两步验证：密码 + 动态验证码

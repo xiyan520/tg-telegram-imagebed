@@ -1,6 +1,6 @@
 {
   "name": "telegram-imagebed-frontend",
-  "version": "2.0.5",
+  "version": "2.0.7",
   "private": true,
   "type": "module",
   "scripts": {
