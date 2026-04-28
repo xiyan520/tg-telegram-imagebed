@@ -28,6 +28,7 @@
             刷新
           </UButton>
           <UButton
+            v-if="gallery?.owner_type !== 'admin'"
             size="sm"
             color="gray"
             variant="soft"
@@ -37,6 +38,7 @@
             设置
           </UButton>
           <UButton
+            v-if="gallery?.owner_type !== 'admin'"
             size="sm"
             color="red"
             variant="soft"

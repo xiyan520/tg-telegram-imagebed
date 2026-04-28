@@ -1,18 +1,13 @@
 <template>
-  <div class="space-y-4">
-    <!-- 顶部导航 -->
-    <div class="flex items-center gap-3">
-      <button
-        class="w-9 h-9 rounded-xl bg-white dark:bg-neutral-800 border border-stone-200 dark:border-neutral-700 flex items-center justify-center hover:bg-stone-50 dark:hover:bg-neutral-700 transition-colors"
-        @click="$emit('navigate', 'list')"
-      >
-        <UIcon name="heroicons:arrow-left" class="w-4 h-4 text-stone-500" />
-      </button>
-      <div class="flex-1 min-w-0">
-        <h2 class="text-lg font-bold text-stone-900 dark:text-white">我的上传</h2>
-        <p class="text-xs text-stone-400 dark:text-stone-500">共 {{ total }} 张图片</p>
+  <UCard>
+    <template #header>
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="font-semibold text-stone-900 dark:text-white">我的上传</h3>
+          <p class="text-xs text-stone-400 dark:text-stone-500">共 {{ total }} 张图片</p>
+        </div>
       </div>
-    </div>
+    </template>
 
     <!-- 搜索和排序 -->
     <div class="flex flex-wrap items-center gap-2">
@@ -141,7 +136,7 @@
         </template>
       </UCard>
     </UModal>
-  </div>
+  </UCard>
 </template>
 
 <script setup lang="ts">
