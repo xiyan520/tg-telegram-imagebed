@@ -40,6 +40,11 @@ export default defineNuxtConfig({
     }
   },
 
+  // 自动导入配置（Pinia stores 需要显式声明）
+  imports: {
+    dirs: ['stores']
+  },
+
   // Nitro 配置（静态生成）
   // 注: Nuxt 内部默认 failOnError=true，需通过 hook 覆盖
   nitro: {
