@@ -11,12 +11,14 @@ env:
   RELEASE_SHA_NAME: tg-imagebed-release.zip.sha256
 
 jobs:
-  release:
+  prepare:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -88,7 +90,6 @@ jobs:
         run: |
           npm ci --prefix frontend
           npm run generate --prefix frontend
-          # SPA fallback: 如果 prerender 跳过了 / 路由，用 200.html 作为入口
           if [ ! -f frontend/.output/public/index.html ] && [ -f frontend/.output/public/200.html ]; then
             cp frontend/.output/public/200.html frontend/.output/public/index.html
           fi
@@ -111,6 +112,21 @@ jobs:
             dist/tg-imagebed-release.zip
             dist/tg-imagebed-release.zip.sha256
 
+  build-amd64:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update VERSION (bumped by prepare job)
+        run: echo "${{ needs.prepare.outputs.version }}" > VERSION
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -120,14 +136,79 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push (linux/amd64)
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          platforms: linux/amd64
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
-            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-amd64
+            ${{ env.IMAGE_NAME }}:latest-amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+
+  build-arm64:
+    needs: prepare
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update VERSION (bumped by prepare job)
+        run: echo "${{ needs.prepare.outputs.version }}" > VERSION
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (linux/arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/arm64
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-arm64
+            ${{ env.IMAGE_NAME }}:latest-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  merge-manifest:
+    needs: [prepare, build-amd64, build-arm64]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push multi-arch manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.prepare.outputs.tag }}"
+
+          docker manifest create "${{ env.IMAGE_NAME }}:${TAG}" \
+            "${{ env.IMAGE_NAME }}:${TAG}-amd64" \
+            "${{ env.IMAGE_NAME }}:${TAG}-arm64"
+          docker manifest push "${{ env.IMAGE_NAME }}:${TAG}"
+
+          docker manifest create "${{ env.IMAGE_NAME }}:latest" \
+            "${{ env.IMAGE_NAME }}:latest-amd64" \
+            "${{ env.IMAGE_NAME }}:latest-arm64"
+          docker manifest push "${{ env.IMAGE_NAME }}:latest"
