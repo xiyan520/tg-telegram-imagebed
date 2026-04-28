@@ -180,11 +180,11 @@ def create_auth_token_with_ip_limit(
                 (token, expires_at, upload_limit, ip_address, user_agent, description or '娓稿Token')
             )
 
-        logger.info(f"鍒涘缓鏂扮殑auth_token: {token[:20]}... (闄愬埗: {upload_limit}寮? 鏈夋晥鏈? {expires_days}澶?)")
+        logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")
         return token, None
 
     except Exception as e:
-        logger.error(f"鍒涘缓auth_token澶辫触: {e}")
+        logger.error(f"创建auth_token失败: {e}")
         return None, 'error'
 
 

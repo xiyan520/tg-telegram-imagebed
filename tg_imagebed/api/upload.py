@@ -65,9 +65,15 @@ def validate_image_magic(content: bytes) -> Optional[str]:
         return mime_type
 
     if len(content) >= 12 and content[4:8] == b"ftyp":
-        brand_region = content[8:min(32, len(content))]
-        if b"avif" in brand_region or b"avis" in brand_region:
+        # 检查 major brand（字节 8-11）和 compatible brands（字节 16+，每4字节）
+        major_brand = content[8:12]
+        if major_brand in (b"avif", b"avis"):
             return "image/avif"
+        # 检查 compatible brands 区域
+        compat_region = content[16:min(32, len(content))]
+        for i in range(0, len(compat_region) - 3, 4):
+            if compat_region[i:i + 4] in (b"avif", b"avis"):
+                return "image/avif"
 
     return None
 

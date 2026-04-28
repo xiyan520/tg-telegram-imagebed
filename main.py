@@ -182,7 +182,7 @@ def create_app() -> Flask:
         max_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=1024)
     except Exception:
         max_mb = 20
-    # ?????2MB ???????????? multipart ???
+    # 预留2MB冗余空间以容纳multipart请求头
     app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
 
     @app.before_request

@@ -74,7 +74,13 @@ class StorageRouter:
         if driver == "telegram":
             effective_token, _ = get_effective_bot_token()
             bot_token = str(cfg2.get("bot_token") or effective_token or "")
-            chat_id = int(cfg2.get("chat_id") or 0)
+            raw_chat_id = cfg2.get("chat_id")
+            try:
+                chat_id = int(raw_chat_id) if raw_chat_id is not None else 0
+            except (ValueError, TypeError):
+                chat_id = 0
+            if chat_id <= 0:
+                logger.warning(f"Telegram 后端 '{name}' 缺少有效的 chat_id，上传将失败")
             proxy_url = str(cfg2.get("proxy_url") or get_proxy_url() or "").strip() or None
             return TelegramBackend(name=name, bot_token=bot_token, chat_id=chat_id, proxy_url=proxy_url)
 
@@ -296,12 +302,7 @@ def get_storage_router(*, ttl_seconds: int = 5) -> StorageRouter:
     """
     global _router, _router_ts
     now = time.time()
-    # 快速路径：缓存有效时直接返回（无锁读取）
-    if _router and (now - _router_ts) < ttl_seconds:
-        return _router
     with _router_lock:
-        # 双重检查：进入锁后再次验证，避免重复创建
-        now = time.time()
         if _router and (now - _router_ts) < ttl_seconds:
             return _router
         cfg = _load_storage_config()

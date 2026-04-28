@@ -33,10 +33,16 @@ def purge_cdn_cache():
     cdn_urls = []
     cdn_domain = _get_cdn_domain()
     for url in urls:
-        if '/image/' in url:
-            encrypted_id = url.split('/image/')[-1]
-            if cdn_domain:
-                cdn_urls.append(f"https://{cdn_domain}/image/{encrypted_id}")
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        path = parsed.path
+        if '/image/' in path:
+            # 提取 /image/ 之后的部分作为 encrypted_id
+            parts = path.split('/image/', 1)
+            if len(parts) == 2 and parts[1]:
+                encrypted_id = parts[1]
+                if cdn_domain:
+                    cdn_urls.append(f"https://{cdn_domain}/image/{encrypted_id}")
 
     if cdn_urls and cloudflare_cdn.purge_cache(cdn_urls):
         response = jsonify({
@@ -113,7 +119,10 @@ def admin_cdn_warm():
     data = request.get_json() or {}
     encrypted_ids = data.get('encrypted_ids') or []
     all_uncached = bool(data.get('all_uncached'))
-    limit = int(data.get('limit') or 200)
+    raw_limit = data.get('limit')
+    limit = int(raw_limit) if raw_limit is not None else 200
+    if limit <= 0:
+        limit = 200
     since_seconds = int(data.get('since_seconds') or 86400)
 
     if all_uncached:

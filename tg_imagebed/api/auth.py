@@ -545,6 +545,7 @@ def _delete_file_record(encrypted_id: str, token: str, *, delete_storage: bool =
     返回 { 'deleted': bool, 'tg_deleted': bool, 'error': str|None }
     """
     result = {'deleted': False, 'tg_deleted': False, 'error': None}
+    file_row = None
 
     try:
         with get_connection() as conn:
@@ -564,16 +565,7 @@ def _delete_file_record(encrypted_id: str, token: str, *, delete_storage: bool =
 
             file_row = dict(row)
 
-            if delete_storage:
-                # 1. 删除存储后端文件
-                _delete_storage_file(file_row)
-
-                # 2. TG 消息同步删除
-                tg_sync_enabled = str(get_system_setting('tg_sync_delete_enabled') or '1') == '1'
-                if tg_sync_enabled:
-                    result['tg_deleted'] = _delete_tg_message(file_row)
-
-            # 3. 删除数据库记录
+            # 删除数据库记录（先完成 DB 操作，释放锁）
             cursor.execute(
                 "DELETE FROM file_storage WHERE encrypted_id = ? AND auth_token = ?",
                 (encrypted_id, token),
@@ -585,6 +577,13 @@ def _delete_file_record(encrypted_id: str, token: str, *, delete_storage: bool =
                     "UPDATE auth_tokens SET upload_count = MAX(0, upload_count - 1) WHERE token = ?",
                     (token,),
                 )
+
+        # 外部操作放在事务外，避免长时间持有 DB 锁
+        if result['deleted'] and delete_storage and file_row:
+            _delete_storage_file(file_row)
+            tg_sync_enabled = str(get_system_setting('tg_sync_delete_enabled') or '1') == '1'
+            if tg_sync_enabled:
+                result['tg_deleted'] = _delete_tg_message(file_row)
 
     except Exception as e:
         logger.error(f"用户删除图片失败: {encrypted_id}, {e}")

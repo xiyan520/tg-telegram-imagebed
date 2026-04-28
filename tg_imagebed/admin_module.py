@@ -757,16 +757,6 @@ def init_database_admin_update(DATABASE_PATH):
     except Exception as e:
         logger.error(f"创建管理索引失败: {e}")
 
-def get_static_file_version(filename):
-    """获取静态文件版本号"""
-    # 如果启用了强制刷新，总是返回当前时间戳
-    force_refresh = os.getenv("FORCE_REFRESH", "false").lower() == "true"
-    if force_refresh:
-        return str(int(time.time()))
-    
-    # 否则返回配置的静态版本
-    return os.getenv("STATIC_VERSION", str(int(time.time())))
-
 def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_size, add_cache_headers):
     """注册管理员路由"""
 

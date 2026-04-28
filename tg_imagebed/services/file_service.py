@@ -21,7 +21,7 @@ from ..bot_control import get_effective_bot_token
 
 
 def _hash_file(path: str) -> str:
-    """浣跨敤娴佸紡璇诲彇璁＄畻鏂囦欢 SHA256锛岄伩鍏嶅ぇ鏂囦欢鏁翠綋鍔犺浇鍒板唴瀛?"""
+    """使用流式读取计算文件 SHA256，避免大文件整体加载到内存"""
     sha256 = hashlib.sha256()
     with open(path, 'rb') as handle:
         while True:
@@ -103,7 +103,7 @@ def process_upload(
         包含 encrypted_id, url 等信息的字典，失败返回 None
     """
     if file_content is None and not staged_file_path:
-        raise ValueError("file_content 鍜?staged_file_path 涓嶈兘鍚屾椂涓虹┖")
+        raise ValueError("file_content 和 staged_file_path 不能同时为空")
 
     if staged_file_path:
         file_size = os.path.getsize(staged_file_path)
@@ -124,14 +124,15 @@ def process_upload(
         else:
             scene = "guest"
 
-    # 计算文件哈希（使用 SHA256，比 MD5 更安全）
+    # 计算文件哈希
     if staged_file_path:
         file_hash = _hash_file(staged_file_path)
     else:
         file_hash = hashlib.sha256(file_content or b'').hexdigest()
 
-    # 构建说明
-    caption = f"{source} | 文件名: {filename} | 大小: {file_size} bytes | 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+    # 构建说明（清理文件名中的换行等控制字符，避免破坏 caption 格式）
+    safe_filename = (filename or '').replace('\n', ' ').replace('\r', ' ')
+    caption = f"{source} | 文件名: {safe_filename} | 大小: {file_size} bytes | 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
 
     # 通过存储路由器选择后端并上传
     router = get_storage_router()

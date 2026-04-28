@@ -67,19 +67,20 @@ def _get_effective_cdn_settings():
         zone_id = str(get_system_setting("cloudflare_zone_id") or "").strip()
         cache_warming_enabled = str(get_system_setting("enable_cache_warming") or "0") == "1"
     except Exception as e:
-        # 数据库不可用时使用默认值（全部关闭）
         logger.debug(f"从数据库读取 CDN 设置失败: {e}")
 
     with _cdn_settings_lock:
-        _CDN_SETTINGS_CACHE.update({
-            "ts": now,
-            "cdn_enabled": cdn_enabled,
-            "monitor_enabled": monitor_enabled,
-            "cdn_domain": cdn_domain,
-            "api_token": api_token,
-            "zone_id": zone_id,
-            "cache_warming_enabled": cache_warming_enabled,
-        })
+        # 双重检查：可能在等待锁期间另一线程已完成刷新
+        if now > _CDN_SETTINGS_CACHE["ts"]:
+            _CDN_SETTINGS_CACHE.update({
+                "ts": now,
+                "cdn_enabled": cdn_enabled,
+                "monitor_enabled": monitor_enabled,
+                "cdn_domain": cdn_domain,
+                "api_token": api_token,
+                "zone_id": zone_id,
+                "cache_warming_enabled": cache_warming_enabled,
+            })
     return cdn_enabled, monitor_enabled, cdn_domain, api_token, zone_id, cache_warming_enabled
 
 
@@ -115,6 +116,7 @@ class CloudflareCDN:
         self.headers = {'Content-Type': 'application/json'}
         self.base_url = 'https://api.cloudflare.com/client/v4'
         self._cfg_ts = 0.0
+        self._session_lock = threading.Lock()
 
         # 创建带重试的 Session
         self._session = requests.Session()
@@ -142,12 +144,13 @@ class CloudflareCDN:
         self.headers = headers
         self._cfg_ts = now
 
-        # 同步代理设置到 Session
+        # 同步代理设置到 Session（需要加锁，Session 非线程安全）
         proxy = get_proxy_url()
-        if proxy:
-            self._session.proxies = {'http': proxy, 'https': proxy}
-        else:
-            self._session.proxies = {}
+        with self._session_lock:
+            if proxy:
+                self._session.proxies = {'http': proxy, 'https': proxy}
+            else:
+                self._session.proxies = {}
 
     def _api_post(self, path: str, payload: dict) -> Tuple[bool, str]:
         """发送 Cloudflare API POST 请求"""
@@ -206,16 +209,16 @@ class CloudflareCDN:
                 cf_ray=cf_ray,
             )
         except requests.exceptions.Timeout:
-            return CDNProbeResult(url=url, status_code=0, cf_cache_status='', cached=False, error='timeout')
+            return CDNProbeResult(url=url, status_code=-1, cf_cache_status='', cached=False, error='timeout')
         except Exception as e:
-            return CDNProbeResult(url=url, status_code=0, cf_cache_status='', cached=False, error=str(e))
+            return CDNProbeResult(url=url, status_code=-1, cf_cache_status='', cached=False, error=str(e))
 
     def probe_encrypted_id(self, encrypted_id: str) -> CDNProbeResult:
         """探测指定图片的 CDN 缓存状态"""
         self._refresh_config()
         if not self.cdn_domain:
             return CDNProbeResult(
-                url='', status_code=0, cf_cache_status='',
+                url='', status_code=-1, cf_cache_status='',
                 cached=False, error='CDN domain not configured'
             )
         url = f'https://{self.cdn_domain}/image/{encrypted_id}'
@@ -265,6 +268,8 @@ class CloudflareCDN:
     def purge_by_tags(self, tags: List[str]) -> bool:
         """按 Cache-Tag 清除缓存（需要 Cloudflare Enterprise 或支持的计划）"""
         self._refresh_config()
+        if not self.api_token or not self.zone_id:
+            return False
         if not tags:
             return True
 

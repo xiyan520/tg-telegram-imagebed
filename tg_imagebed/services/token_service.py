@@ -103,8 +103,13 @@ class TokenService:
                 if not message_id or not chat_id:
                     try:
                         import json as _json
-                        meta_raw = file_row.get('storage_meta') or '{}'
-                        meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+                        meta_raw = file_row.get('storage_meta')
+                        if isinstance(meta_raw, str) and meta_raw.strip():
+                            meta = _json.loads(meta_raw)
+                        elif isinstance(meta_raw, dict):
+                            meta = meta_raw
+                        else:
+                            meta = {}
                         if not message_id:
                             message_id = meta.get('message_id')
                         if not chat_id and storage_backend:
@@ -212,7 +217,7 @@ class TokenService:
 
         except Exception as e:
             logger.error(f"TokenService 级联删除 Token 失败: {e}")
-            raise
+            return False
 
     # ── 影响范围查询 ──────────────────────────────────────
     @staticmethod
