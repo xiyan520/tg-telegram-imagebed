@@ -16,6 +16,11 @@ COPY frontend/ ./
 # 构建前端
 RUN npm run generate
 
+# SPA fallback: 如果 prerender 跳过了 / 路由，用 200.html 作为入口
+RUN if [ ! -f .output/public/index.html ] && [ -f .output/public/200.html ]; then \
+      cp .output/public/200.html .output/public/index.html; \
+    fi
+
 # ==================== 阶段2: 构建最终镜像 ====================
 FROM python:3.11-slim
 
