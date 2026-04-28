@@ -21,7 +21,7 @@
         </div>
         <div class="rounded-xl border border-stone-200 dark:border-stone-700 p-3 bg-stone-50/70 dark:bg-neutral-800/70">
           <p class="text-xs text-stone-500 dark:text-stone-400">剩余额度</p>
-          <p class="text-xl font-semibold text-stone-900 dark:text-white mt-1">{{ remainingUploads }}</p>
+          <p class="text-xl font-semibold text-stone-900 dark:text-white mt-1">{{ remainingUploads === -1 ? '∞' : remainingUploads }}</p>
         </div>
         <div class="rounded-xl border border-stone-200 dark:border-stone-700 p-3 bg-stone-50/70 dark:bg-neutral-800/70">
           <p class="text-xs text-stone-500 dark:text-stone-400">TG 状态</p>
@@ -35,16 +35,22 @@
         </div>
       </div>
 
-      <div v-if="uploadLimit > 0" class="mt-4">
+      <div v-if="hasToken" class="mt-4">
         <div class="flex justify-between text-xs text-stone-500 dark:text-stone-400 mb-1">
           <span>当前 Token 配额</span>
-          <span>{{ uploadCount }} / {{ uploadLimit }}</span>
+          <span>{{ uploadCount }} / {{ uploadLimit > 0 ? uploadLimit : '∞' }}</span>
         </div>
         <div class="h-2 rounded-full bg-stone-200 dark:bg-neutral-700 overflow-hidden">
           <div
+            v-if="uploadLimit > 0"
             class="h-full rounded-full transition-all duration-500"
             :class="quotaPercent > 90 ? 'bg-red-500' : quotaPercent > 70 ? 'bg-orange-500' : 'bg-gradient-to-r from-amber-400 to-orange-500'"
             :style="{ width: `${Math.min(100, quotaPercent)}%` }"
+          />
+          <div
+            v-else
+            class="h-full rounded-full bg-gradient-to-r from-green-400 to-emerald-500"
+            style="width: 100%"
           />
         </div>
       </div>

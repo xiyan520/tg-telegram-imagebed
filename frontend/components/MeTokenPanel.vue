@@ -55,7 +55,7 @@
             </div>
             <!-- 信息行 -->
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-400">
-              <span>{{ item.tokenInfo?.upload_count ?? '?' }} / {{ item.tokenInfo?.upload_limit ?? '?' }} 次上传</span>
+              <span>{{ item.tokenInfo?.upload_count ?? '?' }} / {{ (item.tokenInfo?.upload_limit == null || item.tokenInfo?.upload_limit === 0) ? '∞' : item.tokenInfo?.upload_limit }} 次上传</span>
               <span v-if="item.albumName">· {{ item.albumName }}</span>
               <span v-if="item.tokenInfo?.expires_at" class="inline-flex items-center gap-0.5">
                 · <UIcon name="heroicons:clock" class="w-3 h-3" />
@@ -240,7 +240,8 @@ const formatDate = (d: string) => {
 
 const getQuotaPercent = (item: any) => {
   const count = item.tokenInfo?.upload_count ?? 0
-  const limit = item.tokenInfo?.upload_limit ?? 1
+  const limit = item.tokenInfo?.upload_limit
+  if (!limit) return 0
   return Math.min(100, Math.round((count / limit) * 100))
 }
 

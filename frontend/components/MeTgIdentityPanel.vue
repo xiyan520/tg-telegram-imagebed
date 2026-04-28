@@ -39,7 +39,7 @@
             <div class="min-w-0">
               <code class="text-xs font-mono text-stone-600 dark:text-stone-400 truncate block">{{ maskToken(item.token) }}</code>
               <p class="text-xs text-stone-400 mt-1">
-                {{ item.tokenInfo?.upload_count ?? 0 }} / {{ item.tokenInfo?.upload_limit ?? 0 }} 次上传
+                {{ item.tokenInfo?.upload_count ?? 0 }} / {{ (item.tokenInfo?.upload_limit == null || item.tokenInfo?.upload_limit === 0) ? '∞' : item.tokenInfo?.upload_limit }} 次上传
               </p>
             </div>
             <UButton
