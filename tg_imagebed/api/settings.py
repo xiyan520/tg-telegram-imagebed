@@ -18,8 +18,8 @@ from ..database.domains import _normalize_domain
 
 from .. import admin_module
 
-OFFICIAL_UPDATE_REPO_URL = 'https://github.com/xiyan520/tg-telegram-imagebed.git'
-OFFICIAL_UPDATE_RELEASE_REPO = 'xiyan520/tg-telegram-imagebed'
+OFFICIAL_UPDATE_REPO_URL = 'https://github.com/lostiv/tg-telegram-imagebed.git'
+OFFICIAL_UPDATE_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
 OFFICIAL_UPDATE_ASSET_NAME = 'tg-imagebed-release.zip'
 OFFICIAL_UPDATE_SHA_NAME = 'tg-imagebed-release.zip.sha256'
 

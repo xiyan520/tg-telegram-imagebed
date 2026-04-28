@@ -31,7 +31,7 @@ from .. import __version__
 from ..config import BASE_DIR, logger
 from ..database import get_system_setting, update_system_settings
 
-OFFICIAL_RELEASE_REPO = 'xiyan520/tg-telegram-imagebed'
+OFFICIAL_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
 OFFICIAL_REPO_URL = f'https://github.com/{OFFICIAL_RELEASE_REPO}.git'
 DEFAULT_ASSET_NAME = 'tg-imagebed-release.zip'
 DEFAULT_SHA_NAME = 'tg-imagebed-release.zip.sha256'

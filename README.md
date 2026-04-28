@@ -70,13 +70,15 @@
 ```yaml
 services:
   telegram-imagebed:
-    image: xiyan520/tg-telegram-imagebed:latest
+    image: lost4/tg-telegram-imagebed:latest
     container_name: telegram-imagebed
     ports:
       - "18793:18793"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
 ```
 
 #### 2. 启动服务
@@ -106,13 +108,15 @@ docker-compose up -d
 ```yaml
 services:
   telegram-imagebed:
-    image: xiyan520/tg-telegram-imagebed:latest
+    image: lost4/tg-telegram-imagebed:latest
     container_name: telegram-imagebed
     ports:
       - "18793:18793"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
 ```
 
 ```bash
@@ -126,8 +130,9 @@ docker run -d \
   --name telegram-imagebed \
   -p 18793:18793 \
   -v ./data:/app/data \
+  -e TZ=Asia/Shanghai \
   --restart unless-stopped \
-  xiyan520/tg-telegram-imagebed:latest
+  lost4/tg-telegram-imagebed:latest
 ```
 
 ### 手动部署
@@ -136,7 +141,7 @@ docker run -d \
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/xiyan520/tg-telegram-imagebed.git
+git clone https://github.com/lostiv/tg-telegram-imagebed.git
 cd tg-telegram-imagebed
 
 # 2. 安装依赖
@@ -486,4 +491,4 @@ MIT License
 
 ## 📮 联系方式
 
-如有问题，请提交 [Issue](https://github.com/xiyan520/tg-telegram-imagebed/issues)
+如有问题，请提交 [Issue](https://github.com/lostiv/tg-telegram-imagebed/issues)
