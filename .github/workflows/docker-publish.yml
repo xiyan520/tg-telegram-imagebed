@@ -88,6 +88,10 @@ jobs:
         run: |
           npm ci --prefix frontend
           npm run generate --prefix frontend
+          # SPA fallback: 如果 prerender 跳过了 / 路由，用 200.html 作为入口
+          if [ ! -f frontend/.output/public/index.html ] && [ -f frontend/.output/public/200.html ]; then
+            cp frontend/.output/public/200.html frontend/.output/public/index.html
+          fi
 
       - name: Package release artifact
         shell: bash
