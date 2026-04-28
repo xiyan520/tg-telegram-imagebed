@@ -413,6 +413,20 @@ A: 确保上传时使用的是 Token 模式（Bearer Token 认证）。当同时
 
 ### 最新更新
 
+#### v2.0.4 — Bug 修复与稳定性提升
+- 修复 3 处中文注释/日志乱码（文件编码回写错误）
+- 修复 Bot 实例引用的线程安全问题（跨线程读写竞态）
+- 修复 CDN 服务配置缓存的 TOCTOU 竞态条件
+- 修复 CDN 会话代理设置的非线程安全写入
+- 修复图片删除时数据库事务内执行外部 API 调用（长时间持锁）
+- 修复管理员 API CORS Origin 未经验证即回显（安全加固）
+- 修复 AVIF 文件头检测过于宽松（子串匹配改为 4 字节边界精确匹配）
+- 修复 CDN 缓存清除 URL 解析缺陷（改用 urlparse）
+- 修复 CDN 预热 limit=0 被静默转为默认值
+- 修复 Token 服务 json.loads("") 崩溃及异常处理不一致
+- 移除 admin_module.py 中重复的 get_static_file_version 死代码
+- 清理 Telegram 标题中的文件名换行符
+
 #### 首页组件重构
 - ✅ `pages/index.vue` 从 846 行精简为 ~70 行容器组件
 - ✅ 拆分为 4 个子组件：HomeUploadZone / HomeUploadResults / HomeUploadHistory / HomeImagePreview
