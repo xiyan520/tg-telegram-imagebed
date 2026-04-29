@@ -13,16 +13,13 @@ env:
 
 jobs:
   prepare:
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      (startsWith(github.ref, 'refs/tags/v') && github.event.head_commit.author.name != 'github-actions[bot]') ||
-      (startsWith(github.event.head_commit.message, 'release:') && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      skip: ${{ steps.version.outputs.skip }}
 
     steps:
       - name: Checkout
@@ -30,28 +27,50 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Git Identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
       - name: Determine version
         id: version
         shell: bash
         run: |
           set -euo pipefail
 
-          # 如果是 tag 推送，直接用 tag 版本，跳过 bump/commit/tag 步骤
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+          REF="${{ github.ref }}"
+
+          # —— 判断触发类型 ——
+          # tag 推送：refs/tags/vX.Y.Z
+          if [[ "$REF" == refs/tags/v* ]]; then
             tag="${{ github.ref_name }}"
             version="${tag#v}"
+
+            # 防递归：bot 推送的 tag 直接跳过整个 job
+            if [[ "${{ github.actor }}" == "github-actions[bot]" ]]; then
+              echo "Bot-pushed tag detected, skip build to avoid recursion."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "version=${version}" >> "$GITHUB_OUTPUT"
+              echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
             echo "Triggered by tag push: version=${version}, tag=${tag}"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "is_tag_push=true" >> "$GITHUB_OUTPUT"
             echo "version=${version}" >> "$GITHUB_OUTPUT"
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          # 分支推送：仅 release: 开头的 commit 消息触发
+          MESSAGE="${{ github.event.head_commit.message }}"
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
+            if [[ ! "$MESSAGE" =~ ^release: ]]; then
+              echo "Branch push but commit message doesn't start with 'release:', skip."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "version=0.0.0" >> "$GITHUB_OUTPUT"
+              echo "tag=v0.0.0" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "is_tag_push=false" >> "$GITHUB_OUTPUT"
 
           if [[ ! -f VERSION ]]; then
@@ -74,7 +93,7 @@ jobs:
           echo "tag=v${next}" >> "$GITHUB_OUTPUT"
 
       - name: Commit and push VERSION
-        if: steps.version.outputs.is_tag_push != 'true'
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_tag_push != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -87,7 +106,7 @@ jobs:
           fi
 
       - name: Create and push tag
-        if: steps.version.outputs.is_tag_push != 'true'
+        if: steps.version.outputs.skip != 'true' && steps.version.outputs.is_tag_push != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -100,6 +119,7 @@ jobs:
           git push origin "$tag"
 
       - name: Set up Node.js
+        if: steps.version.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -107,6 +127,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Build frontend static artifacts
+        if: steps.version.outputs.skip != 'true'
         run: |
           npm ci --prefix frontend
           npm run generate --prefix frontend
@@ -115,6 +136,7 @@ jobs:
           fi
 
       - name: Package release artifact
+        if: steps.version.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -123,6 +145,7 @@ jobs:
           sha256sum "dist/${RELEASE_ASSET_NAME}" > "dist/${RELEASE_SHA_NAME}"
 
       - name: Publish GitHub Release
+        if: steps.version.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
@@ -134,6 +157,7 @@ jobs:
 
   build-amd64:
     needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -171,6 +195,7 @@ jobs:
 
   build-arm64:
     needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-24.04-arm
     permissions:
       packages: write
@@ -208,6 +233,7 @@ jobs:
 
   merge-manifest:
     needs: [prepare, build-amd64, build-arm64]
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       packages: write
