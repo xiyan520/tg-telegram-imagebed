@@ -70,7 +70,17 @@
 
             <!-- 游客登录 / 用户入口 -->
             <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
-            <template v-if="tgAuthStore.isLoggedIn">
+            <template v-if="authStore.isAuthenticated">
+              <!-- 管理员已登录：显示用户名，跳转管理后台 -->
+              <NuxtLink
+                to="/admin"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
+              >
+                <UIcon name="heroicons:shield-check" class="w-4 h-4" />
+                {{ authStore.username || '管理' }}
+              </NuxtLink>
+            </template>
+            <template v-else-if="tgAuthStore.isLoggedIn">
               <!-- TG 模式：显示用户名，点击跳转控制台 -->
               <NuxtLink
                 to="/me"
@@ -244,6 +254,7 @@ import { useDocumentVisibility } from '@vueuse/core'
 
 const config = useRuntimeConfig()
 const mobileMenuOpen = ref(false)
+const authStore = useAuthStore()
 const tokenStore = useTokenStore()
 const tgAuthStore = useTgAuthStore()
 const { getStats } = useImageApi()
@@ -348,18 +359,18 @@ watch(visibility, (current) => {
   }
 })
 
-// 页面加载时恢复游客token和加载统计
+// 页面加载时恢复游客 token 和 TG 会话
 onMounted(async () => {
-  tokenStore.restoreToken()
-  await loadStats()
+  // 并行恢复 token 和 TG 会话
+  await Promise.all([
+    tokenStore.restoreToken(),
+    tgAuthStore.checkSession(),
+    authStore.restoreAuth(),
+    loadStats(),
+  ])
 
   // 加载公共设置
   await loadSettings()
-
-  // TG 认证启用时恢复会话
-  if (publicSettings.value.tgAuthEnabled) {
-    tgAuthStore.checkSession()
-  }
 
   // 监听全局统计刷新事件
   onStatsRefresh(() => {
