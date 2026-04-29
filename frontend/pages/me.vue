@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-4 me-workbench">
-    <UCard v-if="!tokenStore.hasToken && !tgAuth.isLoggedIn" class="shadow-sm">
+    <UCard v-if="!authStore.isAuthenticated && !tokenStore.hasToken && !tgAuth.isLoggedIn" class="shadow-sm">
       <div class="text-center py-8 space-y-4">
         <div class="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
           <UIcon name="heroicons:key" class="w-7 h-7 text-white" />
@@ -111,6 +111,7 @@ import type { MeNavItem, MeNavKey } from '~/components/MeConsoleShell.vue'
 
 const tokenStore = useTokenStore()
 const tgAuth = useTgAuthStore()
+const authStore = useAuthStore()
 const { publicSettings, tgEffective, loadSettings, logout } = useGuestAuth()
 const toast = useLightToast()
 
@@ -208,6 +209,9 @@ const openLightbox = (images: GalleryImage[], index: number) => {
 
 const handleLogout = async () => {
   await logout()
+  if (authStore.isAuthenticated) {
+    await authStore.logout()
+  }
   navigateTo('/')
 }
 
@@ -248,7 +252,7 @@ watch(navItems, (items) => {
 })
 
 watch(() => tokenStore.hasToken, (has) => {
-  if (!has && !tgAuth.isLoggedIn) {
+  if (!authStore.isAuthenticated && !has && !tgAuth.isLoggedIn) {
     navigateTo('/')
   }
 })
@@ -271,7 +275,14 @@ onMounted(async () => {
       pruneBoundTokensIfSessionLost()
     }
   }
-  if (!tokenStore.hasToken && !tgAuth.isLoggedIn) {
+  if (!authStore.isAuthenticated && !tokenStore.hasToken && !tgAuth.isLoggedIn) {
+    navigateTo('/')
+  }
+})
+
+// 管理员登出后，若也无 Token/TG 登录则跳转首页
+watch(() => authStore.isAuthenticated, (authed) => {
+  if (!authed && !tokenStore.hasToken && !tgAuth.isLoggedIn) {
     navigateTo('/')
   }
 })
