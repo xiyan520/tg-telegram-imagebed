@@ -140,7 +140,7 @@ class TelegramBackend(StorageBackend):
 
         kwargs: Dict[str, Any] = {
             "name": f"tg_imagebed_{re.sub(r'[^a-zA-Z0-9_]+', '_', self.name or 'telegram')}",
-            "api_id": self._api_id,
+            "api_id": int(self._api_id),
             "api_hash": self._api_hash,
             "bot_token": self._bot_token,
             "in_memory": True,
