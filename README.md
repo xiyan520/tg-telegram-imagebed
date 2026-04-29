@@ -418,6 +418,26 @@ A: 确保上传时使用的是 Token 模式（Bearer Token 认证）。当同时
 
 ### 最新更新
 
+#### v2.1.0 — Kurigram MTProto 大文件上传
+
+- 集成 Kurigram (Pyrogram fork) MTProto 通道，支持 >20MB 大文件上传
+- 小文件 (≤10MB JPEG) 自动走 Bot API sendPhoto，其他格式走 sendDocument
+- 大文件下载优先走 Kurigram 流式传输，失败自动回退 Bot API
+- 仅 JPEG 发送为 photo，保护 PNG/WebP/GIF/AVIF 透明度
+- Flask 请求体大小限制动态同步数据库配置，避免 413 错误
+- 新增 `RequestEntityTooLarge` 统一错误处理器
+- 存储 Telegram 后端支持配置 api_id/api_hash (MTProto)
+- 修复 RequestEntityTooLarge 未导入导致启动失败
+- 修复 api_id 类型错误（字符串 → 整数）
+- 同步 max_file_size_mb 默认值 20→100，上限 100→1024
+- 新增依赖：Kurigram==2.2.19, TgCrypto==1.2.5
+
+#### v2.0.9 — Docker 构建修复
+- 修复 manifest merge 失败，关闭 build-push-action provenance
+
+#### v2.0.8 — CI 多架构构建
+- CI 并行构建 amd64 + arm64，arm64 改用原生 runner
+
 #### v2.0.7 — 修复 500 错误（Pinia 初始化失败）
 - ✅ 修复 jiti v2 覆盖导致 Nuxt 模块加载系统崩溃，Pinia 插件未注册
 - ✅ 修复 `useAuthStore()` 报错 `_s` undefined（删除 jiti override）
