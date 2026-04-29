@@ -31,8 +31,7 @@ from .. import __version__
 from ..config import BASE_DIR, logger
 from ..database import get_system_setting, update_system_settings
 
-OFFICIAL_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
-OFFICIAL_REPO_URL = f'https://github.com/{OFFICIAL_RELEASE_REPO}.git'
+DEFAULT_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
 DEFAULT_ASSET_NAME = 'tg-imagebed-release.zip'
 DEFAULT_SHA_NAME = 'tg-imagebed-release.zip.sha256'
 
@@ -99,9 +98,9 @@ def _configured_update_source() -> str:
 
 
 def _configured_release_repo() -> str:
-    value = (get_system_setting('app_update_release_repo') or '').strip() or OFFICIAL_RELEASE_REPO
+    value = (get_system_setting('app_update_release_repo') or '').strip() or DEFAULT_RELEASE_REPO
     normalized = _normalize_release_repo(value)
-    return normalized or OFFICIAL_RELEASE_REPO
+    return normalized or DEFAULT_RELEASE_REPO
 
 
 def _configured_asset_name() -> str:
@@ -112,10 +111,6 @@ def _configured_asset_name() -> str:
 def _configured_sha_name() -> str:
     value = (get_system_setting('app_update_release_sha_name') or '').strip() or DEFAULT_SHA_NAME
     return value
-
-
-def _release_repo_allowed(repo: str) -> bool:
-    return _normalize_release_repo(repo) == _normalize_release_repo(OFFICIAL_RELEASE_REPO)
 
 
 def _state_copy() -> Dict[str, Any]:
@@ -436,8 +431,7 @@ def get_update_runtime_info() -> Dict[str, Any]:
     update_source = _configured_update_source()
     pip_available = _check_pip_available()
     current_version = _current_version()
-    repo_allowed = _release_repo_allowed(release_repo)
-    release_supported = update_source == 'release' and repo_allowed
+    release_supported = update_source == 'release'
 
     # 兼容旧前端字段：Git 链路已停用
     git_available = shutil.which('git') is not None
@@ -451,11 +445,11 @@ def get_update_runtime_info() -> Dict[str, Any]:
         'repo_path': str(repo_path),
         'update_source': update_source,
         'release_repo': release_repo,
-        'release_repo_url': OFFICIAL_REPO_URL,
+        'release_repo_url': f'https://github.com/{release_repo}.git' if release_repo else '',
         'release_asset_name': asset_name,
         'release_sha_name': sha_name,
         'release_supported': release_supported,
-        'repo_allowed': repo_allowed,
+        'repo_allowed': True,
         'pip_available': pip_available,
         # 兼容旧字段
         'git_available': git_available,
@@ -463,7 +457,7 @@ def get_update_runtime_info() -> Dict[str, Any]:
         'npm_available': npm_available,
         'is_git_repo': False,
         'repo_clean': True,
-        'repo_url': OFFICIAL_REPO_URL,
+        'repo_url': f'https://github.com/{release_repo}.git' if release_repo else '',
         'branch': 'release',
     }
 
@@ -472,8 +466,6 @@ def check_for_updates() -> Dict[str, Any]:
     info = get_update_runtime_info()
     if info['update_source'] != 'release':
         raise RuntimeError('当前环境仅支持 Release 更新模式')
-    if not info['repo_allowed']:
-        raise RuntimeError('更新源未通过白名单校验，仅允许官方仓库')
 
     release = _fetch_latest_release(info['release_repo'])
     assets = release['assets']

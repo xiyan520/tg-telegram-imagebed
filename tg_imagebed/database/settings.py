@@ -187,7 +187,7 @@ DEFAULT_SYSTEM_SETTINGS = {
     'totp_secret': '',
     # 应用更新配置（Release Artifact）
     'app_update_source': 'release',            # 更新源：release
-    'app_update_release_repo': 'lostiv/tg-telegram-imagebed',  # 固定官方仓库（owner/repo）
+    'app_update_release_repo': 'lostiv/tg-telegram-imagebed',
     'app_update_release_asset_name': 'tg-imagebed-release.zip',  # Release 主包
     'app_update_release_sha_name': 'tg-imagebed-release.zip.sha256',  # Release 校验文件
     # 兼容旧配置（保留只读）

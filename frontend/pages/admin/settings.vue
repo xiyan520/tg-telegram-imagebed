@@ -1314,22 +1314,22 @@
             </div>
             <div>
               <h3 class="text-lg font-semibold text-stone-900 dark:text-white">Release 更新配置</h3>
-              <p class="text-xs text-stone-500 dark:text-stone-400">固定官方仓库与资产名，使用校验文件保证完整性</p>
+              <p class="text-xs text-stone-500 dark:text-stone-400">配置 GitHub Release 仓库与资产名，使用校验文件保证完整性</p>
             </div>
           </div>
         </template>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <UFormGroup label="更新源（固定）">
-            <UInput :model-value="settings.app_update_source" disabled />
+          <UFormGroup label="更新源">
+            <UInput v-model="settings.app_update_source" />
           </UFormGroup>
-          <UFormGroup label="Release 仓库（固定）">
-            <UInput :model-value="settings.app_update_release_repo" disabled />
+          <UFormGroup label="Release 仓库（owner/repo）">
+            <UInput v-model="settings.app_update_release_repo" placeholder="lostiv/tg-telegram-imagebed" />
           </UFormGroup>
-          <UFormGroup label="更新包文件名（固定）">
-            <UInput :model-value="settings.app_update_release_asset_name" disabled />
+          <UFormGroup label="更新包文件名">
+            <UInput v-model="settings.app_update_release_asset_name" placeholder="tg-imagebed-release.zip" />
           </UFormGroup>
-          <UFormGroup label="校验文件名（固定）">
-            <UInput :model-value="settings.app_update_release_sha_name" disabled />
+          <UFormGroup label="校验文件名">
+            <UInput v-model="settings.app_update_release_sha_name" placeholder="tg-imagebed-release.zip.sha256" />
           </UFormGroup>
         </div>
       </UCard>
@@ -1574,7 +1574,7 @@ const sectionFieldGroups: Record<SettingsSectionKey, string[]> = {
     'tg_session_expire_days',
   ],
   proxy_and_tokens: ['proxy_url'],
-  about_update: ['app_update_source'],
+  about_update: ['app_update_source', 'app_update_release_repo', 'app_update_release_asset_name', 'app_update_release_sha_name', 'app_update_branch'],
 }
 
 const activeSection = ref<SettingsSectionKey>('domains')

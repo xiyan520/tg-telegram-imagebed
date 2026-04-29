@@ -18,10 +18,9 @@ from ..database.domains import _normalize_domain
 
 from .. import admin_module
 
-OFFICIAL_UPDATE_REPO_URL = 'https://github.com/lostiv/tg-telegram-imagebed.git'
-OFFICIAL_UPDATE_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
-OFFICIAL_UPDATE_ASSET_NAME = 'tg-imagebed-release.zip'
-OFFICIAL_UPDATE_SHA_NAME = 'tg-imagebed-release.zip.sha256'
+DEFAULT_UPDATE_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
+DEFAULT_UPDATE_ASSET_NAME = 'tg-imagebed-release.zip'
+DEFAULT_UPDATE_SHA_NAME = 'tg-imagebed-release.zip.sha256'
 
 
 def _set_admin_cors_headers(response):
@@ -143,11 +142,11 @@ def _format_settings_for_response(settings: dict) -> dict:
         'image_domain_restriction_enabled': settings.get('image_domain_restriction_enabled', '0') == '1',
         # 热更新配置（Release Artifact）
         'app_update_source': settings.get('app_update_source', 'release'),
-        'app_update_release_repo': settings.get('app_update_release_repo', OFFICIAL_UPDATE_RELEASE_REPO),
-        'app_update_release_asset_name': settings.get('app_update_release_asset_name', OFFICIAL_UPDATE_ASSET_NAME),
-        'app_update_release_sha_name': settings.get('app_update_release_sha_name', OFFICIAL_UPDATE_SHA_NAME),
+        'app_update_release_repo': settings.get('app_update_release_repo', DEFAULT_UPDATE_RELEASE_REPO),
+        'app_update_release_asset_name': settings.get('app_update_release_asset_name', DEFAULT_UPDATE_ASSET_NAME),
+        'app_update_release_sha_name': settings.get('app_update_release_sha_name', DEFAULT_UPDATE_SHA_NAME),
         # 兼容旧字段（只读）
-        'app_update_repo_url': settings.get('app_update_repo_url', OFFICIAL_UPDATE_REPO_URL),
+        'app_update_repo_url': settings.get('app_update_repo_url', f'https://github.com/{DEFAULT_UPDATE_RELEASE_REPO}.git'),
         'app_update_branch': settings.get('app_update_branch', 'main'),
         'app_update_last_status': settings.get('app_update_last_status', 'idle'),
         'app_update_last_error': settings.get('app_update_last_error', ''),
@@ -631,39 +630,40 @@ def admin_system_settings():
             # 热更新配置（Release Artifact）
             if 'app_update_source' in data:
                 source = str(data.get('app_update_source') or '').strip().lower()
-                if source != 'release':
+                if source not in ('release', ''):
                     errors.append('更新源仅支持 release')
                 else:
-                    settings_to_update['app_update_source'] = 'release'
+                    settings_to_update['app_update_source'] = source or 'release'
 
             if 'app_update_release_repo' in data:
                 repo = str(data.get('app_update_release_repo') or '').strip()
-                if repo and repo != OFFICIAL_UPDATE_RELEASE_REPO:
-                    errors.append('Release 仓库仅允许使用官方仓库')
+                if repo:
+                    normalized = repo
+                    if normalized.startswith('https://github.com/'):
+                        normalized = normalized[len('https://github.com/'):]
+                    if normalized.endswith('.git'):
+                        normalized = normalized[:-4]
+                    normalized = normalized.strip('/')
+                    if not normalized or '/' not in normalized or normalized.count('/') != 1:
+                        errors.append('Release 仓库格式无效，请使用 owner/repo 格式')
+                    else:
+                        settings_to_update['app_update_release_repo'] = normalized
                 else:
-                    settings_to_update['app_update_release_repo'] = OFFICIAL_UPDATE_RELEASE_REPO
+                    settings_to_update['app_update_release_repo'] = DEFAULT_UPDATE_RELEASE_REPO
 
             if 'app_update_release_asset_name' in data:
                 asset_name = str(data.get('app_update_release_asset_name') or '').strip()
-                if asset_name and asset_name != OFFICIAL_UPDATE_ASSET_NAME:
-                    errors.append('Release 资产名仅允许使用官方默认值')
+                if asset_name and (asset_name.startswith('/') or '..' in asset_name):
+                    errors.append('Release 资产名包含非法字符')
                 else:
-                    settings_to_update['app_update_release_asset_name'] = OFFICIAL_UPDATE_ASSET_NAME
+                    settings_to_update['app_update_release_asset_name'] = asset_name or DEFAULT_UPDATE_ASSET_NAME
 
             if 'app_update_release_sha_name' in data:
                 sha_name = str(data.get('app_update_release_sha_name') or '').strip()
-                if sha_name and sha_name != OFFICIAL_UPDATE_SHA_NAME:
-                    errors.append('Release 校验文件名仅允许使用官方默认值')
+                if sha_name and (sha_name.startswith('/') or '..' in sha_name):
+                    errors.append('Release 校验文件名包含非法字符')
                 else:
-                    settings_to_update['app_update_release_sha_name'] = OFFICIAL_UPDATE_SHA_NAME
-
-            # 热更新兼容配置（固定）
-            if 'app_update_repo_url' in data:
-                incoming_repo = str(data.get('app_update_repo_url') or '').strip()
-                if incoming_repo and incoming_repo != OFFICIAL_UPDATE_REPO_URL:
-                    errors.append('更新仓库仅允许使用官方仓库地址')
-                else:
-                    settings_to_update['app_update_repo_url'] = OFFICIAL_UPDATE_REPO_URL
+                    settings_to_update['app_update_release_sha_name'] = sha_name or DEFAULT_UPDATE_SHA_NAME
 
             if 'app_update_branch' in data:
                 branch = str(data.get('app_update_branch') or '').strip().lower()
