@@ -70,17 +70,7 @@
 
             <!-- 游客登录 / 用户入口 -->
             <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
-            <template v-if="authStore.isAuthenticated">
-              <!-- 管理员已登录：显示用户名，跳转控制台 -->
-              <NuxtLink
-                to="/me"
-                class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
-              >
-                <UIcon name="heroicons:shield-check" class="w-4 h-4" />
-                控制台
-              </NuxtLink>
-            </template>
-            <template v-else-if="tgAuthStore.isLoggedIn">
+            <template v-if="tgAuthStore.isLoggedIn">
               <!-- TG 模式：显示用户名，点击跳转控制台 -->
               <NuxtLink
                 to="/me"
@@ -98,6 +88,16 @@
               >
                 <UIcon name="heroicons:key" class="w-4 h-4" />
                 控制台
+              </NuxtLink>
+            </template>
+            <template v-else-if="authStore.isAuthenticated">
+              <!-- 管理员已登录（无TG/Token）：跳转管理后台 -->
+              <NuxtLink
+                to="/admin"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
+              >
+                <UIcon name="heroicons:shield-check" class="w-4 h-4" />
+                {{ authStore.username || '管理' }}
               </NuxtLink>
             </template>
             <template v-else>
@@ -137,18 +137,8 @@
           <NuxtLink to="/admin" class="block px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-lg transition-all text-center shadow-md">
             管理
           </NuxtLink>
-          <!-- 移动端用户入口 -->
-          <template v-if="authStore.isAuthenticated">
-            <NuxtLink
-              to="/me"
-              class="block w-full px-4 py-2.5 text-sm font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all text-left"
-              @click="mobileMenuOpen = false"
-            >
-              <UIcon name="heroicons:shield-check" class="w-4 h-4 inline -mt-0.5" />
-              控制台
-            </NuxtLink>
-          </template>
-          <template v-else-if="tgAuthStore.isLoggedIn">
+          <!-- 移动端用户入口（TG/Token 优先于 admin） -->
+          <template v-if="tgAuthStore.isLoggedIn">
             <NuxtLink
               to="/me"
               class="block w-full px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all text-left"
@@ -166,6 +156,16 @@
             >
               <UIcon name="heroicons:key" class="w-4 h-4 inline -mt-0.5" />
               控制台
+            </NuxtLink>
+          </template>
+          <template v-else-if="authStore.isAuthenticated">
+            <NuxtLink
+              to="/admin"
+              class="block w-full px-4 py-2.5 text-sm font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all text-left"
+              @click="mobileMenuOpen = false"
+            >
+              <UIcon name="heroicons:shield-check" class="w-4 h-4 inline -mt-0.5" />
+              {{ authStore.username || '管理' }}
             </NuxtLink>
           </template>
           <template v-else>
