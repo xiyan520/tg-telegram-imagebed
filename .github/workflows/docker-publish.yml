@@ -59,9 +59,9 @@ jobs:
           fi
 
           # 分支推送：仅 release: 开头的 commit 消息触发
-          MESSAGE="${{ github.event.head_commit.message }}"
           if [[ "${{ github.event_name }}" != "workflow_dispatch" ]]; then
-            if [[ ! "$MESSAGE" =~ ^release: ]]; then
+            FIRST_LINE="$(git log -1 --pretty=%s)"
+            if [[ ! "$FIRST_LINE" =~ ^release: ]]; then
               echo "Branch push but commit message doesn't start with 'release:', skip."
               echo "skip=true" >> "$GITHUB_OUTPUT"
               echo "version=0.0.0" >> "$GITHUB_OUTPUT"
