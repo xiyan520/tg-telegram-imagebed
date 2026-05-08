@@ -12,6 +12,7 @@ import asyncio
 import io
 import os
 import queue
+import random
 import re
 import shutil
 import threading
@@ -31,6 +32,19 @@ _KURIGRAM_STREAM_CHUNK_SIZE = 1024 * 1024
 _STREAM_CHUNK_SIZE = 8192
 _KURIGRAM_CLIENT_CLASS = None
 _KURIGRAM_CLIENT_CLASS_LOCK = threading.Lock()
+
+# Telegram API 上传限流：避免并发请求触发 429 flood control
+_TG_UPLOAD_SEMAPHORE = threading.BoundedSemaphore(2)
+_TG_UPLOAD_MAX_RETRIES = 3
+_TG_UPLOAD_BASE_DELAY = 1.0
+_TG_UPLOAD_MAX_DELAY = 10.0
+
+
+def _retry_delay(attempt: int, retry_after: Optional[float] = None) -> float:
+    if retry_after is not None and retry_after > 0:
+        return retry_after + random.uniform(0, 1)
+    delay = min(_TG_UPLOAD_BASE_DELAY * (2 ** attempt), _TG_UPLOAD_MAX_DELAY)
+    return delay * random.uniform(0.8, 1.2)
 
 
 class TelegramBackend(StorageBackend):
@@ -250,68 +264,108 @@ class TelegramBackend(StorageBackend):
         file_size: int,
         caption: str,
     ) -> Optional[PutResult]:
-        """沿用现有 Bot API 上传逻辑"""
+        """Bot API 上传，带并发限流和瞬态错误重试"""
         send_as_photo = self._should_send_as_photo(content_type=content_type, file_size=file_size)
-        if send_as_photo:
-            files = {'photo': (filename, file_content, content_type)}
-            data = {'chat_id': self._chat_id, 'caption': caption or ''}
-            resp = self._session.post(
-                f"https://api.telegram.org/bot{self._bot_token}/sendPhoto",
-                files=files,
-                data=data,
-                timeout=60,
-            )
-        else:
-            files = {'document': (filename, file_content, content_type)}
-            data = {'chat_id': self._chat_id, 'caption': caption or ''}
-            resp = self._session.post(
-                f"https://api.telegram.org/bot{self._bot_token}/sendDocument",
-                files=files,
-                data=data,
-                timeout=120,
-            )
+        method = "sendPhoto" if send_as_photo else "sendDocument"
+        url = f"https://api.telegram.org/bot{self._bot_token}/{method}"
+        timeout = 60 if send_as_photo else 120
 
-        if not resp.ok:
-            logger.error(f"Telegram 上传失败: HTTP {resp.status_code}")
-            return None
-
-        payload = resp.json() or {}
-        if not payload.get('ok'):
-            logger.error(f"Telegram 上传失败: {payload.get('description')}")
-            return None
-
-        result = payload.get('result') or {}
-
-        if send_as_photo:
-            photos = result.get('photo') or []
-            if not photos:
-                logger.error("Telegram 上传失败: 无法获取 photo")
-                return None
-            file_id = photos[-1].get('file_id')
-        else:
-            doc = result.get('document') or {}
-            file_id = doc.get('file_id')
-
-        if not file_id:
-            logger.error("Telegram 上传失败: 无法获取 file_id")
-            return None
-
-        file_path = self._get_file_path(file_id) or ''
-        logger.info(f"Telegram 存储上传成功(Bot API): {file_id}")
-
-        return PutResult(
-            file_id=file_id,
-            file_path=file_path,
-            file_size=file_size,
-            storage_backend=self.name,
-            storage_key=file_id,
-            storage_meta={
-                'file_path': file_path,
-                'uploaded_at': int(time.time()),
-                'message_id': result.get('message_id'),
-                'upload_transport': 'bot_api',
-            },
+        files = (
+            {'photo': (filename, file_content, content_type)}
+            if send_as_photo
+            else {'document': (filename, file_content, content_type)}
         )
+        data = {'chat_id': self._chat_id, 'caption': caption or ''}
+
+        last_error = None
+        for attempt in range(_TG_UPLOAD_MAX_RETRIES):
+            with _TG_UPLOAD_SEMAPHORE:
+                session = requests.Session()
+                session.trust_env = True
+                if self._proxy_url:
+                    proxy = self._proxy_url
+                    if "://" not in proxy:
+                        proxy = f"http://{proxy}"
+                    session.proxies = {"http": proxy, "https": proxy}
+                try:
+                    resp = session.post(url, files=files, data=data, timeout=timeout)
+                except Exception as exc:
+                    resp = None
+                    last_error = f"{type(exc).__name__}: {exc}"
+                finally:
+                    session.close()
+
+            if resp is None:
+                # 网络层异常（超时/连接失败/DNS等），退避后重试
+                logger.error("Telegram 上传请求异常(attempt %d): %s", attempt + 1, last_error)
+                delay = _retry_delay(attempt)
+            elif resp.ok:
+                payload = resp.json() or {}
+                if payload.get('ok'):
+                    result = payload.get('result') or {}
+                    file_id = (
+                        (result.get('photo') or [{}])[-1].get('file_id')
+                        if send_as_photo
+                        else (result.get('document') or {}).get('file_id')
+                    )
+                    if file_id:
+                        file_path = self._get_file_path(file_id) or ''
+                        logger.info(
+                            "Telegram 存储上传成功(Bot API): %s (attempt %d)",
+                            file_id, attempt + 1,
+                        )
+                        return PutResult(
+                            file_id=file_id,
+                            file_path=file_path,
+                            file_size=file_size,
+                            storage_backend=self.name,
+                            storage_key=file_id,
+                            storage_meta={
+                                'file_path': file_path,
+                                'uploaded_at': int(time.time()),
+                                'message_id': result.get('message_id'),
+                                'upload_transport': 'bot_api',
+                            },
+                        )
+                    logger.error("Telegram 上传失败: 无法获取 file_id")
+                    return None
+                else:
+                    error_code = payload.get('error_code')
+                    last_error = payload.get('description', f'HTTP {resp.status_code}')
+                    logger.error("Telegram 上传失败(attempt %d): %s", attempt + 1, last_error)
+                    # 仅对 429 (rate limit) 和 5xx / 无错误码 重试
+                    if error_code and error_code < 500 and error_code != 429:
+                        return None
+                    retry_after = None
+                    if error_code == 429:
+                        params = payload.get('parameters') or {}
+                        try:
+                            retry_after = float(params.get('retry_after', 0))
+                        except (TypeError, ValueError):
+                            pass
+                    delay = _retry_delay(attempt, retry_after)
+            else:
+                last_error = f'HTTP {resp.status_code}'
+                logger.error("Telegram 上传 HTTP 错误(attempt %d): %d", attempt + 1, resp.status_code)
+                # 仅对 429 和 5xx 重试
+                if resp.status_code < 500 and resp.status_code != 429:
+                    return None
+                retry_after = None
+                if resp.status_code == 429:
+                    try:
+                        retry_after = float(resp.headers.get('Retry-After', 0))
+                    except (TypeError, ValueError):
+                        pass
+                delay = _retry_delay(attempt, retry_after)
+
+            logger.warning(
+                "Telegram 上传重试 %d/%d，等待 %.1fs",
+                attempt + 1, _TG_UPLOAD_MAX_RETRIES, delay,
+            )
+            time.sleep(delay)
+
+        logger.error("Telegram 上传最终失败: %s", last_error)
+        return None
 
     def _upload_via_kurigram(
         self,
@@ -321,7 +375,7 @@ class TelegramBackend(StorageBackend):
         file_size: int,
         caption: str,
     ) -> PutResult:
-        """通过 Kurigram 走 MTProto 上传大文件"""
+        """通过 Kurigram 走 MTProto 上传大文件（受并发限流保护）"""
 
         async def task():
             app = self._build_kurigram_client()
@@ -345,7 +399,8 @@ class TelegramBackend(StorageBackend):
                 "message_id": getattr(message, "id", None) or getattr(message, "message_id", None),
             }
 
-        upload_data = self._run_async_task(task)
+        with _TG_UPLOAD_SEMAPHORE:
+            upload_data = self._run_async_task(task)
         file_id = str(upload_data.get("file_id") or "").strip()
         if not file_id:
             raise RuntimeError("Kurigram 未返回有效 file_id")
