@@ -8,8 +8,12 @@
         </h3>
         <div class="flex items-center gap-1.5">
           <button
+            type="button"
+            aria-label="刷新画集"
+            title="刷新画集"
             class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-stone-100 dark:hover:bg-neutral-700/50 transition-all"
             :class="{ 'animate-spin': loading }"
+            :disabled="loading"
             @click="loadGalleries"
           >
             <UIcon name="heroicons:arrow-path" class="w-4 h-4" />

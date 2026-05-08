@@ -70,7 +70,7 @@ _GALLERY_LIST_SQL = '''
         )) AS cover_image,
         g.access_mode
     FROM galleries g
-    WHERE g.share_enabled = 1 AND g.access_mode != 'admin_only'
+    WHERE g.share_enabled = 1 AND g.access_mode = 'public'
     ORDER BY g.updated_at DESC
 '''
 
@@ -131,7 +131,7 @@ def gallery_site_list():
             # 统计总数
             cursor.execute('''
                 SELECT COUNT(*) FROM galleries
-                WHERE share_enabled = 1 AND access_mode != 'admin_only'
+                WHERE share_enabled = 1 AND access_mode = 'public'
             ''')
             total = cursor.fetchone()[0]
 

@@ -120,7 +120,10 @@ def admin_cdn_warm():
     encrypted_ids = data.get('encrypted_ids') or []
     all_uncached = bool(data.get('all_uncached'))
     raw_limit = data.get('limit')
-    limit = int(raw_limit) if raw_limit is not None else 200
+    try:
+        limit = int(raw_limit) if raw_limit is not None else 200
+    except (TypeError, ValueError):
+        limit = 200
     if limit <= 0:
         limit = 200
     since_seconds = int(data.get('since_seconds') or 86400)

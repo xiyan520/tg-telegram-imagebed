@@ -71,16 +71,24 @@ def _get_effective_cdn_settings():
 
     with _cdn_settings_lock:
         # 双重检查：可能在等待锁期间另一线程已完成刷新
-        if now > _CDN_SETTINGS_CACHE["ts"]:
-            _CDN_SETTINGS_CACHE.update({
-                "ts": now,
-                "cdn_enabled": cdn_enabled,
-                "monitor_enabled": monitor_enabled,
-                "cdn_domain": cdn_domain,
-                "api_token": api_token,
-                "zone_id": zone_id,
-                "cache_warming_enabled": cache_warming_enabled,
-            })
+        if now <= _CDN_SETTINGS_CACHE["ts"]:
+            return (
+                _CDN_SETTINGS_CACHE["cdn_enabled"],
+                _CDN_SETTINGS_CACHE["monitor_enabled"],
+                _CDN_SETTINGS_CACHE["cdn_domain"],
+                _CDN_SETTINGS_CACHE["api_token"],
+                _CDN_SETTINGS_CACHE["zone_id"],
+                _CDN_SETTINGS_CACHE["cache_warming_enabled"],
+            )
+        _CDN_SETTINGS_CACHE.update({
+            "ts": now,
+            "cdn_enabled": cdn_enabled,
+            "monitor_enabled": monitor_enabled,
+            "cdn_domain": cdn_domain,
+            "api_token": api_token,
+            "zone_id": zone_id,
+            "cache_warming_enabled": cache_warming_enabled,
+        })
     return cdn_enabled, monitor_enabled, cdn_domain, api_token, zone_id, cache_warming_enabled
 
 

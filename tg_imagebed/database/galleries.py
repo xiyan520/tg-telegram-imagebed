@@ -50,7 +50,7 @@ def get_gallery(gallery_id: int, owner_token: Optional[str] = None) -> Optional[
             cursor = conn.cursor()
             if owner_token:
                 cursor.execute('''SELECT * FROM galleries WHERE id = ?
-                    AND (owner_token = ? OR (owner_type = 'admin' AND access_mode != 'admin_only'))''',
+                    AND (owner_token = ? OR (owner_type = 'admin' AND access_mode = 'public'))''',
                     (gallery_id, owner_token))
             else:
                 cursor.execute('SELECT * FROM galleries WHERE id = ?', (gallery_id,))
@@ -74,7 +74,7 @@ def list_galleries(owner_token: str, page: int = 1, limit: int = 50) -> Dict[str
             # 用户自有画集 + 管理员创建的公开画集（排除 admin_only）
             cursor.execute('''
                 SELECT COUNT(*) FROM galleries
-                WHERE owner_token = ? OR (owner_type = 'admin' AND access_mode != 'admin_only')
+                WHERE owner_token = ? OR (owner_type = 'admin' AND access_mode = 'public')
             ''', (owner_token,))
             total = cursor.fetchone()[0]
             offset = (page - 1) * limit
@@ -89,7 +89,7 @@ def list_galleries(owner_token: str, page: int = 1, limit: int = 50) -> Dict[str
                         WHERE gi2.gallery_id = g.id ORDER BY gi2.added_at ASC LIMIT 1
                     )) AS resolved_cover_image
                 FROM galleries g
-                WHERE g.owner_token = ? OR (g.owner_type = 'admin' AND g.access_mode != 'admin_only')
+                WHERE g.owner_token = ? OR (g.owner_type = 'admin' AND g.access_mode = 'public')
                 ORDER BY g.owner_type = 'admin' ASC, g.updated_at DESC
                 LIMIT ? OFFSET ?
             ''', (owner_token, limit, offset))
@@ -300,7 +300,7 @@ def get_gallery_images(gallery_id: int, owner_token: Optional[str] = None, page:
             cursor = conn.cursor()
             if owner_token:
                 cursor.execute('''SELECT id FROM galleries WHERE id = ?
-                    AND (owner_token = ? OR (owner_type = 'admin' AND access_mode != 'admin_only'))''',
+                    AND (owner_token = ? OR (owner_type = 'admin' AND access_mode = 'public'))''',
                     (gallery_id, owner_token))
             else:
                 cursor.execute('''
@@ -460,7 +460,7 @@ def get_share_all_galleries(share_token: str, page: int = 1, limit: int = 50) ->
                        )) AS cover_image
                 FROM galleries g
                 WHERE g.hide_from_share_all = 0
-                AND g.access_mode != 'admin_only'
+                AND g.access_mode = 'public'
                 ORDER BY g.updated_at DESC
                 LIMIT ? OFFSET ?
             ''', (limit, offset))
@@ -469,7 +469,7 @@ def get_share_all_galleries(share_token: str, page: int = 1, limit: int = 50) ->
             # 获取总数
             cursor.execute('''
                 SELECT COUNT(*) FROM galleries
-                WHERE hide_from_share_all = 0 AND access_mode != 'admin_only'
+                WHERE hide_from_share_all = 0 AND access_mode = 'public'
             ''')
             total = cursor.fetchone()[0]
 
@@ -512,7 +512,7 @@ def get_share_all_gallery(share_token: str, gallery_id: int) -> Optional[Dict[st
                 FROM galleries g
                 WHERE g.id = ?
                   AND g.hide_from_share_all = 0
-                  AND g.access_mode != 'admin_only'
+                  AND g.access_mode = 'public'
                 LIMIT 1
             ''', (gallery_id,))
             row = cursor.fetchone()
@@ -542,7 +542,7 @@ def get_share_all_gallery_images(
                 SELECT 1 FROM galleries
                 WHERE id = ?
                   AND hide_from_share_all = 0
-                  AND access_mode != 'admin_only'
+                  AND access_mode = 'public'
                 LIMIT 1
             ''', (gallery_id,))
             if not cursor.fetchone():

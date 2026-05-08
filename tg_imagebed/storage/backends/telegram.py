@@ -39,6 +39,19 @@ _TG_UPLOAD_MAX_RETRIES = 3
 _TG_UPLOAD_BASE_DELAY = 1.0
 _TG_UPLOAD_MAX_DELAY = 10.0
 
+# 上传幂等缓存：fingerprint → file_id，避免超时重试产生重复消息
+_TG_IDEMPOTENCY_CACHE: Dict[str, str] = {}
+_TG_IDEMPOTENCY_LOCK = threading.Lock()
+
+
+def _upload_fingerprint(file_content: bytes, chat_id: int, send_as_photo: bool) -> str:
+    """计算上传请求的幂等指纹"""
+    import hashlib
+    h = hashlib.sha256(file_content)
+    h.update(str(chat_id).encode())
+    h.update(b"photo" if send_as_photo else b"document")
+    return h.hexdigest()
+
 
 def _retry_delay(attempt: int, retry_after: Optional[float] = None) -> float:
     if retry_after is not None and retry_after > 0:
@@ -264,7 +277,7 @@ class TelegramBackend(StorageBackend):
         file_size: int,
         caption: str,
     ) -> Optional[PutResult]:
-        """Bot API 上传，带并发限流和瞬态错误重试"""
+        """Bot API 上传，带并发限流、幂等保护和瞬态错误重试"""
         send_as_photo = self._should_send_as_photo(content_type=content_type, file_size=file_size)
         method = "sendPhoto" if send_as_photo else "sendDocument"
         url = f"https://api.telegram.org/bot{self._bot_token}/{method}"
@@ -276,6 +289,27 @@ class TelegramBackend(StorageBackend):
             else {'document': (filename, file_content, content_type)}
         )
         data = {'chat_id': self._chat_id, 'caption': caption or ''}
+
+        # 幂等指纹：避免超时重试产生重复消息
+        fingerprint = _upload_fingerprint(file_content, self._chat_id, send_as_photo)
+        with _TG_IDEMPOTENCY_LOCK:
+            cached_file_id = _TG_IDEMPOTENCY_CACHE.get(fingerprint)
+        if cached_file_id:
+            logger.info("Telegram 上传命中幂等缓存: %s", cached_file_id)
+            file_path = self._get_file_path(cached_file_id) or ''
+            return PutResult(
+                file_id=cached_file_id,
+                file_path=file_path,
+                file_size=file_size,
+                storage_backend=self.name,
+                storage_key=cached_file_id,
+                storage_meta={
+                    'file_path': file_path,
+                    'uploaded_at': int(time.time()),
+                    'upload_transport': 'bot_api',
+                    'idempotency_hit': True,
+                },
+            )
 
         last_error = None
         for attempt in range(_TG_UPLOAD_MAX_RETRIES):
@@ -296,8 +330,26 @@ class TelegramBackend(StorageBackend):
                     session.close()
 
             if resp is None:
-                # 网络层异常（超时/连接失败/DNS等），退避后重试
+                # 网络层异常（超时/连接失败/DNS等）：先查幂等缓存，再决定是否重试
                 logger.error("Telegram 上传请求异常(attempt %d): %s", attempt + 1, last_error)
+                with _TG_IDEMPOTENCY_LOCK:
+                    cached = _TG_IDEMPOTENCY_CACHE.get(fingerprint)
+                if cached:
+                    logger.info("Telegram 上传超时但幂等缓存命中: %s", cached)
+                    file_path = self._get_file_path(cached) or ''
+                    return PutResult(
+                        file_id=cached,
+                        file_path=file_path,
+                        file_size=file_size,
+                        storage_backend=self.name,
+                        storage_key=cached,
+                        storage_meta={
+                            'file_path': file_path,
+                            'uploaded_at': int(time.time()),
+                            'upload_transport': 'bot_api',
+                            'idempotency_hit': True,
+                        },
+                    )
                 delay = _retry_delay(attempt)
             elif resp.ok:
                 payload = resp.json() or {}
@@ -309,6 +361,9 @@ class TelegramBackend(StorageBackend):
                         else (result.get('document') or {}).get('file_id')
                     )
                     if file_id:
+                        # 存入幂等缓存，避免超时重试重复上传
+                        with _TG_IDEMPOTENCY_LOCK:
+                            _TG_IDEMPOTENCY_CACHE[fingerprint] = file_id
                         file_path = self._get_file_path(file_id) or ''
                         logger.info(
                             "Telegram 存储上传成功(Bot API): %s (attempt %d)",

@@ -169,7 +169,10 @@ def admin_token_detail_api(token_id: int):
             raw_limit = payload['upload_limit']
             if raw_limit is not None and raw_limit != '' and str(raw_limit).lower() != 'nan':
                 try:
-                    update_kwargs['upload_limit'] = int(raw_limit)
+                    parsed_limit = int(raw_limit)
+                    if parsed_limit < 0:
+                        return _admin_json({'success': False, 'error': 'upload_limit 不能为负数'}, 400)
+                    update_kwargs['upload_limit'] = parsed_limit
                 except (ValueError, TypeError):
                     update_kwargs['upload_limit'] = None
             else:

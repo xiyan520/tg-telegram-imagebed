@@ -466,12 +466,21 @@ def get_totp_secret() -> str:
 
 
 def enable_totp(secret: str) -> None:
-    """启用 TOTP 并存储密钥"""
-    update_system_setting('totp_secret', secret)
-    update_system_setting('totp_enabled', '1')
+    """启用 TOTP 并存储密钥（原子写入）"""
+    secret = (secret or '').strip()
+    if not secret:
+        raise ValueError("totp_secret cannot be empty")
+    if not update_system_settings({
+        'totp_secret': secret,
+        'totp_enabled': '1',
+    }):
+        raise RuntimeError("failed to enable totp")
 
 
 def disable_totp() -> None:
-    """禁用 TOTP 并清除密钥"""
-    update_system_setting('totp_secret', '')
-    update_system_setting('totp_enabled', '0')
+    """禁用 TOTP 并清除密钥（原子写入）"""
+    if not update_system_settings({
+        'totp_secret': '',
+        'totp_enabled': '0',
+    }):
+        raise RuntimeError("failed to disable totp")
