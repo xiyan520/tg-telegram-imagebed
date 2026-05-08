@@ -87,6 +87,7 @@ _totp_verify_tokens: dict[str, dict] = {}
 _totp_verify_tokens_lock = threading.Lock()
 
 _TOTP_VERIFY_TOKEN_EXPIRE_SECONDS = 60  # 验证 token 有效期 60 秒
+_TOTP_MAX_ATTEMPTS = 3  # 单个 token 最多 TOTP 验证尝试次数
 
 
 def _cleanup_totp_verify_tokens():
@@ -844,8 +845,6 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
         # 验证用户名和密码
         if verify_admin_password(username, password):
-            _record_login_success(ip)
-
             # 检查是否启用了 TOTP 二次验证
             from .database.settings import is_totp_enabled, get_totp_secret
             if is_totp_enabled() and get_totp_secret():
@@ -859,6 +858,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                         'ip': ip,
                         'remember_me': remember_me,
                         'used': False,
+                        'attempts': 0,
                     }
                 logger.info(f"管理员密码验证通过，等待 TOTP 二次验证: {username}")
                 return jsonify({
@@ -868,6 +868,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                 })
 
             # TOTP 未启用，直接设置 session
+            _record_login_success(ip)
             session['admin_logged_in'] = True
             session['admin_username'] = username
             session['_remember_me'] = remember_me
@@ -949,18 +950,20 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         from .database.settings import get_totp_secret
         totp_secret = get_totp_secret()
         if not _verify_totp_code(totp_secret, code):
-            # TOTP 码错误，清除 used 标记允许重试
+            _log_security_event('login_failed', ip, username, detail='totp_code_invalid')
             with _totp_verify_tokens_lock:
                 tok = _totp_verify_tokens.get(verification_token)
                 if tok:
-                    tok['used'] = False
-            _log_security_event('login_failed', ip, username, detail='totp_code_invalid')
+                    tok['attempts'] = tok.get('attempts', 0) + 1
+                    if tok['attempts'] >= _TOTP_MAX_ATTEMPTS:
+                        del _totp_verify_tokens[verification_token]
             logger.warning(f"TOTP 验证失败: {username}")
             return jsonify({'success': False, 'message': '验证码错误'}), 401
 
-        # TOTP 验证成功，清除 token
+        # TOTP 验证成功，清除 token 并记录登录成功
         with _totp_verify_tokens_lock:
             _totp_verify_tokens.pop(verification_token, None)
+        _record_login_success(ip)
 
         # 设置 session
         session['admin_logged_in'] = True
@@ -2074,6 +2077,9 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
         response = make_response(buf.getvalue())
         response.headers.set('Content-Type', 'image/png')
+        response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private')
+        response.headers.set('Pragma', 'no-cache')
+        response.headers.set('Expires', '0')
         return response
 
     logger.info("管理员路由注册完成")

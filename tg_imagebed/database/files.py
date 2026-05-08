@@ -103,9 +103,11 @@ def save_file_info(
                 (reservation_key,)
             )
             reservation_row = cursor.fetchone()
-            if reservation_row:
-                auth_token = reservation_row['auth_token']
-                if auth_token:
+            if not reservation_row:
+                raise ValueError('upload reservation is missing or already consumed')
+
+            auth_token = reservation_row['auth_token']
+            if auth_token:
                     cursor.execute(
                         '''
                         UPDATE auth_tokens

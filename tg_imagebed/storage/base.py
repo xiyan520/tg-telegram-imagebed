@@ -79,19 +79,22 @@ class StorageBackend(abc.ABC):
         username: str,
     ) -> Optional[PutResult]:
         """
-        浠庢湰鍦版殏瀛樻枃浠朵笂浼狅紝榛樿鍥為€€鍒?put_bytes銆?
-        鍚庣鍙互瑕嗙洊姝ゆ柟娉曚互閬垮厤灏嗘暣涓枃浠跺姞杞藉埌鍐呭瓨銆?
+        从本地暂存文件上传，默认回退到 put_bytes。
+        后端可以覆盖此方法以避免将整个文件加载到内存。
         """
-        with open(file_path, 'rb') as handle:
-            return self.put_bytes(
-                file_content=handle.read(),
-                filename=filename,
-                content_type=content_type,
-                file_size=file_size,
-                caption=caption,
-                source=source,
-                username=username,
-            )
+        try:
+            with open(file_path, 'rb') as handle:
+                return self.put_bytes(
+                    file_content=handle.read(),
+                    filename=filename,
+                    content_type=content_type,
+                    file_size=file_size,
+                    caption=caption,
+                    source=source,
+                    username=username,
+                )
+        except (FileNotFoundError, PermissionError, OSError):
+            return None
 
     @abc.abstractmethod
     def download(

@@ -183,6 +183,8 @@ def create_auth_token_with_ip_limit(
         logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")
         return token, None
 
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"创建auth_token失败: {e}")
         return None, 'error'
@@ -226,18 +228,18 @@ def reserve_token_upload(token: str, *, daily_limit: int = 0) -> Dict[str, Any]:
                 '''
                 SELECT COUNT(*)
                 FROM upload_reservations
-                WHERE auth_token = ? AND created_day = date('now', 'localtime')
+                WHERE auth_token = ?
                 ''',
                 (token,)
             )
-            reserved_slots = int((cursor.fetchone() or (0,))[0] or 0)
+            reserved_total = int((cursor.fetchone() or (0,))[0] or 0)
 
             upload_count = int(token_data.get('upload_count') or 0)
             upload_limit = token_data.get('upload_limit')
             unlimited = upload_limit in (None, 0)
             if not unlimited:
                 upload_limit_int = int(upload_limit)
-                remaining_before = upload_limit_int - upload_count - reserved_slots
+                remaining_before = upload_limit_int - upload_count - reserved_total
                 if remaining_before <= 0:
                     return {'ok': False, 'reason': f'已达到上传限制 {upload_limit} 次'}
             else:
@@ -247,13 +249,22 @@ def reserve_token_upload(token: str, *, daily_limit: int = 0) -> Dict[str, Any]:
                 cursor.execute(
                     '''
                     SELECT COUNT(*)
+                    FROM upload_reservations
+                    WHERE auth_token = ? AND created_day = date('now', 'localtime')
+                    ''',
+                    (token,)
+                )
+                reserved_today = int((cursor.fetchone() or (0,))[0] or 0)
+                cursor.execute(
+                    '''
+                    SELECT COUNT(*)
                     FROM file_storage
                     WHERE auth_token = ? AND date(created_at) = date('now', 'localtime')
                     ''',
                     (token,)
                 )
                 uploaded_today = int((cursor.fetchone() or (0,))[0] or 0)
-                if uploaded_today + reserved_slots >= int(daily_limit):
+                if uploaded_today + reserved_today >= int(daily_limit):
                     return {'ok': False, 'reason': f'已达到每日上传限制 {daily_limit} 次', 'status': 429}
 
             reservation_key = secrets.token_urlsafe(24)
@@ -265,7 +276,7 @@ def reserve_token_upload(token: str, *, daily_limit: int = 0) -> Dict[str, Any]:
                 (reservation_key, token)
             )
 
-            remaining_after = -1 if unlimited else max(0, upload_limit_int - upload_count - reserved_slots - 1)
+            remaining_after = -1 if unlimited else max(0, upload_limit_int - upload_count - reserved_total - 1)
             return {
                 'ok': True,
                 'reservation_key': reservation_key,

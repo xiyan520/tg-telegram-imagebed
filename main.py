@@ -185,9 +185,21 @@ def create_app() -> Flask:
         except Exception:
             return 100
 
+    # 缓存上传限制，避免每次请求都查DB（1秒TTL）
+    _request_limit_cache = {'ts': 0.0, 'max_mb': 100}
+
+    def _get_max_upload_mb_cached() -> int:
+        now = time.time()
+        if now - _request_limit_cache['ts'] < 1.0:
+            return _request_limit_cache['max_mb']
+        max_mb = _get_max_upload_mb()
+        _request_limit_cache['ts'] = now
+        _request_limit_cache['max_mb'] = max_mb
+        return max_mb
+
     def _apply_request_limit() -> int:
         """将数据库中的上传限制同步到 Flask 请求体限制"""
-        max_mb = _get_max_upload_mb()
+        max_mb = _get_max_upload_mb_cached()
         app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
         return max_mb
 
@@ -196,12 +208,10 @@ def create_app() -> Flask:
     @app.before_request
     def refresh_request_size_limit():
         """
-        每次请求前同步上传限制。
-
-        不然管理员在后台把 max_file_size_mb 调大以后，当前进程还是抱着启动时
-        的旧值不撒手，上传直接 413。
+        仅上传类请求刷新上传大小限制，避免普通 GET/HEAD 请求产生不必要的 DB 查询。
         """
-        _apply_request_limit()
+        if request.method in ('POST', 'PUT', 'PATCH'):
+            _apply_request_limit()
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_entity_too_large(error):

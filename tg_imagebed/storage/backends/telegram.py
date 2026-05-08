@@ -40,14 +40,26 @@ _TG_UPLOAD_BASE_DELAY = 1.0
 _TG_UPLOAD_MAX_DELAY = 10.0
 
 # 上传幂等缓存：fingerprint → file_id，避免超时重试产生重复消息
-_TG_IDEMPOTENCY_CACHE: Dict[str, str] = {}
+_TG_IDEMPOTENCY_CACHE: Dict[str, tuple[str, float]] = {}
+_TG_IDEMPOTENCY_CACHE_TTL = 3600  # 缓存条目最长保留 1 小时
 _TG_IDEMPOTENCY_LOCK = threading.Lock()
 
 
 def _upload_fingerprint(file_content: bytes, chat_id: int, send_as_photo: bool) -> str:
-    """计算上传请求的幂等指纹"""
+    """计算上传请求的幂等指纹（基于内容）"""
     import hashlib
     h = hashlib.sha256(file_content)
+    h.update(str(chat_id).encode())
+    h.update(b"photo" if send_as_photo else b"document")
+    return h.hexdigest()
+
+
+def _upload_fingerprint_from_file(file_path: str, chat_id: int, send_as_photo: bool) -> str:
+    """计算上传请求的幂等指纹（基于文件路径+大小，用于流式上传避免全读）"""
+    import hashlib
+    h = hashlib.sha256()
+    h.update(file_path.encode())
+    h.update(str(os.path.getsize(file_path)).encode())
     h.update(str(chat_id).encode())
     h.update(b"photo" if send_as_photo else b"document")
     return h.hexdigest()
@@ -271,7 +283,9 @@ class TelegramBackend(StorageBackend):
     def _upload_via_bot_api(
         self,
         *,
-        file_content: bytes,
+        file_content: Optional[bytes] = None,
+        file_handle=None,
+        file_handle_path: str = '',
         filename: str,
         content_type: str,
         file_size: int,
@@ -283,17 +297,32 @@ class TelegramBackend(StorageBackend):
         url = f"https://api.telegram.org/bot{self._bot_token}/{method}"
         timeout = 60 if send_as_photo else 120
 
-        files = (
-            {'photo': (filename, file_content, content_type)}
-            if send_as_photo
-            else {'document': (filename, file_content, content_type)}
-        )
-        data = {'chat_id': self._chat_id, 'caption': caption or ''}
+        if file_handle is not None:
+            # 流式上传：直接传递文件句柄给 requests，避免全部加载到内存
+            files = (
+                {'photo': (filename, file_handle, content_type)}
+                if send_as_photo
+                else {'document': (filename, file_handle, content_type)}
+            )
+            fingerprint = _upload_fingerprint_from_file(file_handle_path, self._chat_id, send_as_photo)
+        elif file_content is not None:
+            files = (
+                {'photo': (filename, file_content, content_type)}
+                if send_as_photo
+                else {'document': (filename, file_content, content_type)}
+            )
+            fingerprint = _upload_fingerprint(file_content, self._chat_id, send_as_photo)
+        else:
+            logger.error("Telegram 上传缺少文件内容")
+            return None
 
-        # 幂等指纹：避免超时重试产生重复消息
-        fingerprint = _upload_fingerprint(file_content, self._chat_id, send_as_photo)
+        data = {'chat_id': self._chat_id, 'caption': caption or ''}
         with _TG_IDEMPOTENCY_LOCK:
-            cached_file_id = _TG_IDEMPOTENCY_CACHE.get(fingerprint)
+            cached = _TG_IDEMPOTENCY_CACHE.get(fingerprint)
+            if cached and time.time() - cached[1] > _TG_IDEMPOTENCY_CACHE_TTL:
+                del _TG_IDEMPOTENCY_CACHE[fingerprint]
+                cached = None
+            cached_file_id = cached[0] if cached else None
         if cached_file_id:
             logger.info("Telegram 上传命中幂等缓存: %s", cached_file_id)
             file_path = self._get_file_path(cached_file_id) or ''
@@ -334,15 +363,19 @@ class TelegramBackend(StorageBackend):
                 logger.error("Telegram 上传请求异常(attempt %d): %s", attempt + 1, last_error)
                 with _TG_IDEMPOTENCY_LOCK:
                     cached = _TG_IDEMPOTENCY_CACHE.get(fingerprint)
+                    if cached and time.time() - cached[1] > _TG_IDEMPOTENCY_CACHE_TTL:
+                        del _TG_IDEMPOTENCY_CACHE[fingerprint]
+                        cached = None
                 if cached:
-                    logger.info("Telegram 上传超时但幂等缓存命中: %s", cached)
-                    file_path = self._get_file_path(cached) or ''
+                    cached_id = cached[0]
+                    logger.info("Telegram 上传超时但幂等缓存命中: %s", cached_id)
+                    file_path = self._get_file_path(cached_id) or ''
                     return PutResult(
-                        file_id=cached,
+                        file_id=cached_id,
                         file_path=file_path,
                         file_size=file_size,
                         storage_backend=self.name,
-                        storage_key=cached,
+                        storage_key=cached_id,
                         storage_meta={
                             'file_path': file_path,
                             'uploaded_at': int(time.time()),
@@ -361,9 +394,9 @@ class TelegramBackend(StorageBackend):
                         else (result.get('document') or {}).get('file_id')
                     )
                     if file_id:
-                        # 存入幂等缓存，避免超时重试重复上传
+                        # 存入幂等缓存（含时间戳），避免超时重试重复上传
                         with _TG_IDEMPOTENCY_LOCK:
-                            _TG_IDEMPOTENCY_CACHE[fingerprint] = file_id
+                            _TG_IDEMPOTENCY_CACHE[fingerprint] = (file_id, time.time())
                         file_path = self._get_file_path(file_id) or ''
                         logger.info(
                             "Telegram 存储上传成功(Bot API): %s (attempt %d)",
@@ -792,27 +825,50 @@ class TelegramBackend(StorageBackend):
         source: str,
         username: str,
     ) -> Optional[PutResult]:
-        """上传本地文件到 Telegram"""
+        """上传本地文件到 Telegram（流式读取，避免大文件全部加载到内存）"""
         if not self._bot_token or not self._chat_id:
             logger.error("Telegram 存储后端未配置 bot_token 或 chat_id")
             return None
 
         try:
-            with open(file_path, "rb") as handle:
-                file_content = handle.read()
-        except Exception as exc:
-            logger.error(f"读取本地文件失败: {exc}")
-            return None
+            # Kurigram 大文件通道需要完整内容，先走 Bot API 流式上传
+            if self._should_use_kurigram_upload(file_size):
+                try:
+                    with open(file_path, "rb") as handle:
+                        file_content = handle.read()
+                except (FileNotFoundError, PermissionError, OSError) as exc:
+                    logger.error(f"读取本地文件失败: {exc}")
+                    return None
+                try:
+                    return self._upload_via_kurigram(
+                        file_content=file_content,
+                        filename=filename,
+                        file_size=file_size,
+                        caption=caption,
+                    )
+                except Exception as e:
+                    logger.warning(f"Kurigram 上传失败，回退 Bot API: {type(e).__name__}: {e}")
 
-        return self.put_bytes(
-            file_content=file_content,
-            filename=filename,
-            content_type=content_type,
-            file_size=file_size,
-            caption=caption,
-            source=source,
-            username=username,
-        )
+            # Bot API：传递文件句柄，避免大文件全部加载到内存
+            try:
+                handle = open(file_path, "rb")
+            except (FileNotFoundError, PermissionError, OSError) as exc:
+                logger.error(f"读取本地文件失败: {exc}")
+                return None
+            try:
+                return self._upload_via_bot_api(
+                    file_handle=handle,
+                    file_handle_path=file_path,
+                    filename=filename,
+                    content_type=content_type,
+                    file_size=file_size,
+                    caption=caption,
+                )
+            finally:
+                handle.close()
+        except Exception as e:
+            logger.error(f"Telegram 存储上传异常: {e}")
+            return None
 
     def download(
         self,

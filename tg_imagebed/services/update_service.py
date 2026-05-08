@@ -32,6 +32,7 @@ from ..config import BASE_DIR, logger
 from ..database import get_system_setting, update_system_settings
 
 DEFAULT_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
+_ALLOWED_RELEASE_REPOS = {DEFAULT_RELEASE_REPO}
 DEFAULT_ASSET_NAME = 'tg-imagebed-release.zip'
 DEFAULT_SHA_NAME = 'tg-imagebed-release.zip.sha256'
 
@@ -467,7 +468,11 @@ def check_for_updates() -> Dict[str, Any]:
     if info['update_source'] != 'release':
         raise RuntimeError('当前环境仅支持 Release 更新模式')
 
-    release = _fetch_latest_release(info['release_repo'])
+    release_repo = info['release_repo']
+    if release_repo not in _ALLOWED_RELEASE_REPOS:
+        raise RuntimeError(f'不允许的更新仓库: {release_repo}，仅支持官方仓库')
+
+    release = _fetch_latest_release(release_repo)
     assets = release['assets']
     asset_name = info['release_asset_name']
     sha_name = info['release_sha_name']

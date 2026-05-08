@@ -168,22 +168,26 @@ class S3Backend(StorageBackend):
         source: str,
         username: str,
     ) -> Optional[PutResult]:
-        """浠庢湰鍦版殏瀛樻枃浠朵笂浼犲埌 S3锛岄伩鍏嶅ぇ鏂囦欢鍏ㄩ儴鍔犺浇鍒板唴瀛?"""
+        """从本地暂存文件上传到 S3，避免大文件全部加载到内存"""
         if not HAS_BOTO3 or not self._client:
-            logger.error("S3 瀹㈡埛绔笉鍙敤")
+            logger.error("S3 客户端不可用")
             return None
 
         try:
             key = self._generate_key(filename)
-            with open(file_path, 'rb') as handle:
-                self._client.upload_fileobj(
-                    handle,
-                    self._bucket,
-                    key,
-                    ExtraArgs={'ContentType': content_type},
-                )
+            try:
+                with open(file_path, 'rb') as handle:
+                    self._client.upload_fileobj(
+                        handle,
+                        self._bucket,
+                        key,
+                        ExtraArgs={'ContentType': content_type},
+                    )
+            except (FileNotFoundError, PermissionError, OSError) as e:
+                logger.error(f"S3 上传本地文件读取失败: {e}")
+                return None
 
-            logger.info(f"S3 瀛樺偍涓婁紶鎴愬姛: {key}")
+            logger.info(f"S3 存储上传成功: {key}")
             return PutResult(
                 file_id=key,
                 file_path=key,
@@ -198,7 +202,7 @@ class S3Backend(StorageBackend):
                 },
             )
         except Exception as e:
-            logger.error(f"S3 瀛樺偍涓婁紶澶辫触: {e}")
+            logger.error(f"S3 存储上传失败: {e}")
             return None
 
     def download(

@@ -642,7 +642,7 @@ def gallery_admin_settings():
             if key in data:
                 raw = data[key]
                 if key == 'gallery_site_enabled':
-                    value = '1' if raw == '1' or raw is True else '0'
+                    value = '1' if raw in (True, 1, '1') else '0'
                 elif key == 'gallery_site_images_per_page':
                     try:
                         value = str(max(1, min(100, int(raw))))

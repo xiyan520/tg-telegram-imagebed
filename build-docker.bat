@@ -44,7 +44,7 @@ if defined GIT_BASH (
     )
     pushd "%SCRIPT_DIR%"
     call "%GIT_BASH%" -lc "./build-docker.sh"
-    set "RUN_EXIT=%ERRORLEVEL%"
+    set "RUN_EXIT=!ERRORLEVEL!"
     popd
     if not "!RUN_EXIT!"=="0" goto :runner_fail
     goto :success

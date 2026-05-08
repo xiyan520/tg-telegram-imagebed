@@ -119,6 +119,7 @@ def admin_cdn_warm():
     data = request.get_json() or {}
     encrypted_ids = data.get('encrypted_ids') or []
     all_uncached = bool(data.get('all_uncached'))
+    MAX_WARM_LIMIT = 1000
     raw_limit = data.get('limit')
     try:
         limit = int(raw_limit) if raw_limit is not None else 200
@@ -126,6 +127,7 @@ def admin_cdn_warm():
         limit = 200
     if limit <= 0:
         limit = 200
+    limit = min(limit, MAX_WARM_LIMIT)
     since_seconds = int(data.get('since_seconds') or 86400)
 
     if all_uncached:
