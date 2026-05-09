@@ -230,7 +230,6 @@ def admin_system_settings():
 
             settings_to_update = {}
             errors = []
-            svg_warning = ''
 
             # 游客上传策略
             if 'guest_upload_policy' in data:
@@ -675,7 +674,6 @@ def admin_system_settings():
                     settings_to_update['app_update_branch'] = branch
 
             # 允许的文件后缀
-            svg_warning = ''
             if 'allowed_extensions' in data:
                 raw_exts = str(data.get('allowed_extensions') or '').strip()
                 if raw_exts:
@@ -684,9 +682,9 @@ def admin_system_settings():
                     invalid_exts = [e for e in ext_list if not re.match(r'^[a-zA-Z0-9]+$', e)]
                     if invalid_exts:
                         errors.append(f'文件后缀格式无效: {", ".join(invalid_exts)}')
+                    elif 'svg' in ext_list:
+                        errors.append('不支持 SVG 上传，存在 XSS 安全风险')
                     else:
-                        if 'svg' in ext_list:
-                            svg_warning = '已启用 SVG 上传，请注意 SVG 文件存在 XSS 安全风险'
                         # 去重、排序、小写化
                         unique_exts = sorted(set(ext_list))
                         settings_to_update['allowed_extensions'] = ','.join(unique_exts)
@@ -746,8 +744,6 @@ def admin_system_settings():
                     disabled_count = disable_all_tokens()
 
             msg = '设置已更新'
-            if svg_warning:
-                msg = f'{msg}。⚠️ {svg_warning}'
 
             response = jsonify({
                 'success': True,
@@ -775,6 +771,10 @@ def admin_revoke_tokens():
     try:
         data = request.get_json() or {}
         revoke_type = data.get('type', 'guest')
+
+        if revoke_type not in ('guest', 'all'):
+            response = jsonify({'success': False, 'error': '无效的禁用类型，仅支持 guest 或 all'})
+            return _set_admin_cors_headers(response), 400
 
         if revoke_type == 'all':
             count = disable_all_tokens()

@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any
 import requests
 
 from ..config import logger
-from ..database import save_file_info, get_file_info, update_file_path_in_db
+from ..database import save_file_info, get_file_info, update_file_path_in_db, release_upload_reservation
 from ..utils import sign_file_id, get_mime_type
 from .cdn_service import add_to_cdn_monitor
 from ..storage.router import get_storage_router
@@ -212,6 +212,8 @@ def process_upload(
         save_file_info(encrypted_id, file_data, reservation_key=reservation_key)
     except Exception:
         logger.exception(f"保存文件信息失败，尝试回滚已存储的对象: {encrypted_id}")
+        if reservation_key:
+            release_upload_reservation(reservation_key)
         try:
             backend.delete(put_result.storage_key)
         except Exception:

@@ -183,7 +183,7 @@ def create_app() -> Flask:
         try:
             return get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
         except Exception:
-            return 100
+            return _request_limit_cache.get('max_mb', 100)
 
     # 缓存上传限制，避免每次请求都查DB（1秒TTL）
     _request_limit_cache = {'ts': 0.0, 'max_mb': 100}

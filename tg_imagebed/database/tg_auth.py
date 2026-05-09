@@ -550,6 +550,7 @@ def bind_token_to_user_with_limit(token: str, tg_user_id: int, max_tokens: int) 
     """原子操作：检查配额 + 绑定已有 Token 到 TG 用户"""
     try:
         with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
             cursor = conn.cursor()
             cursor.execute(
                 f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',
@@ -626,6 +627,7 @@ def create_and_bind_tg_token(
         expires_at = datetime.now() + timedelta(days=expires_days)
 
         with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
             cursor = conn.cursor()
             cursor.execute(
                 f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',

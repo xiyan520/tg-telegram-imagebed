@@ -19,7 +19,7 @@ from .. import admin_module
 from .upload import validate_upload_file
 
 # 敏感字段列表（需要掩码）
-_SENSITIVE_FIELDS = {'bot_token', 'api_hash', 'secret_key', 'access_key'}
+_SENSITIVE_FIELDS = {'bot_token', 'api_id', 'api_hash', 'secret_key', 'access_key'}
 _MASKED_VALUE = '__MASKED__'
 # 允许的驱动类型
 _ALLOWED_DRIVERS = {'telegram', 'local', 's3', 'rclone'}
@@ -350,6 +350,8 @@ def add_storage_backend():
             'data': {'name': name, 'config': _mask_sensitive(backend_config)}
         })
 
+    except ValueError as e:
+        return _admin_json({'success': False, 'error': str(e)}, 400)
     except Exception as e:
         logger.error(f"添加存储后端失败: {e}")
         return _admin_json({'success': False, 'error': '添加存储后端失败'}, 500)
@@ -429,6 +431,8 @@ def modify_storage_backend(name: str):
             'data': {'name': name, 'config': _mask_sensitive(merged_config)}
         })
 
+    except ValueError as e:
+        return _admin_json({'success': False, 'error': str(e)}, 400)
     except Exception as e:
         logger.error(f"修改存储后端失败: {e}")
         return _admin_json({'success': False, 'error': '修改存储后端失败'}, 500)

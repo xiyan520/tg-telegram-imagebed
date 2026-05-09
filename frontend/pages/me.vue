@@ -265,18 +265,21 @@ watch(() => tgAuth.isLoggedIn, (loggedIn) => {
 })
 
 onMounted(async () => {
-  await tokenStore.restoreToken()
-  await loadSettings()
-  if (publicSettings.value.tgAuthEnabled) {
-    await tgAuth.checkSession()
-    if (tgAuth.isLoggedIn) {
-      await tgAuth.syncTokensToVault()
-      await tgAuth.fetchSessions().catch(() => {})
-    } else {
-      pruneBoundTokensIfSessionLost()
+  try {
+    await tokenStore.restoreToken()
+    await loadSettings()
+    if (publicSettings.value.tgAuthEnabled) {
+      await tgAuth.checkSession()
+      if (tgAuth.isLoggedIn) {
+        await tgAuth.syncTokensToVault()
+        await tgAuth.fetchSessions().catch(() => {})
+      } else {
+        pruneBoundTokensIfSessionLost()
+      }
     }
+  } finally {
+    authBootstrapDone.value = true
   }
-  authBootstrapDone.value = true
   if (!tokenStore.hasToken && !tgAuth.isLoggedIn) {
     navigateTo('/')
   }

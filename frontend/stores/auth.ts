@@ -112,7 +112,7 @@ export const useAuthStore = defineStore('auth', {
         })
         return response
       } catch (error: any) {
-        if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
+        if (error?.response?.status === 401) { this.handleUnauthorized(); throw error }
         throw error
       }
     },
@@ -131,7 +131,7 @@ export const useAuthStore = defineStore('auth', {
         }
         return response
       } catch (error: any) {
-        if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
+        if (error?.response?.status === 401) { this.handleUnauthorized(); throw error }
         throw error
       }
     },
@@ -150,7 +150,7 @@ export const useAuthStore = defineStore('auth', {
         }
         return response
       } catch (error: any) {
-        if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
+        if (error?.response?.status === 401) { this.handleUnauthorized(); throw error }
         throw error
       }
     },

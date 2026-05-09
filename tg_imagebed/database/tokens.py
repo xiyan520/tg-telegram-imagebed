@@ -160,10 +160,12 @@ def create_auth_token_with_ip_limit(
             conn.execute('BEGIN IMMEDIATE')
             cursor = conn.cursor()
             cursor.execute(
-                f'''
+                '''
                 SELECT COUNT(*)
                 FROM auth_tokens
-                WHERE ip_address = ? AND {_ACTIVE_EXPR}
+                WHERE ip_address = ?
+                  AND is_active = 1
+                  AND NOT (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)
                 ''',
                 (ip_address,)
             )
@@ -503,7 +505,12 @@ def count_tokens_by_ip(ip_address: str) -> int:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                f'SELECT COUNT(*) FROM auth_tokens WHERE ip_address = ? AND {_ACTIVE_EXPR}',
+                '''
+                SELECT COUNT(*) FROM auth_tokens
+                WHERE ip_address = ?
+                  AND is_active = 1
+                  AND NOT (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)
+                ''',
                 (ip_address,)
             )
             row = cursor.fetchone()

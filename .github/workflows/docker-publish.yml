@@ -247,7 +247,7 @@ jobs:
           docker manifest push "${{ env.IMAGE_NAME }}:latest"
 
   release:
-    needs: [prepare, build-amd64, build-arm64, merge-manifest]
+    needs: [prepare, build-amd64, build-arm64, merge-manifest, finalize]
     if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -270,22 +270,25 @@ jobs:
             tg-imagebed-release.zip.sha256
 
   finalize:
-    needs: [prepare, merge-manifest, release]
-    if: needs.prepare.outputs.skip != 'true' && needs.prepare.outputs.is_tag_push != 'true'
+    needs: [prepare, merge-manifest]
+    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
       - name: Checkout
+        if: needs.prepare.outputs.is_tag_push != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Write VERSION
+        if: needs.prepare.outputs.is_tag_push != 'true'
         run: echo "${{ needs.prepare.outputs.version }}" > VERSION
 
       - name: Commit and push VERSION
+        if: needs.prepare.outputs.is_tag_push != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -300,6 +303,7 @@ jobs:
           fi
 
       - name: Create and push tag
+        if: needs.prepare.outputs.is_tag_push != 'true'
         shell: bash
         run: |
           set -euo pipefail

@@ -283,7 +283,7 @@ const removeToken = (id: string) => {
   const item = tokenStore.vaultItems.find(i => i.id === id)
   if (!item) return
   deletingItem.value = item
-  deleteWithImages.value = false
+  deleteWithImages.value = deleteStorageEnabled.value
   deleteModalOpen.value = true
 }
 
