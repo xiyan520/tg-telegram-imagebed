@@ -116,6 +116,58 @@ class LocalBackend(StorageBackend):
             logger.error(f"本地存储上传失败: {e}")
             return None
 
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """从本地暂存文件流式写入到本地存储目录（原子写入，避免截断残留）"""
+        key = self._generate_key(filename)
+        target = (self._root / key).resolve()
+        target_tmp = target.with_suffix(target.suffix + '.tmp')
+
+        if not target.is_relative_to(self._root.resolve()):
+            logger.error(f"路径安全检查失败: {target}")
+            return None
+
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'rb') as src, open(target_tmp, 'wb') as dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+            os.replace(target_tmp, target)
+        except Exception as e:
+            logger.error(f"本地存储上传失败: {e}")
+            try:
+                if target_tmp.exists():
+                    target_tmp.unlink()
+            except Exception:
+                pass
+            return None
+
+        logger.info(f"本地存储上传成功: {key} ({file_size} bytes)")
+        return PutResult(
+            file_id=key,
+            file_path=key,
+            file_size=file_size,
+            storage_backend=self.name,
+            storage_key=key,
+            storage_meta={
+                'root_dir': str(self._root),
+                'content_type': content_type,
+                'original_filename': filename,
+            },
+        )
+
     def download(
         self,
         *,

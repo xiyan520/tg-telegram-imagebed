@@ -38,7 +38,7 @@
             </div>
           </div>
 
-          <div class="mt-4 grid grid-cols-3 gap-1.5 rounded-xl bg-stone-100/80 p-1 dark:bg-neutral-900/70">
+          <div class="mt-4 grid grid-cols-4 gap-1.5 rounded-xl bg-stone-100/80 p-1 dark:bg-neutral-900/70">
             <button
               v-for="tab in tabs"
               :key="tab.key"
@@ -196,7 +196,159 @@
             </UCard>
           </div>
 
-          <div v-else class="space-y-3">
+          <div v-else-if="activeTab === 'security'" class="space-y-4">
+            <!-- TOTP 未启用 -->
+            <UCard v-if="!totpSetupStarted && !authStore.totpEnabled" class="panel-card">
+              <template #header>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-semibold text-stone-900 dark:text-stone-100">二次验证</p>
+                    <p class="mt-0.5 text-xs text-stone-500 dark:text-stone-400">启用基于时间的一次性密码 (TOTP) 保护您的账户</p>
+                  </div>
+                  <UBadge color="red" variant="soft">未启用</UBadge>
+                </div>
+              </template>
+
+              <div class="space-y-4">
+                <div class="rounded-xl border border-amber-200/70 bg-amber-50/70 p-4 dark:border-amber-700/40 dark:bg-amber-900/20">
+                  <div class="flex items-start gap-3">
+                    <UIcon name="heroicons:light-bulb" class="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-500" />
+                    <div class="text-sm text-amber-800 dark:text-amber-200">
+                      <p class="font-medium mb-1">为什么要启用二次验证？</p>
+                      <ul class="list-disc pl-4 space-y-0.5 text-xs opacity-80">
+                        <li>即使密码泄露，攻击者也无法登录</li>
+                        <li>使用 Google Authenticator / Authy 等应用生成动态验证码</li>
+                        <li>验证码每 30 秒自动刷新，无需网络连接</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                <UButton color="primary" block @click="startTotpSetup">
+                  <UIcon name="heroicons:shield-check" class="w-4 h-4 mr-1" />
+                  启用二次验证
+                </UButton>
+              </div>
+            </UCard>
+
+            <!-- TOTP 设置流程中 -->
+            <template v-if="totpSetupStarted && !authStore.totpEnabled">
+              <UCard class="panel-card">
+                <template #header>
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <p class="text-sm font-semibold text-stone-900 dark:text-stone-100">步骤 1：扫描二维码</p>
+                      <p class="mt-0.5 text-xs text-stone-500 dark:text-stone-400">使用身份验证器应用扫描二维码或手动输入密钥</p>
+                    </div>
+                  </div>
+                </template>
+
+                <div class="space-y-4">
+                  <div class="flex justify-center">
+                    <div class="rounded-xl border border-stone-200 bg-white p-4 dark:border-neutral-700 dark:bg-neutral-900">
+                      <img
+                        :src="`${runtimeConfig.public.apiBase}/api/admin/totp/qrcode`"
+                        alt="TOTP QR Code"
+                        class="h-48 w-48"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="rounded-lg bg-stone-50 p-3 dark:bg-neutral-900">
+                    <p class="text-xs text-stone-500 dark:text-stone-400 mb-1">手动输入密钥：</p>
+                    <p class="font-mono text-sm font-medium text-stone-800 dark:text-stone-200 break-all select-all">
+                      {{ totpManualSecret }}
+                    </p>
+                  </div>
+                </div>
+              </UCard>
+
+              <UCard class="panel-card">
+                <template #header>
+                  <div>
+                    <p class="text-sm font-semibold text-stone-900 dark:text-stone-100">步骤 2：验证并启用</p>
+                    <p class="mt-0.5 text-xs text-stone-500 dark:text-stone-400">输入身份验证器中显示的 6 位数字验证码</p>
+                  </div>
+                </template>
+
+                <div class="space-y-3">
+                  <UFormGroup label="验证码" required>
+                    <UInput
+                      v-model="totpVerifyCode"
+                      placeholder="输入 6 位验证码"
+                      maxlength="6"
+                      autocomplete="one-time-code"
+                      class="text-center text-lg tracking-widest"
+                    />
+                  </UFormGroup>
+
+                  <div class="flex gap-2">
+                    <UButton color="gray" variant="ghost" @click="cancelTotpSetup">取消</UButton>
+                    <UButton color="primary" :loading="totpVerifying" :disabled="totpVerifyCode.length !== 6" @click="confirmTotpSetup">
+                      验证并启用
+                    </UButton>
+                  </div>
+                </div>
+              </UCard>
+            </template>
+
+            <!-- TOTP 已启用 -->
+            <UCard v-if="authStore.totpEnabled" class="panel-card">
+              <template #header>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-semibold text-stone-900 dark:text-stone-100">二次验证</p>
+                    <p class="mt-0.5 text-xs text-stone-500 dark:text-stone-400">您的账户已受到二次验证保护</p>
+                  </div>
+                  <UBadge color="emerald" variant="soft">已启用</UBadge>
+                </div>
+              </template>
+
+              <div class="space-y-4">
+                <div class="rounded-xl border border-emerald-200/70 bg-emerald-50/70 p-4 dark:border-emerald-700/40 dark:bg-emerald-900/20">
+                  <div class="flex items-start gap-3">
+                    <UIcon name="heroicons:check-circle" class="mt-0.5 h-5 w-5 flex-shrink-0 text-emerald-500" />
+                    <div class="text-sm text-emerald-800 dark:text-emerald-200">
+                      <p class="font-medium">二次验证已启用</p>
+                      <p class="text-xs mt-0.5 opacity-80">登录时需要输入身份验证器中的动态验证码</p>
+                    </div>
+                  </div>
+                </div>
+
+                <UButton color="red" variant="soft" block @click="totpDisableModalOpen = true">
+                  <UIcon name="heroicons:shield-exclamation" class="w-4 h-4 mr-1" />
+                  禁用二次验证
+                </UButton>
+              </div>
+            </UCard>
+            <!-- 禁用 TOTP 确认弹窗 -->
+            <UModal v-model="totpDisableModalOpen">
+              <UCard>
+                <template #header>
+                  <h3 class="text-base font-semibold text-red-600 dark:text-red-400">禁用二次验证</h3>
+                </template>
+                <div class="space-y-3">
+                  <p class="text-sm text-stone-600 dark:text-stone-300">
+                    禁用后登录时将不再需要动态验证码。请输入您的密码和当前验证码以确认操作。
+                  </p>
+                  <UFormGroup label="密码" required>
+                    <UInput v-model="totpDisablePassword" type="password" placeholder="请输入管理员密码" />
+                  </UFormGroup>
+                  <UFormGroup label="验证码" required>
+                    <UInput v-model="totpDisableCode" placeholder="输入 6 位验证码" maxlength="6" class="text-center tracking-widest" />
+                  </UFormGroup>
+                </div>
+                <template #footer>
+                  <div class="flex justify-end gap-2">
+                    <UButton color="gray" variant="ghost" @click="totpDisableModalOpen = false">取消</UButton>
+                    <UButton color="red" :loading="totpDisabling" @click="confirmDisableTotp">确认禁用</UButton>
+                  </div>
+                </template>
+              </UCard>
+            </UModal>
+          </div>
+
+          <div v-else-if="activeTab === 'logs'" class="space-y-3">
             <UCard class="panel-card">
               <template #header>
                 <div class="flex items-center justify-between gap-2">
@@ -290,7 +442,7 @@
 <script setup lang="ts">
 import { getClientDeviceFingerprint, parseUserAgentToLabel } from '~/utils/deviceFingerprint'
 
-type UserCenterTab = 'credentials' | 'sessions' | 'logs'
+type UserCenterTab = 'credentials' | 'sessions' | 'security' | 'logs'
 
 interface SettingsForm {
   username: string
@@ -354,7 +506,8 @@ const notification = useNotification()
 const tabs: { key: UserCenterTab; label: string; icon: string }[] = [
   { key: 'credentials', label: '凭据', icon: 'heroicons:key' },
   { key: 'sessions', label: '会话', icon: 'heroicons:computer-desktop' },
-  { key: 'logs', label: '日志', icon: 'heroicons:shield-check' }
+  { key: 'security', label: '安全', icon: 'heroicons:shield-check' },
+  { key: 'logs', label: '日志', icon: 'heroicons:document-text' }
 ]
 
 const activeTab = ref<UserCenterTab>('credentials')
@@ -386,6 +539,76 @@ const logFilterOptions = [
   { value: 'session_kicked', label: '会话踢出' },
   { value: 'password_changed', label: '密码修改' }
 ]
+
+// TOTP 相关状态
+const totpSetupStarted = ref(false)
+const totpManualSecret = ref('')
+const totpVerifyCode = ref('')
+const totpVerifying = ref(false)
+const totpDisableModalOpen = ref(false)
+const totpDisablePassword = ref('')
+const totpDisableCode = ref('')
+const totpDisabling = ref(false)
+
+const startTotpSetup = async () => {
+  try {
+    const res = await authStore.startTotpSetup()
+    if (res.success && res.data) {
+      totpManualSecret.value = res.data.secret
+      totpSetupStarted.value = true
+      totpVerifyCode.value = ''
+    }
+  } catch (error: any) {
+    notification.error('设置失败', error?.data?.error || error?.message || '无法开始 TOTP 设置')
+  }
+}
+
+const cancelTotpSetup = () => {
+  totpSetupStarted.value = false
+  totpManualSecret.value = ''
+  totpVerifyCode.value = ''
+}
+
+const confirmTotpSetup = async () => {
+  if (totpVerifyCode.value.length !== 6) return
+  totpVerifying.value = true
+  try {
+    await authStore.verifyAndEnableTotp(totpVerifyCode.value)
+    notification.success('启用成功', '二次验证已启用，下次登录时需要输入验证码')
+    totpSetupStarted.value = false
+    totpManualSecret.value = ''
+    totpVerifyCode.value = ''
+  } catch (error: any) {
+    notification.error('验证失败', error?.data?.error || error?.message || '验证码错误，请重试')
+    totpVerifyCode.value = ''
+  } finally {
+    totpVerifying.value = false
+  }
+}
+
+const confirmDisableTotp = async () => {
+  if (!totpDisablePassword.value || totpDisableCode.value.length !== 6) return
+  totpDisabling.value = true
+  try {
+    await authStore.disableTotp(totpDisablePassword.value, totpDisableCode.value)
+    notification.success('已禁用', '二次验证已关闭')
+    totpDisableModalOpen.value = false
+    totpDisablePassword.value = ''
+    totpDisableCode.value = ''
+  } catch (error: any) {
+    notification.error('操作失败', error?.data?.error || error?.message || '密码或验证码错误')
+  } finally {
+    totpDisabling.value = false
+  }
+}
+
+const refreshTotpStatus = async () => {
+  try {
+    await authStore.fetchTotpStatus()
+  } catch {
+    // 静默失败
+  }
+}
 
 const passwordStrength = computed(() => {
   const pwd = settingsForm.value.password || ''
@@ -672,10 +895,17 @@ watch(() => props.open, (open) => {
     stopHeartbeat()
     revokeModalOpen.value = false
     revokingSession.value = null
+    totpSetupStarted.value = false
+    totpManualSecret.value = ''
+    totpVerifyCode.value = ''
+    totpDisableModalOpen.value = false
+    totpDisablePassword.value = ''
+    totpDisableCode.value = ''
     return
   }
 
   resetCredentialsForm()
+  void refreshTotpStatus()
   if (activeTab.value === 'sessions') {
     void loadSessions()
     startHeartbeat()
@@ -699,6 +929,17 @@ watch(activeTab, (tab) => {
 
   if (tab === 'logs') {
     void loadLogs()
+  }
+
+  if (tab === 'security') {
+    void refreshTotpStatus()
+  }
+})
+
+watch(totpDisableModalOpen, (open) => {
+  if (!open) {
+    totpDisablePassword.value = ''
+    totpDisableCode.value = ''
   }
 })
 

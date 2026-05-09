@@ -631,10 +631,15 @@
 </template>
 
 <script setup lang="ts">
-import type { Gallery, GalleryImage } from '~/composables/useGalleryApi'
-import { useCoverRecommend } from '~/composables/useCoverRecommend'
+definePageMeta({
+  layout: 'admin',
+  middleware: 'auth',
+})
 
-definePageMeta({ layout: 'admin', middleware: 'auth' })
+import { computed, ref } from 'vue'
+import type { Gallery, GalleryImage } from '~/composables/useGalleryApi'
+import AdminPageHeader from '~/components/admin/common/AdminPageHeader.vue'
+import type { ApiResponse } from '~/types/api'
 
 const route = useRoute()
 const router = useRouter()

@@ -14,6 +14,9 @@ import json
 import re
 import threading
 import requests
+import pyotp
+import qrcode
+import io
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import session, request, jsonify, render_template, make_response, redirect, url_for
@@ -76,6 +79,58 @@ def verify_gallery_auth_token(token: str) -> tuple[bool, str]:
         # 标记为已使用（原子操作，防止重放攻击）
         info['used'] = True
         return True, info['username']
+
+
+# ===================== TOTP 二次验证 Token 存储 =====================
+# 格式: {token_str: {'created_at': float, 'username': str, 'ip': str, 'remember_me': bool, 'used': bool}}
+_totp_verify_tokens: dict[str, dict] = {}
+_totp_verify_tokens_lock = threading.Lock()
+
+_TOTP_VERIFY_TOKEN_EXPIRE_SECONDS = 60  # 验证 token 有效期 60 秒
+_TOTP_MAX_ATTEMPTS = 3  # 单个 token 最多 TOTP 验证尝试次数
+
+# 按 (username, ip) 限流，防止通过反复登录重置 per-token 预算
+# 格式: {(username, ip): {'attempts': int, 'first_attempt': float}}
+_TOTP_RATE_LIMIT_WINDOW = 300  # 5 分钟窗口
+_TOTP_MAX_FAILED_PER_ACCOUNT_IP = 10  # 窗口内最多累计失败次数
+_totp_account_ip_attempts: dict[tuple, dict] = {}
+
+
+def _cleanup_totp_verify_tokens():
+    """清理过期的 TOTP 验证 token 和按账号/IP 的尝试记录（调用方须持有锁）"""
+    now = time.time()
+    expired = [
+        t for t, info in _totp_verify_tokens.items()
+        if now - info['created_at'] > _TOTP_VERIFY_TOKEN_EXPIRE_SECONDS
+    ]
+    for t in expired:
+        del _totp_verify_tokens[t]
+
+    stale_keys = [
+        k for k, v in _totp_account_ip_attempts.items()
+        if now - v['first_attempt'] > _TOTP_RATE_LIMIT_WINDOW
+    ]
+    for k in stale_keys:
+        del _totp_account_ip_attempts[k]
+
+
+def _generate_totp_secret() -> str:
+    """生成新的 TOTP 密钥"""
+    return pyotp.random_base32()
+
+
+def _get_totp_uri(secret: str, username: str) -> str:
+    """生成 TOTP provisioning URI（供 QR 码使用）"""
+    label = f"图床Pro:{username}"
+    return pyotp.totp.TOTP(secret).provisioning_uri(name=label, issuer_name="图床Pro")
+
+
+def _verify_totp_code(secret: str, code: str) -> bool:
+    """验证 TOTP 验证码"""
+    if not secret or not code:
+        return False
+    totp = pyotp.TOTP(secret)
+    return totp.verify(code)
 
 
 # 从 utils.py 导入 get_domain 和 format_size
@@ -757,16 +812,6 @@ def init_database_admin_update(DATABASE_PATH):
     except Exception as e:
         logger.error(f"创建管理索引失败: {e}")
 
-def get_static_file_version(filename):
-    """获取静态文件版本号"""
-    # 如果启用了强制刷新，总是返回当前时间戳
-    force_refresh = os.getenv("FORCE_REFRESH", "false").lower() == "true"
-    if force_refresh:
-        return str(int(time.time()))
-    
-    # 否则返回配置的静态版本
-    return os.getenv("STATIC_VERSION", str(int(time.time())))
-
 def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_size, add_cache_headers):
     """注册管理员路由"""
 
@@ -813,8 +858,46 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
 
         # 验证用户名和密码
         if verify_admin_password(username, password):
-            _record_login_success(ip)
+            # 检查是否启用了 TOTP 二次验证
+            from .database.settings import is_totp_enabled, get_totp_secret
+            if is_totp_enabled():
+                totp_secret = get_totp_secret()
+                if not totp_secret:
+                    logger.error(f"TOTP 已启用但 secret 缺失，拒绝登录: {username}")
+                    return jsonify({
+                        'success': False,
+                        'message': '系统配置错误，请联系管理员',
+                    }), 500
+                # TOTP 已启用且 secret 有效，检查账号/IP 级别限流
+                with _totp_verify_tokens_lock:
+                    _cleanup_totp_verify_tokens()
+                    account_ip_key = (username, ip)
+                    rate_info = _totp_account_ip_attempts.get(account_ip_key)
+                    if rate_info and rate_info['attempts'] >= _TOTP_MAX_FAILED_PER_ACCOUNT_IP:
+                        logger.warning(f"TOTP 尝试次数已达上限，拒绝签发新 token: {username}, IP={ip}")
+                        return jsonify({
+                            'success': False,
+                            'message': '验证尝试次数过多，请稍后再试',
+                        }), 429
+                    # 生成临时验证 token
+                    verification_token = secrets.token_urlsafe(32)
+                    _totp_verify_tokens[verification_token] = {
+                        'created_at': time.time(),
+                        'username': username,
+                        'ip': ip,
+                        'remember_me': remember_me,
+                        'used': False,
+                        'attempts': 0,
+                    }
+                logger.info(f"管理员密码验证通过，等待 TOTP 二次验证: {username}")
+                return jsonify({
+                    'success': True,
+                    'totp_required': True,
+                    'verification_token': verification_token
+                })
 
+            # TOTP 未启用，直接设置 session
+            _record_login_success(ip)
             session['admin_logged_in'] = True
             session['admin_username'] = username
             session['_remember_me'] = remember_me
@@ -864,6 +947,110 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             'success': False,
             'message': '用户名或密码错误',
         }), 401
+
+    @app.route('/api/admin/login/verify-totp', methods=['POST'])
+    def admin_login_verify_totp():
+        """管理员登录第二步：TOTP 验证码校验"""
+        data = request.get_json() or {}
+        verification_token = data.get('verification_token', '')
+        code = data.get('code', '').strip()
+
+        if not verification_token or not code:
+            return jsonify({'success': False, 'message': '参数不完整'}), 400
+
+        # 验证 verification_token（只读取，不标记 used，验证通过后再标记）
+        with _totp_verify_tokens_lock:
+            _cleanup_totp_verify_tokens()
+            info = _totp_verify_tokens.get(verification_token)
+            if not info:
+                return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
+            if info.get('used'):
+                return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
+            if time.time() - info['created_at'] > _TOTP_VERIFY_TOKEN_EXPIRE_SECONDS:
+                del _totp_verify_tokens[verification_token]
+                return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
+            username = info['username']
+            ip = info['ip']
+            remember_me = info['remember_me']
+
+        current_ip = _get_client_ip(request)
+        if current_ip != ip:
+            with _totp_verify_tokens_lock:
+                _totp_verify_tokens.pop(verification_token, None)
+            return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
+
+        # 验证 TOTP 码（在锁外执行，避免阻塞其他请求）
+        from .database.settings import get_totp_secret
+        totp_secret = get_totp_secret()
+        if not _verify_totp_code(totp_secret, code):
+            _log_security_event('login_failed', ip, username, detail='totp_code_invalid')
+            with _totp_verify_tokens_lock:
+                tok = _totp_verify_tokens.get(verification_token)
+                if tok:
+                    tok['attempts'] = tok.get('attempts', 0) + 1
+                    if tok['attempts'] >= _TOTP_MAX_ATTEMPTS:
+                        del _totp_verify_tokens[verification_token]
+                account_ip_key = (username, ip)
+                entry = _totp_account_ip_attempts.get(account_ip_key)
+                if entry:
+                    entry['attempts'] += 1
+                else:
+                    _totp_account_ip_attempts[account_ip_key] = {
+                        'attempts': 1,
+                        'first_attempt': time.time(),
+                    }
+            logger.warning(f"TOTP 验证失败: {username}")
+            return jsonify({'success': False, 'message': '验证码错误'}), 401
+
+        # TOTP 验证成功，原子消费 token 防止并发重放
+        with _totp_verify_tokens_lock:
+            tok = _totp_verify_tokens.get(verification_token)
+            if not tok or tok.get('used'):
+                return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
+            tok['used'] = True
+            _totp_verify_tokens.pop(verification_token, None)
+        _record_login_success(ip)
+
+        # TOTP 登录成功，清空该账号+IP 的失败计数
+        with _totp_verify_tokens_lock:
+            _totp_account_ip_attempts.pop((username, ip), None)
+
+        # 设置 session
+        session['admin_logged_in'] = True
+        session['admin_username'] = username
+        session['_remember_me'] = remember_me
+        session.permanent = True
+
+        lifetime = _get_session_lifetime(remember_me)
+        app.permanent_session_lifetime = timedelta(seconds=lifetime)
+
+        token = secrets.token_urlsafe(32)
+        session['admin_token'] = token
+
+        device_ctx = _get_admin_device_context(request)
+        _register_session(
+            token,
+            ip,
+            remember_me=remember_me,
+            user_agent=device_ctx['user_agent'],
+            platform=device_ctx['platform'],
+            device_name=device_ctx['device_name'],
+            device_id=device_ctx['device_id'],
+            os_name=device_ctx['os_name'],
+            browser_name=device_ctx['browser_name'],
+            browser_version=device_ctx['browser_version'],
+            device_label=device_ctx['device_label'],
+        )
+
+        _log_security_event('login_success', ip, username)
+        logger.info(f"管理员 TOTP 登录成功: {username}")
+        return jsonify({
+            'success': True,
+            'data': {
+                'token': token,
+                'username': username
+            }
+        })
 
     @app.route('/api/admin/logout', methods=['POST'])
     def admin_logout():
@@ -1122,8 +1309,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                         where_clauses.append('fs.source LIKE ?')
                         where_params.append('%token%')
                     elif source == 'guest':
-                        where_clauses.append('(fs.source = ? OR fs.source = ? OR fs.source = ? OR fs.source LIKE ?)')
-                        where_params.extend(['guest', 'anonymous', 'web', 'guest_%'])
+                        where_clauses.append(
+                            '(fs.source = ? OR fs.source = ? OR fs.source = ? OR fs.source = ? OR fs.source LIKE ?)'
+                        )
+                        where_params.extend(['guest', 'anonymous', 'web', 'web_upload', 'guest_%'])
                     else:
                         where_clauses.append('fs.source = ?')
                         where_params.append(source)
@@ -1808,5 +1997,170 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             # 未登录，回跳并标记失败
             final_url = _append_query_param(return_url, 'sso_failed', '1')
             return redirect(final_url)
+
+    # ===================== TOTP 二次验证管理端点 =====================
+
+    @app.route('/api/admin/totp/status')
+    @login_required
+    def admin_totp_status():
+        """获取 TOTP 状态"""
+        from .database.settings import is_totp_enabled, get_totp_secret
+        return jsonify({
+            'success': True,
+            'data': {
+                'enabled': is_totp_enabled(),
+                'secret_exists': bool(get_totp_secret()),
+            }
+        })
+
+    @app.route('/api/admin/totp/setup', methods=['POST'])
+    @login_required
+    def admin_totp_setup():
+        """开始 TOTP 设置：生成新密钥，返回密钥和 QR 码 URI"""
+        from .database.settings import is_totp_enabled
+        if is_totp_enabled():
+            return jsonify({'success': False, 'message': 'TOTP 已启用，请先禁用后再重新设置'}), 400
+
+        username = session.get('admin_username', 'admin')
+        secret = _generate_totp_secret()
+
+        # 将待验证的密钥临时存入 session
+        session['totp_pending_secret'] = secret
+
+        uri = _get_totp_uri(secret, username)
+        return jsonify({
+            'success': True,
+            'data': {
+                'secret': secret,
+                'qrcode_uri': uri,
+            }
+        })
+
+    @app.route('/api/admin/totp/verify', methods=['POST'])
+    @login_required
+    def admin_totp_verify():
+        """验证 TOTP 码并启用二次验证"""
+        from .database.settings import is_totp_enabled, enable_totp
+        if is_totp_enabled():
+            return jsonify({'success': False, 'message': 'TOTP 已启用'}), 400
+
+        pending_secret = session.get('totp_pending_secret', '')
+        if not pending_secret:
+            return jsonify({'success': False, 'message': '请先开始 TOTP 设置'}), 400
+
+        data = request.get_json()
+        code = data.get('code', '').strip()
+        if not code:
+            return jsonify({'success': False, 'message': '请输入验证码'}), 400
+
+        if not _verify_totp_code(pending_secret, code):
+            return jsonify({'success': False, 'message': '验证码错误'}), 401
+
+        # 验证成功，启用 TOTP
+        enable_totp(pending_secret)
+        session.pop('totp_pending_secret', None)
+
+        ip = _get_client_ip(request)
+        username = session.get('admin_username', 'admin')
+        _log_security_event('password_changed', ip, username, detail='totp_enabled')
+        logger.info(f"TOTP 二次验证已启用: {username}")
+
+        return jsonify({
+            'success': True,
+            'message': '二次验证已启用'
+        })
+
+    @app.route('/api/admin/totp/disable', methods=['POST'])
+    @login_required
+    def admin_totp_disable():
+        """禁用 TOTP 二次验证（需验证密码和 TOTP 码）"""
+        from .database.settings import is_totp_enabled, get_totp_secret, disable_totp
+        if not is_totp_enabled():
+            return jsonify({'success': False, 'message': 'TOTP 未启用'}), 400
+
+        data = request.get_json()
+        password = data.get('password', '')
+        code = data.get('code', '').strip()
+
+        if not password or not code:
+            return jsonify({'success': False, 'message': '请输入密码和验证码'}), 400
+
+        username = session.get('admin_username', 'admin')
+        ip = _get_client_ip(request)
+        account_ip_key = (username, ip)
+
+        # 检查账号+IP 级别限流
+        with _totp_verify_tokens_lock:
+            _cleanup_totp_verify_tokens()
+            rate_info = _totp_account_ip_attempts.get(account_ip_key)
+            if rate_info and rate_info['attempts'] >= _TOTP_MAX_FAILED_PER_ACCOUNT_IP:
+                return jsonify({
+                    'success': False,
+                    'message': '验证尝试次数过多，请稍后再试',
+                }), 429
+
+        # 验证密码
+        if not verify_admin_password(username, password):
+            _log_security_event('login_failed', ip, username, detail='totp_disable_wrong_password')
+            with _totp_verify_tokens_lock:
+                entry = _totp_account_ip_attempts.get(account_ip_key)
+                if entry:
+                    entry['attempts'] += 1
+                else:
+                    _totp_account_ip_attempts[account_ip_key] = {
+                        'attempts': 1,
+                        'first_attempt': time.time(),
+                    }
+            return jsonify({'success': False, 'message': '密码错误'}), 401
+
+        # 验证 TOTP 码
+        totp_secret = get_totp_secret()
+        if not _verify_totp_code(totp_secret, code):
+            with _totp_verify_tokens_lock:
+                entry = _totp_account_ip_attempts.get(account_ip_key)
+                if entry:
+                    entry['attempts'] += 1
+                else:
+                    _totp_account_ip_attempts[account_ip_key] = {
+                        'attempts': 1,
+                        'first_attempt': time.time(),
+                    }
+            return jsonify({'success': False, 'message': '验证码错误'}), 401
+
+        # 禁用 TOTP
+        disable_totp()
+
+        # 成功后清除限流计数
+        with _totp_verify_tokens_lock:
+            _totp_account_ip_attempts.pop(account_ip_key, None)
+        _log_security_event('password_changed', ip, username, detail='totp_disabled')
+        logger.info(f"TOTP 二次验证已禁用: {username}")
+
+        return jsonify({
+            'success': True,
+            'message': '二次验证已禁用'
+        })
+
+    @app.route('/api/admin/totp/qrcode')
+    @login_required
+    def admin_totp_qrcode():
+        """生成 TOTP QR 码 PNG 图片（仅在 setup 阶段可用）"""
+        pending_secret = session.get('totp_pending_secret', '')
+        if not pending_secret:
+            return jsonify({'success': False, 'message': '请先开始 TOTP 设置'}), 400
+
+        username = session.get('admin_username', 'admin')
+        uri = _get_totp_uri(pending_secret, username)
+        img = qrcode.make(uri)
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+
+        response = make_response(buf.getvalue())
+        response.headers.set('Content-Type', 'image/png')
+        response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private')
+        response.headers.set('Pragma', 'no-cache')
+        response.headers.set('Expires', '0')
+        return response
 
     logger.info("管理员路由注册完成")

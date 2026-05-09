@@ -40,9 +40,31 @@ export default defineNuxtConfig({
     }
   },
 
+  // 自动导入配置（Pinia stores 需要显式声明）
+  imports: {
+    dirs: ['stores']
+  },
+
   // Nitro 配置（静态生成）
+  // 注: Nuxt 内部默认 failOnError=true，需通过 hook 覆盖
   nitro: {
-    preset: 'static'
+    preset: 'static',
+    prerender: {
+      routes: ['/', '/200.html', '/404.html']
+    }
+  },
+
+  routeRules: {
+    '/': { ssr: false },
+    '/**': { ssr: false }
+  },
+
+  hooks: {
+    'nitro:build:before'(nitro: any) {
+      // 纯 SPA：关闭爬虫，禁止预渲染失败时退出
+      nitro.options.prerender.crawlLinks = false
+      nitro.options.prerender.failOnError = false
+    }
   },
 
   // UI 配置

@@ -233,3 +233,24 @@ export interface AdminUpdateCredentialsData {
   updated_username: boolean
   updated_password: boolean
 }
+
+// ===================== TOTP 二次验证 =====================
+
+/** TOTP 状态响应 */
+export interface TotpStatusData {
+  enabled: boolean
+  secret_exists: boolean
+}
+
+/** TOTP 设置响应 */
+export interface TotpSetupData {
+  secret: string
+  qrcode_uri: string
+}
+
+/** 登录返回 TOTP 要求（中间状态） */
+export interface AdminLoginTotpRequired {
+  success: true
+  totp_required: true
+  verification_token: string
+}

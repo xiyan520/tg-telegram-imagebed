@@ -14,6 +14,8 @@ export const useGuestAuth = () => {
     tgAuthRequired: false,
     tgBindEnabled: false,
     tgSyncDeleteEnabled: false,
+    gallerySiteEnabled: true,
+    gallerySiteName: '画集',
     loaded: false,
   }))
 
@@ -33,6 +35,8 @@ export const useGuestAuth = () => {
         publicSettings.value.tgAuthRequired = !!res.data.tg_auth_required_for_token
         publicSettings.value.tgBindEnabled = !!res.data.tg_bind_token_enabled
         publicSettings.value.tgSyncDeleteEnabled = !!res.data.tg_sync_delete_enabled
+        publicSettings.value.gallerySiteEnabled = res.data.gallery_site_enabled !== undefined ? !!res.data.gallery_site_enabled : true
+        publicSettings.value.gallerySiteName = res.data.gallery_site_name || '画集'
         publicSettings.value.loaded = true
       }
     } catch { /* 忽略 */ }

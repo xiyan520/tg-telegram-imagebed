@@ -8,6 +8,8 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:18793/api/health"]
       interval: 30s

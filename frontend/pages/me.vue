@@ -247,8 +247,10 @@ watch(navItems, (items) => {
   }
 })
 
+const authBootstrapDone = ref(false)
+
 watch(() => tokenStore.hasToken, (has) => {
-  if (!has && !tgAuth.isLoggedIn) {
+  if (authBootstrapDone.value && !has && !tgAuth.isLoggedIn) {
     navigateTo('/')
   }
 })
@@ -256,20 +258,29 @@ watch(() => tokenStore.hasToken, (has) => {
 watch(() => tgAuth.isLoggedIn, (loggedIn) => {
   if (!loggedIn) {
     pruneBoundTokensIfSessionLost()
+    if (authBootstrapDone.value && !tokenStore.hasToken) {
+      navigateTo('/')
+    }
   }
 })
 
 onMounted(async () => {
-  await tokenStore.restoreToken()
-  await loadSettings()
-  if (publicSettings.value.tgAuthEnabled) {
-    await tgAuth.checkSession()
-    if (tgAuth.isLoggedIn) {
-      await tgAuth.syncTokensToVault()
-      await tgAuth.fetchSessions().catch(() => {})
-    } else {
-      pruneBoundTokensIfSessionLost()
+  try {
+    await tokenStore.restoreToken()
+    await loadSettings()
+    if (publicSettings.value.tgAuthEnabled) {
+      await tgAuth.checkSession()
+      if (tgAuth.isLoggedIn) {
+        await tgAuth.syncTokensToVault()
+        await tgAuth.fetchSessions().catch(() => {})
+      } else {
+        pruneBoundTokensIfSessionLost()
+      }
     }
+  } catch (e: any) {
+    toast.error(e?.message || '登录状态初始化失败')
+  } finally {
+    authBootstrapDone.value = true
   }
   if (!tokenStore.hasToken && !tgAuth.isLoggedIn) {
     navigateTo('/')

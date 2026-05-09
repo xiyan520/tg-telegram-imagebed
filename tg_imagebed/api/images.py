@@ -313,7 +313,7 @@ def get_info():
     cdn_redirect_enabled = str(get_system_setting('cdn_redirect_enabled') or '0') == '1'
     group_upload_admin_only = str(get_system_setting('group_upload_admin_only') or '0') == '1'
     group_upload_reply = str(get_system_setting('group_upload_reply') or '1') == '1'
-    max_file_size_mb = get_system_setting_int('max_file_size_mb', 20, minimum=1, maximum=100)
+    max_file_size_mb = get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
 
     response = jsonify({
         'domain': get_domain(request),

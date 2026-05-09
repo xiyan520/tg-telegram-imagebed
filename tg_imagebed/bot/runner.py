@@ -24,6 +24,7 @@ from .state import (
     set_bot_instance,
     set_bot_loop,
     set_bot_application,
+    clear_bot_refs,
     _set_queue_depth,
 )
 from .handlers import start, handle_photo, handle_verify_text
@@ -469,9 +470,7 @@ def run_telegram_bot():
                     except Exception:
                         pass
 
-                set_bot_instance(None)
-                set_bot_loop(None)
-                set_bot_application(None)
+                clear_bot_refs()
                 _set_queue_depth(0)
 
     while True:

@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """TG 认证数据访问层"""
+import sqlite3
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 from ..config import logger
 from .connection import get_connection, db_retry
 from .settings import get_system_setting_int
+
+
+_ACTIVE_TOKEN_WHERE = "is_active = 1 AND (expires_at IS NULL OR expires_at >= CURRENT_TIMESTAMP)"
 
 
 # ===================== TG 用户管理 =====================
@@ -29,6 +33,8 @@ def upsert_tg_user(tg_user_id: int, username: str = None,
                     last_login_at = CURRENT_TIMESTAMP
             ''', (tg_user_id, username, first_name, last_name))
             return True
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"upsert_tg_user 失败: {e}")
         return False
@@ -43,6 +49,8 @@ def get_tg_user(tg_user_id: int) -> Optional[Dict]:
             cursor.execute('SELECT * FROM tg_users WHERE tg_user_id = ?', (tg_user_id,))
             row = cursor.fetchone()
             return dict(row) if row else None
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"get_tg_user 失败: {e}")
         return None
@@ -62,6 +70,8 @@ def get_tg_user_by_username(username: str) -> Optional[Dict]:
             )
             row = cursor.fetchone()
             return dict(row) if row else None
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"get_tg_user_by_username 失败: {e}")
         return None
@@ -110,6 +120,8 @@ def create_login_code(code_type: str, tg_user_id: int = None,
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (tg_user_id, code, code_type, username_hint, expires_at.strftime('%Y-%m-%d %H:%M:%S'), ip_address))
             return code
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"create_login_code 失败: {e}")
         return None
@@ -140,6 +152,8 @@ def verify_login_code(code: str, code_type: str = 'verify') -> Optional[Dict]:
                 (row['id'],)
             )
             return {'tg_user_id': row['tg_user_id'], 'code_type': row['code_type']}
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"verify_login_code 失败: {e}")
         return None
@@ -247,6 +261,8 @@ def create_tg_session(
                 user_agent=user_agent,
             )
             return session_token
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"create_tg_session 失败: {e}")
         return None
@@ -278,6 +294,8 @@ def verify_tg_session(session_token: str) -> Optional[Dict]:
             if row['is_blocked']:
                 return None
             return dict(row)
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"verify_tg_session 失败: {e}")
         return None
@@ -319,6 +337,8 @@ def touch_tg_session(
                 try:
                     last_seen_dt = datetime.strptime(last_seen_raw, '%Y-%m-%d %H:%M:%S')
                     can_update = (now - last_seen_dt).total_seconds() >= min_interval_seconds
+                except sqlite3.OperationalError:
+                    raise
                 except Exception:
                     can_update = True
 
@@ -344,6 +364,8 @@ def touch_tg_session(
                     user_agent=user_agent,
                 )
             return True
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"touch_tg_session 失败: {e}")
         return False
@@ -375,6 +397,8 @@ def list_tg_sessions(tg_user_id: int, current_session_token: str = '') -> List[D
                 item['is_current'] = bool(current_session_token and row['session_token'] == current_session_token)
                 items.append(item)
             return items
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"list_tg_sessions 失败: {e}")
         return []
@@ -398,6 +422,8 @@ def count_tg_sessions(tg_user_id: int) -> int:
             )
             row = cursor.fetchone()
             return int(row[0]) if row else 0
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"count_tg_sessions 失败: {e}")
         return 0
@@ -438,6 +464,8 @@ def revoke_tg_session(session_id: str, tg_user_id: int, reason: str = 'manual') 
                         revoked=True,
                     )
             return updated
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"revoke_tg_session 失败: {e}")
         return False
@@ -451,6 +479,8 @@ def delete_tg_session(session_token: str) -> bool:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM tg_sessions WHERE session_token = ?', (session_token,))
             return cursor.rowcount > 0
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"delete_tg_session 失败: {e}")
         return False
@@ -468,6 +498,8 @@ def has_bound_tokens(tg_user_id: int) -> bool:
                 (tg_user_id,)
             )
             return cursor.fetchone() is not None
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"has_bound_tokens 失败: {e}")
         return False
@@ -480,11 +512,13 @@ def get_user_token_count(tg_user_id: int) -> int:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND is_active = 1',
+                f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',
                 (tg_user_id,)
             )
             row = cursor.fetchone()
             return int(row[0]) if row else 0
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"get_user_token_count 失败: {e}")
         return 0
@@ -504,9 +538,40 @@ def get_user_tokens(tg_user_id: int) -> List[Dict]:
                 ORDER BY created_at DESC
             ''', (tg_user_id,))
             return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"get_user_tokens 失败: {e}")
         return []
+
+
+@db_retry()
+def bind_token_to_user_with_limit(token: str, tg_user_id: int, max_tokens: int) -> Tuple[bool, Optional[str]]:
+    """原子操作：检查配额 + 绑定已有 Token 到 TG 用户"""
+    try:
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',
+                (tg_user_id,)
+            )
+            count = int(cursor.fetchone()[0])
+            if count >= max_tokens:
+                return False, 'token_limit'
+
+            cursor.execute(
+                'UPDATE auth_tokens SET tg_user_id = ? WHERE token = ? AND tg_user_id IS NULL',
+                (tg_user_id, token)
+            )
+            if cursor.rowcount == 0:
+                return False, 'token_already_bound'
+            return True, None
+    except sqlite3.OperationalError:
+        raise
+    except Exception as e:
+        logger.error(f"bind_token_to_user_with_limit 失败: {e}")
+        return False, str(e)
 
 
 @db_retry()
@@ -520,6 +585,8 @@ def bind_token_to_user(token: str, tg_user_id: int) -> bool:
                 (tg_user_id, token)
             )
             return cursor.rowcount > 0
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"bind_token_to_user 失败: {e}")
         return False
@@ -536,9 +603,54 @@ def unbind_token_from_user(token: str, tg_user_id: int) -> bool:
                 (token, tg_user_id)
             )
             return cursor.rowcount > 0
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"unbind_token_from_user 失败: {e}")
         return False
+
+
+@db_retry()
+def create_and_bind_tg_token(
+    tg_user_id: int,
+    max_tokens: int,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    description: Optional[str] = None,
+    upload_limit: int = 100,
+    expires_days: int = 30,
+) -> Tuple[Optional[str], Optional[str]]:
+    """原子操作：检查配额 → 创建 Token → 绑定 TG 用户，全部在同一事务内"""
+    try:
+        token = secrets.token_hex(32)
+        token = f"guest_{token}"
+        expires_at = datetime.utcnow() + timedelta(days=expires_days)
+
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',
+                (tg_user_id,)
+            )
+            count = int(cursor.fetchone()[0])
+            if count >= max_tokens:
+                return None, 'token_limit'
+
+            cursor.execute('''
+                INSERT INTO auth_tokens
+                (token, tg_user_id, expires_at, upload_limit, ip_address, user_agent, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (token, tg_user_id, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'))
+
+        logger.info(f"创建并绑定 TG Token: {token[:20]}... (tg_user_id={tg_user_id})")
+        return token, None
+
+    except sqlite3.OperationalError:
+        raise
+    except Exception as e:
+        logger.error(f"create_and_bind_tg_token 失败: {e}")
+        return None, str(e)
 
 
 # ===================== 默认上传 Token 管理 =====================
@@ -552,10 +664,12 @@ def get_active_user_tokens(tg_user_id: int) -> List[Dict]:
             cursor.execute('''
                 SELECT token, description, is_default_upload
                 FROM auth_tokens
-                WHERE tg_user_id = ? AND is_active = 1
+                WHERE tg_user_id = ? AND ''' + _ACTIVE_TOKEN_WHERE + '''
                 ORDER BY is_default_upload DESC, last_used DESC
             ''', (tg_user_id,))
             return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"get_active_user_tokens 失败: {e}")
         return []
@@ -574,7 +688,7 @@ def get_default_upload_token(tg_user_id: int) -> Optional[str]:
             # 优先查找显式标记的默认 Token
             cursor.execute('''
                 SELECT token FROM auth_tokens
-                WHERE tg_user_id = ? AND is_active = 1 AND is_default_upload = 1
+                WHERE tg_user_id = ? AND ''' + _ACTIVE_TOKEN_WHERE + ''' AND is_default_upload = 1
                 LIMIT 1
             ''', (tg_user_id,))
             row = cursor.fetchone()
@@ -584,12 +698,14 @@ def get_default_upload_token(tg_user_id: int) -> Optional[str]:
             # 回退：最近使用的活跃 Token
             cursor.execute('''
                 SELECT token FROM auth_tokens
-                WHERE tg_user_id = ? AND is_active = 1
-                ORDER BY last_used DESC NULLS LAST, created_at DESC
+                WHERE tg_user_id = ? AND ''' + _ACTIVE_TOKEN_WHERE + '''
+                ORDER BY CASE WHEN last_used IS NULL THEN 1 ELSE 0 END, last_used DESC, created_at DESC
                 LIMIT 1
             ''', (tg_user_id,))
             row = cursor.fetchone()
             return row['token'] if row else None
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"get_default_upload_token 失败: {e}")
         return None
@@ -612,6 +728,8 @@ def set_default_upload_token(tg_user_id: int, token: str) -> bool:
                 (tg_user_id, token)
             )
             return cursor.rowcount > 0
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"set_default_upload_token 失败: {e}")
         return False
@@ -657,6 +775,8 @@ def consume_web_verify_code(code: str, tg_user_id: int) -> Optional[str]:
                 WHERE id = ?
             ''', (tg_user_id, session_token, code_id))
             return session_token
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"consume_web_verify_code 失败: {e}")
         return None
@@ -686,6 +806,8 @@ def get_web_verify_status(code: str) -> Optional[Dict]:
             if row['expires_at'] <= datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'):
                 return {'status': 'expired', 'session_token': None}
             return {'status': 'pending', 'session_token': None}
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"get_web_verify_status 失败: {e}")
         return None
@@ -701,6 +823,8 @@ def cleanup_expired_codes() -> int:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM tg_login_codes WHERE expires_at < CURRENT_TIMESTAMP')
             return cursor.rowcount
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"cleanup_expired_codes 失败: {e}")
         return 0
@@ -714,6 +838,8 @@ def cleanup_expired_sessions() -> int:
             cursor = conn.cursor()
             cursor.execute('DELETE FROM tg_sessions WHERE expires_at < CURRENT_TIMESTAMP')
             return cursor.rowcount
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"cleanup_expired_sessions 失败: {e}")
         return 0

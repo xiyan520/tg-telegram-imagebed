@@ -157,6 +157,54 @@ class S3Backend(StorageBackend):
             logger.error(f"S3 存储上传失败: {e}")
             return None
 
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """从本地暂存文件上传到 S3，避免大文件全部加载到内存"""
+        if not HAS_BOTO3 or not self._client:
+            logger.error("S3 客户端不可用")
+            return None
+
+        try:
+            key = self._generate_key(filename)
+            try:
+                with open(file_path, 'rb') as handle:
+                    self._client.upload_fileobj(
+                        handle,
+                        self._bucket,
+                        key,
+                        ExtraArgs={'ContentType': content_type},
+                    )
+            except (FileNotFoundError, PermissionError, OSError) as e:
+                logger.error(f"S3 上传本地文件读取失败: {e}")
+                return None
+
+            logger.info(f"S3 存储上传成功: {key}")
+            return PutResult(
+                file_id=key,
+                file_path=key,
+                file_size=file_size,
+                storage_backend=self.name,
+                storage_key=key,
+                storage_meta={
+                    "driver": "s3",
+                    "bucket": self._bucket,
+                    "endpoint": self._endpoint,
+                    "content_type": content_type,
+                },
+            )
+        except Exception as e:
+            logger.error(f"S3 存储上传失败: {e}")
+            return None
+
     def download(
         self,
         *,

@@ -59,6 +59,10 @@
               <span class="relative z-10">首页</span>
               <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
             </NuxtLink>
+            <NuxtLink v-if="publicSettings.gallerySiteEnabled" to="/gallery-site" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
+              <span class="relative z-10">{{ publicSettings.gallerySiteName }}</span>
+              <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
+            </NuxtLink>
             <NuxtLink to="/docs" class="relative px-4 py-2 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 rounded-lg transition-all group">
               <span class="relative z-10">文档</span>
               <div class="absolute inset-0 bg-amber-50 dark:bg-amber-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"></div>
@@ -84,6 +88,16 @@
               >
                 <UIcon name="heroicons:key" class="w-4 h-4" />
                 控制台
+              </NuxtLink>
+            </template>
+            <template v-else-if="authStore.isAuthenticated">
+              <!-- 管理员已登录（无TG/Token）：跳转管理后台 -->
+              <NuxtLink
+                to="/admin"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all"
+              >
+                <UIcon name="heroicons:shield-check" class="w-4 h-4" />
+                {{ authStore.username || '管理' }}
               </NuxtLink>
             </template>
             <template v-else>
@@ -114,13 +128,16 @@
           <NuxtLink to="/" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
             首页
           </NuxtLink>
+          <NuxtLink v-if="publicSettings.gallerySiteEnabled" to="/gallery-site" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
+            {{ publicSettings.gallerySiteName }}
+          </NuxtLink>
           <NuxtLink to="/docs" class="block px-4 py-2.5 text-sm font-medium text-stone-700 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all">
             文档
           </NuxtLink>
           <NuxtLink to="/admin" class="block px-4 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 rounded-lg transition-all text-center shadow-md">
             管理
           </NuxtLink>
-          <!-- 移动端游客登录 / 用户入口 -->
+          <!-- 移动端用户入口（TG/Token 优先于 admin） -->
           <template v-if="tgAuthStore.isLoggedIn">
             <NuxtLink
               to="/me"
@@ -139,6 +156,16 @@
             >
               <UIcon name="heroicons:key" class="w-4 h-4 inline -mt-0.5" />
               控制台
+            </NuxtLink>
+          </template>
+          <template v-else-if="authStore.isAuthenticated">
+            <NuxtLink
+              to="/admin"
+              class="block w-full px-4 py-2.5 text-sm font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-all text-left"
+              @click="mobileMenuOpen = false"
+            >
+              <UIcon name="heroicons:shield-check" class="w-4 h-4 inline -mt-0.5" />
+              {{ authStore.username || '管理' }}
             </NuxtLink>
           </template>
           <template v-else>
@@ -237,6 +264,7 @@ import { useDocumentVisibility } from '@vueuse/core'
 
 const config = useRuntimeConfig()
 const mobileMenuOpen = ref(false)
+const authStore = useAuthStore()
 const tokenStore = useTokenStore()
 const tgAuthStore = useTgAuthStore()
 const { getStats } = useImageApi()
@@ -341,18 +369,22 @@ watch(visibility, (current) => {
   }
 })
 
-// 页面加载时恢复游客token和加载统计
+// 页面加载时恢复游客 token 和 TG 会话
 onMounted(async () => {
-  tokenStore.restoreToken()
-  await loadStats()
+  // 并行恢复 token 和 TG 会话（失败不影响页面初始化）
+  try {
+    await Promise.all([
+      tokenStore.restoreToken(),
+      tgAuthStore.checkSession(),
+      authStore.restoreAuth(),
+      loadStats(),
+    ])
+  } catch {
+    // 会话恢复失败时继续加载页面
+  }
 
   // 加载公共设置
   await loadSettings()
-
-  // TG 认证启用时恢复会话
-  if (publicSettings.value.tgAuthEnabled) {
-    tgAuthStore.checkSession()
-  }
 
   // 监听全局统计刷新事件
   onStatsRefresh(() => {

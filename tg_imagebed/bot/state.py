@@ -81,11 +81,16 @@ def _inc_template_error(count: int = 1) -> None:
 
 def _set_queue_depth(depth: int) -> None:
     """更新 webhook 更新队列长度"""
+    try:
+        d = max(0, int(depth))
+    except (ValueError, TypeError):
+        return
     with _BOT_STATUS_LOCK:
-        _BOT_STATUS["queue_depth"] = max(0, int(depth))
+        _BOT_STATUS["queue_depth"] = d
 
 
 # ===================== Bot 实例引用（跨线程桥接） =====================
+_BOT_REF_LOCK = threading.Lock()
 _bot_instance = None
 _bot_loop = None
 _bot_application = None
@@ -93,28 +98,43 @@ _bot_application = None
 def set_bot_instance(bot):
     """保存 Bot 实例引用（在 Bot 启动后调用）"""
     global _bot_instance
-    _bot_instance = bot
+    with _BOT_REF_LOCK:
+        _bot_instance = bot
 
 def get_bot_instance():
     """获取 Bot 实例"""
-    return _bot_instance
+    with _BOT_REF_LOCK:
+        return _bot_instance
 
 def set_bot_loop(loop):
     """保存 Bot 事件循环引用"""
     global _bot_loop
-    _bot_loop = loop
+    with _BOT_REF_LOCK:
+        _bot_loop = loop
 
 def get_bot_loop():
     """获取 Bot 事件循环"""
-    return _bot_loop
+    with _BOT_REF_LOCK:
+        return _bot_loop
 
 
 def set_bot_application(app):
     """保存 Application 实例引用"""
     global _bot_application
-    _bot_application = app
+    with _BOT_REF_LOCK:
+        _bot_application = app
 
 
 def get_bot_application():
     """获取 Application 实例"""
-    return _bot_application
+    with _BOT_REF_LOCK:
+        return _bot_application
+
+
+def clear_bot_refs():
+    """原子性地清除所有 Bot 实例引用"""
+    global _bot_instance, _bot_loop, _bot_application
+    with _BOT_REF_LOCK:
+        _bot_instance = None
+        _bot_loop = None
+        _bot_application = None

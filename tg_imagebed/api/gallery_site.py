@@ -67,7 +67,8 @@ _GALLERY_LIST_SQL = '''
             JOIN file_storage fs ON gi2.encrypted_id = fs.encrypted_id
             WHERE gi2.gallery_id = g.id
             ORDER BY gi2.added_at ASC LIMIT 1
-        )) AS cover_image
+        )) AS cover_image,
+        g.access_mode
     FROM galleries g
     WHERE g.share_enabled = 1 AND g.access_mode = 'public'
     ORDER BY g.updated_at DESC
@@ -494,13 +495,12 @@ def _set_admin_cors_headers(response):
     """设置管理端点的 CORS 头（仅允许已配置的 Origin，支持 credentials）"""
     origin = request.headers.get('Origin')
     if origin:
-        # 从配置中获取允许的 Origin 列表（与主站 CORS 策略保持一致）
         from ..config import ALLOWED_ORIGINS
         allowed = [o.strip() for o in ALLOWED_ORIGINS.split(',') if o.strip()]
-        # ALLOWED_ORIGINS='*' 时反射请求 Origin（开发模式）；否则严格白名单
-        if ALLOWED_ORIGINS == '*' or origin in allowed:
+        if origin in allowed:
             response.headers['Access-Control-Allow-Origin'] = origin
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Vary'] = 'Origin'
     return response
 
 
@@ -511,11 +511,12 @@ def _handle_admin_options():
     if origin:
         from ..config import ALLOWED_ORIGINS
         allowed = [o.strip() for o in ALLOWED_ORIGINS.split(',') if o.strip()]
-        if ALLOWED_ORIGINS == '*' or origin in allowed:
+        if origin in allowed:
             response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
+    response.headers['Vary'] = 'Origin'
     return add_cache_headers(response, 'no-cache')
 
 
@@ -641,7 +642,7 @@ def gallery_admin_settings():
             if key in data:
                 raw = data[key]
                 if key == 'gallery_site_enabled':
-                    value = '1' if raw else '0'
+                    value = '1' if raw in (True, 1, '1') else '0'
                 elif key == 'gallery_site_images_per_page':
                     try:
                         value = str(max(1, min(100, int(raw))))

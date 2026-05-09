@@ -20,7 +20,7 @@ from ..database import (
     create_login_code, verify_login_code,
     create_tg_session, verify_tg_session, delete_tg_session,
     touch_tg_session, list_tg_sessions, count_tg_sessions, revoke_tg_session,
-    get_user_token_count, get_user_tokens,
+    get_user_token_count, get_user_tokens, verify_auth_token_access,
     get_system_setting_int,
     get_web_verify_status,
 )
@@ -620,10 +620,7 @@ def tg_user_tokens():
 
 @auth_bp.route('/api/auth/tg/sync-tokens', methods=['GET'])
 def tg_sync_tokens():
-    """同步当前 TG 用户的所有 Token 到前端 vault（返回完整 token 字符串）
-
-    安全性：需要有效 TG session，仅返回该用户名下的 Token。
-    """
+    """Sync all active tokens for the current TG user to the frontend vault."""
     err = _check_tg_auth_enabled()
     if err:
         return err
@@ -631,29 +628,32 @@ def tg_sync_tokens():
     session_info = _get_tg_session_info()
     if not session_info:
         return add_cache_headers(jsonify({
-            'success': False, 'error': '未登录'
+            'success': False, 'error': 'Not logged in'
         }), 'no-cache'), 401
 
     tokens = get_user_tokens(session_info['tg_user_id'])
     tg_user_id = session_info['tg_user_id']
-    # 返回完整 token 字符串 + tokenInfo，供前端同步到本地 vault
     result = []
-    for t in tokens:
-        if not t.get('is_active'):
+    for item in tokens:
+        token_value = item.get('token')
+        if not token_value:
             continue
-        upload_count = t.get('upload_count', 0)
-        upload_limit = t.get('upload_limit', 0)
-        remaining = max(0, upload_limit - upload_count) if upload_limit > 0 else 0
+
+        verification = verify_auth_token_access(token_value)
+        if not verification.get('valid'):
+            continue
+
+        token_data = verification.get('token_data') or {}
         result.append({
-            'token': t['token'],
-            'description': t.get('description', ''),
-            'upload_count': upload_count,
-            'upload_limit': upload_limit,
-            'remaining_uploads': remaining,
-            'expires_at': t.get('expires_at', ''),
-            'created_at': t.get('created_at', ''),
-            'last_used': t.get('last_used') or None,
-            'can_upload': remaining > 0 if upload_limit > 0 else True,
+            'token': token_value,
+            'description': token_data.get('description', ''),
+            'upload_count': token_data.get('upload_count', 0),
+            'upload_limit': token_data.get('upload_limit'),
+            'remaining_uploads': verification.get('remaining_uploads', 0),
+            'expires_at': token_data.get('expires_at', ''),
+            'created_at': token_data.get('created_at', ''),
+            'last_used': token_data.get('last_used') or None,
+            'can_upload': verification.get('can_upload', False),
             'tg_user_id': tg_user_id,
         })
 
@@ -661,8 +661,6 @@ def tg_sync_tokens():
         'success': True,
         'data': {'tokens': result}
     }), 'no-cache')
-
-
 @auth_bp.route('/api/auth/tg/webhook/<secret>', methods=['POST'])
 def tg_webhook_ingest(secret: str):
     """

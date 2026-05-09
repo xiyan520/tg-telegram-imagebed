@@ -4,7 +4,7 @@
  * 不覆盖 globalThis.fetch，避免污染全局环境
  */
 export default defineNuxtPlugin((nuxtApp) => {
-  const authStore = useAuthStore()
+  const authStore = useAuthStore(nuxtApp.$pinia)
 
   // 通过 $fetch.create() 创建带拦截器的实例，处理管理后台 API 的 401
   const apiFetch = $fetch.create({

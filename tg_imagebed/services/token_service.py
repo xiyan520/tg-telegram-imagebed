@@ -3,6 +3,7 @@
 """
 Token 统一调度层 — 级联删除 / 影响范围查询 / 批量操作
 """
+import sqlite3
 from typing import Any, Dict, List, Optional
 
 from ..config import logger
@@ -103,8 +104,14 @@ class TokenService:
                 if not message_id or not chat_id:
                     try:
                         import json as _json
-                        meta_raw = file_row.get('storage_meta') or '{}'
-                        meta = _json.loads(meta_raw) if isinstance(meta_raw, str) else (meta_raw or {})
+                        meta_raw = file_row.get('storage_meta')
+                        meta = {}
+                        if isinstance(meta_raw, str) and meta_raw.strip():
+                            parsed = _json.loads(meta_raw)
+                            if isinstance(parsed, dict):
+                                meta = parsed
+                        elif isinstance(meta_raw, dict):
+                            meta = meta_raw
                         if not message_id:
                             message_id = meta.get('message_id')
                         if not chat_id and storage_backend:
@@ -210,9 +217,11 @@ class TokenService:
             logger.info(f"TokenService {action} Token: ID={token_id}")
             return True
 
+        except sqlite3.OperationalError:
+            raise
         except Exception as e:
             logger.error(f"TokenService 级联删除 Token 失败: {e}")
-            raise
+            return False
 
     # ── 影响范围查询 ──────────────────────────────────────
     @staticmethod

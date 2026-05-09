@@ -68,7 +68,7 @@
               />
             </div>
             <p class="text-[11px] text-stone-500 dark:text-stone-400 mt-1.5">
-              <span v-if="tokenStore.tokenInfo">剩余可上传 {{ tokenStore.remainingUploads }} 次</span>
+              <span v-if="tokenStore.tokenInfo">剩余可上传 {{ tokenStore.remainingUploads === -1 ? '∞' : tokenStore.remainingUploads }} 次</span>
               <span v-else>支持按名称、格式、大小快速筛选</span>
             </p>
           </div>

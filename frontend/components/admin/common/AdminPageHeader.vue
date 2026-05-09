@@ -1,6 +1,6 @@
 <template>
-  <section class="rounded-2xl border border-stone-200/85 bg-white/92 px-4 py-3 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900/88 sm:px-5 sm:py-4">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+   <section class="rounded-2xl border border-stone-200/85 bg-white px-4 py-3 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 sm:px-5 sm:py-4">
+     <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div class="min-w-0 space-y-1">
         <div class="flex min-w-0 items-center gap-2.5">
           <div
@@ -29,7 +29,7 @@
         </div>
       </div>
 
-      <div class="flex flex-wrap items-center gap-2 sm:justify-end">
+      <div v-if="$slots.actions" class="flex flex-wrap items-center gap-2 sm:justify-end">
         <slot name="actions" />
       </div>
     </div>

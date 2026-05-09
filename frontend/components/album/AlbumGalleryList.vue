@@ -1,24 +1,29 @@
 <template>
-  <div class="space-y-4">
-    <!-- 标题栏 -->
-    <div class="flex items-center justify-between">
-      <h2 class="text-lg font-bold text-stone-900 dark:text-white">
-        我的画集
-        <span v-if="total > 0" class="text-sm font-normal text-stone-400 ml-1">({{ total }})</span>
-      </h2>
-      <div class="flex items-center gap-1.5">
-        <button
-          class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-stone-100 dark:hover:bg-neutral-700/50 transition-all"
-          :class="{ 'animate-spin': loading }"
-          @click="loadGalleries"
-        >
-          <UIcon name="heroicons:arrow-path" class="w-4 h-4" />
-        </button>
-        <UButton icon="heroicons:plus" color="primary" size="sm" :ui="{ rounded: 'rounded-xl' }" @click="showCreate = true">
-          创建画集
-        </UButton>
+  <UCard>
+    <template #header>
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold text-stone-900 dark:text-white">
+          我的画集
+          <span v-if="total > 0" class="text-sm font-normal text-stone-400 ml-1">({{ total }})</span>
+        </h3>
+        <div class="flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label="刷新画集"
+            title="刷新画集"
+            class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 hover:bg-stone-100 dark:hover:bg-neutral-700/50 transition-all"
+            :class="{ 'animate-spin': loading }"
+            :disabled="loading"
+            @click="loadGalleries"
+          >
+            <UIcon name="heroicons:arrow-path" class="w-4 h-4" />
+          </button>
+          <UButton icon="heroicons:plus" color="primary" size="sm" :ui="{ rounded: 'rounded-xl' }" @click="showCreate = true">
+            创建画集
+          </UButton>
+        </div>
       </div>
-    </div>
+    </template>
 
     <!-- 搜索 -->
     <div v-if="galleries.length > 0" class="max-w-xs">
@@ -66,7 +71,7 @@
 
     <!-- 创建画集弹窗 -->
     <AlbumCreateGalleryModal v-model="showCreate" @created="loadGalleries" />
-  </div>
+  </UCard>
 </template>
 
 <script setup lang="ts">

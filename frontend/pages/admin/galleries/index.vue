@@ -70,28 +70,35 @@
       </div>
 
       <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-        <NuxtLink
+        <div
           v-for="gallery in galleries"
           :key="gallery.id"
-          :to="`/admin/galleries/${gallery.id}`"
           class="group relative aspect-square rounded-xl overflow-hidden border-2 border-stone-200 dark:border-neutral-700 hover:border-amber-400 dark:hover:border-amber-500 transition-all hover:shadow-lg"
         >
-          <!-- 封面图 -->
-          <img
-            v-if="gallery.cover_url"
-            :src="gallery.cover_url"
-            :alt="gallery.name"
-            class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-300"
-          />
-          <div
-            v-else
-            class="w-full h-full bg-gradient-to-br from-stone-100 to-stone-200 dark:from-neutral-800 dark:to-neutral-700 flex items-center justify-center"
-          >
-            <UIcon name="heroicons:photo" class="w-12 h-12 text-stone-400" />
-          </div>
+          <NuxtLink :to="`/admin/galleries/${gallery.id}`" class="block w-full h-full">
+            <!-- 封面图 -->
+            <img
+              v-if="gallery.cover_url"
+              :src="gallery.cover_url"
+              :alt="gallery.name"
+              class="w-full h-full object-cover transform group-hover:scale-110 transition-transform duration-300"
+            />
+            <div
+              v-else
+              class="w-full h-full bg-gradient-to-br from-stone-100 to-stone-200 dark:from-neutral-800 dark:to-neutral-700 flex items-center justify-center"
+            >
+              <UIcon name="heroicons:photo" class="w-12 h-12 text-stone-400" />
+            </div>
+
+            <!-- 信息遮罩 -->
+            <div class="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 via-black/50 to-transparent">
+              <p class="text-white font-medium truncate">{{ gallery.name }}</p>
+              <p class="text-stone-300 text-xs">{{ gallery.image_count }} 张图片</p>
+            </div>
+          </NuxtLink>
 
           <!-- 分享标记 -->
-          <div v-if="gallery.share_enabled" class="absolute top-2 right-2 z-10">
+          <div v-if="gallery.share_enabled" class="absolute top-2 left-2 z-10">
             <UBadge color="green" variant="solid" size="xs" class="shadow-lg">
               <template #leading>
                 <UIcon name="heroicons:share" class="w-3 h-3" />
@@ -100,12 +107,17 @@
             </UBadge>
           </div>
 
-          <!-- 信息遮罩 -->
-          <div class="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 via-black/50 to-transparent">
-            <p class="text-white font-medium truncate">{{ gallery.name }}</p>
-            <p class="text-stone-300 text-xs">{{ gallery.image_count }} 张图片</p>
-          </div>
-        </NuxtLink>
+          <!-- 删除按钮 -->
+          <button
+            @click.stop="askDelete(gallery)"
+            :disabled="deletingGalleryId !== null"
+            aria-label="删除画集"
+            class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-red-600 disabled:opacity-0 disabled:cursor-not-allowed"
+            title="删除画集"
+          >
+            <UIcon name="heroicons:trash" class="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       <!-- 分页 -->
@@ -401,6 +413,30 @@ const copyShareAllUrl = async () => {
     notification.success('已复制', '链接已复制到剪贴板')
   } catch {
     notification.error('复制失败', '请手动复制链接')
+  }
+}
+
+const deletingGalleryId = ref<number | null>(null)
+
+const askDelete = (gallery: Gallery) => {
+  if (deletingGalleryId.value !== null) return
+  if (!confirm(`确定要删除画集"${gallery.name}"吗？\n\n此操作将删除画集本身，但不会删除画集中的图片。`)) {
+    return
+  }
+  handleDelete(gallery.id)
+}
+
+const handleDelete = async (id: number) => {
+  if (deletingGalleryId.value !== null) return
+  deletingGalleryId.value = id
+  try {
+    await galleryApi.deleteGallery(id)
+    notification.success('删除成功', '画集已删除')
+    await loadGalleries()
+  } catch (error: any) {
+    notification.error('删除失败', error.message || '无法删除画集')
+  } finally {
+    deletingGalleryId.value = null
   }
 }
 

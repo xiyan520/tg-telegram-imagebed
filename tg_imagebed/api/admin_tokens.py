@@ -68,10 +68,27 @@ def admin_tokens_api():
             from datetime import datetime, timedelta
             expires_at = (datetime.now() + timedelta(days=default_expires_days)).strftime('%Y-%m-%d %H:%M:%S')
 
+        # 处理 upload_limit：缺失字段使用系统默认值，明确发送的无效值使用 0（无限上传）
+        raw_upload_limit = payload.get('upload_limit')
+        if 'upload_limit' not in payload:
+            upload_limit = default_upload_limit
+        elif raw_upload_limit is None or str(raw_upload_limit).strip() == '' or str(raw_upload_limit).strip().lower() == 'nan':
+            upload_limit = 0
+        else:
+            try:
+                if isinstance(raw_upload_limit, bool):
+                    raise ValueError
+                val = int(str(raw_upload_limit).strip())
+                if val < 0:
+                    return _admin_json({'success': False, 'error': 'upload_limit 不能为负数'}, 400)
+                upload_limit = val
+            except (ValueError, TypeError):
+                return _admin_json({'success': False, 'error': 'upload_limit 必须是非负整数'}, 400)
+
         created = TokenService.create_token(
             description=payload.get('description'),
             expires_at=expires_at,
-            upload_limit=payload.get('upload_limit', default_upload_limit),
+            upload_limit=upload_limit,
             is_active=payload.get('is_active', True),
         )
 
@@ -148,7 +165,19 @@ def admin_token_detail_api(token_id: int):
             update_kwargs['expires_at'] = payload['expires_at']
 
         if 'upload_limit' in payload:
-            update_kwargs['upload_limit'] = payload['upload_limit']
+            raw_limit = payload['upload_limit']
+            if isinstance(raw_limit, bool):
+                return _admin_json({'success': False, 'error': 'upload_limit 必须是非负整数，不能为布尔值'}, 400)
+            if raw_limit is None or raw_limit == '' or str(raw_limit).strip().lower() == 'nan':
+                update_kwargs['upload_limit'] = None
+            else:
+                try:
+                    parsed_limit = int(str(raw_limit).strip())
+                    if parsed_limit < 0:
+                        return _admin_json({'success': False, 'error': 'upload_limit 不能为负数'}, 400)
+                    update_kwargs['upload_limit'] = parsed_limit
+                except (ValueError, TypeError):
+                    return _admin_json({'success': False, 'error': 'upload_limit 必须是非负整数'}, 400)
 
         if not update_kwargs:
             return _admin_json({'success': False, 'error': '未提供任何更新字段'}, 400)

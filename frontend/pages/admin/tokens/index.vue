@@ -122,6 +122,7 @@ import type {
 } from '~/types/admin'
 import type { ImpactData } from '~/components/admin/tokens/TokenBatchActions.vue'
 import type { CreateTokenForm } from '~/components/admin/tokens/TokenCreateModal.vue'
+import { useTokenStore } from '~/stores/token'
 
 definePageMeta({
   layout: 'admin',
@@ -133,6 +134,7 @@ type TokenStatus = 'all' | 'active' | 'disabled' | 'expired'
 const runtimeConfig = useRuntimeConfig()
 const notification = useNotification()
 const route = useRoute()
+const tokenStore = useTokenStore()
 
 // 列表状态
 const status = ref<TokenStatus>('all')
@@ -391,7 +393,7 @@ const createToken = async (form: CreateTokenForm) => {
     const payload = {
       description: form.description?.trim() || null,
       expires_at: form.expires_at?.trim() || null,
-      upload_limit: Number(form.upload_limit),
+      upload_limit: form.upload_limit === null || form.upload_limit === undefined || form.upload_limit === '' ? 0 : Number(form.upload_limit),
       is_active: Boolean(form.is_active),
     }
     const resp = await $fetch<any>(`${runtimeConfig.public.apiBase}/api/admin/tokens`, {
@@ -403,6 +405,9 @@ const createToken = async (form: CreateTokenForm) => {
     createdToken.value = resp.data?.token || null
     tokenCopied.value = false
     notification.success('创建成功', 'Token 已生成，请及时复制保存')
+
+    // 管理后台不自动保存 Token 到本地 Vault（避免在共享设备上泄露凭据）
+
     await refreshAll()
   } catch (error: any) {
     console.error('创建Token失败:', error)

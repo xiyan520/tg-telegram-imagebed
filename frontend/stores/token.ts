@@ -8,47 +8,48 @@ const LEGACY_IS_GUEST_KEY = 'is_guest'
 
 const nowIso = () => new Date().toISOString()
 
-// ── Token 混淆编解码（base64 + 字符位移，防止明文存储）──────────────────────
-const SHIFT = 3
-
+// ── Token 编解码（base64，防止明文存储）──────────────────────
 /**
- * 编码：base64 后对每个字符做位移混淆
- * 存储格式：'ob:' 前缀 + 混淆字符串
+ * 编码：base64 编码
+ * 存储格式：'b64:' 前缀 + base64 字符串
  */
 const obfuscateToken = (token: string): string => {
   if (!token) return token
   try {
     const b64 = btoa(unescape(encodeURIComponent(token)))
-    const shifted = b64.split('').map(c => {
-      const code = c.charCodeAt(0)
-      // 仅对 ASCII 可打印字符做位移
-      if (code >= 33 && code <= 126) {
-        return String.fromCharCode(((code - 33 + SHIFT) % 94) + 33)
-      }
-      return c
-    }).join('')
-    return `ob:${shifted}`
+    return `b64:${b64}`
   } catch {
     return token
   }
 }
 
 /**
- * 解码：检测前缀，有则还原，无则视为旧格式直接返回（自动迁移）
+ * 解码：检测前缀，有则还原 base64
  */
 const deobfuscateToken = (stored: string): string => {
   if (!stored) return stored
-  // 旧格式（无前缀）直接返回
-  if (!stored.startsWith('ob:')) return stored
-  try {
-    const shifted = stored.slice(3)
-    const b64 = shifted.split('').map(c => {
-      const code = c.charCodeAt(0)
-      if (code >= 33 && code <= 126) {
-        return String.fromCharCode(((code - 33 - SHIFT + 94) % 94) + 33)
+  // 旧格式（ob: 前缀）直接返回
+  if (!stored.startsWith('b64:')) {
+    if (stored.startsWith('ob:')) {
+      // 兼容旧版 ob: 前缀格式（尝试解码，失败则返回原值）
+      try {
+        const shifted = stored.slice(3)
+        const b64 = shifted.split('').map(c => {
+          const code = c.charCodeAt(0)
+          if (code >= 33 && code <= 126) {
+            return String.fromCharCode(((code - 33 - 3 + 94) % 94) + 33)
+          }
+          return c
+        }).join('')
+        return decodeURIComponent(escape(atob(b64)))
+      } catch {
+        return stored
       }
-      return c
-    }).join('')
+    }
+    return stored
+  }
+  try {
+    const b64 = stored.slice(4)
     return decodeURIComponent(escape(atob(b64)))
   } catch {
     return stored

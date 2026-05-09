@@ -4,10 +4,10 @@
 import sqlite3
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 from ..config import logger
-from .connection import get_connection
+from .connection import get_connection, db_retry
 
 
 # ===================== 内部辅助 =====================
@@ -83,6 +83,18 @@ def _token_row_to_dict(row: sqlite3.Row, *, include_full_token: bool = False) ->
 
 # 过期判断 SQL 表达式（避免重复）
 _EXPIRED_EXPR = "(expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)"
+_ACTIVE_EXPR = f"(is_active = 1 AND NOT {_EXPIRED_EXPR})"
+
+
+def _cleanup_stale_reservations(cursor, *, max_age_minutes: int = 120) -> None:
+    """清理过期的上传预约记录，避免异常中断后长期占用配额"""
+    cursor.execute(
+        """
+        DELETE FROM upload_reservations
+        WHERE created_at < datetime('now', ?)
+        """,
+        (f"-{int(max_age_minutes)} minutes",)
+    )
 
 
 # ===================== 用户侧 Token =====================
@@ -110,7 +122,7 @@ def create_auth_token(
                 INSERT INTO auth_tokens
                 (token, expires_at, upload_limit, ip_address, user_agent, description)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ''', (token, expires_at, upload_limit, ip_address, user_agent, description or '游客Token'))
+            ''', (token, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'))
 
         logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")
         return token
@@ -118,6 +130,246 @@ def create_auth_token(
     except Exception as e:
         logger.error(f"创建auth_token失败: {e}")
         return None
+
+
+@db_retry()
+def create_auth_token_with_ip_limit(
+    *,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    description: Optional[str] = None,
+    upload_limit: int = 100,
+    expires_days: int = 30,
+    max_tokens_for_ip: int,
+) -> Tuple[Optional[str], Optional[str]]:
+    """在事务中原子地创建 Token，避免同一 IP 并发超过上限"""
+    if not ip_address:
+        # 无 IP 时无需配额检查，但保持 db_retry 保护
+        try:
+            token = generate_auth_token()
+            expires_at = datetime.now() + timedelta(days=expires_days)
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO auth_tokens
+                    (token, expires_at, upload_limit, ip_address, user_agent, description)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (token, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'))
+            logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")
+            return token, None
+        except Exception as e:
+            logger.error(f"创建auth_token失败: {e}")
+            return None, 'db_error'
+
+    try:
+        token = generate_auth_token()
+        expires_at = datetime.now() + timedelta(days=expires_days)
+
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM auth_tokens
+                WHERE ip_address = ?
+                  AND is_active = 1
+                  AND NOT (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)
+                ''',
+                (ip_address,)
+            )
+            current_count = int((cursor.fetchone() or (0,))[0] or 0)
+            if current_count >= int(max_tokens_for_ip):
+                return None, 'ip_limit'
+
+            cursor.execute(
+                '''
+                INSERT INTO auth_tokens
+                (token, expires_at, upload_limit, ip_address, user_agent, description)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''',
+                (token, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'),
+            )
+
+        logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")
+        return token, None
+
+    except sqlite3.OperationalError:
+        raise
+    except Exception as e:
+        logger.error(f"创建auth_token失败: {e}")
+        return None, 'error'
+
+
+@db_retry()
+def reserve_token_upload(token: str, *, daily_limit: int = 0) -> Dict[str, Any]:
+    """为当前 Token 预留一个上传名额，原子检查总配额和每日限制。"""
+    token = (token or '').strip()
+    if not token:
+        return {'ok': False, 'reason': 'Token为空'}
+
+    try:
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            _cleanup_stale_reservations(cursor)
+
+            cursor.execute('SELECT * FROM auth_tokens WHERE token = ?', (token,))
+            row = cursor.fetchone()
+            if not row:
+                return {'ok': False, 'reason': 'Token不存在'}
+
+            token_data = dict(row)
+            if not token_data.get('is_active', 1):
+                return {'ok': False, 'reason': 'Token已被禁用'}
+
+            if token_data.get('expires_at'):
+                try:
+                    expires_at = datetime.fromisoformat(
+                        str(token_data['expires_at']).replace('Z', '+00:00')
+                    )
+                    if expires_at.tzinfo is not None:
+                        expires_at = expires_at.astimezone().replace(tzinfo=None)
+                    if datetime.now() > expires_at:
+                        return {'ok': False, 'reason': 'Token已过期'}
+                except (ValueError, TypeError):
+                    return {'ok': False, 'reason': 'Token过期时间异常'}
+
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM upload_reservations
+                WHERE auth_token = ?
+                ''',
+                (token,)
+            )
+            reserved_total = int((cursor.fetchone() or (0,))[0] or 0)
+
+            upload_count = int(token_data.get('upload_count') or 0)
+            upload_limit = token_data.get('upload_limit')
+            unlimited = upload_limit in (None, 0)
+            if not unlimited:
+                upload_limit_int = int(upload_limit)
+                remaining_before = upload_limit_int - upload_count - reserved_total
+                if remaining_before <= 0:
+                    return {'ok': False, 'reason': f'已达到上传限制 {upload_limit} 次'}
+            else:
+                upload_limit_int = 0
+
+            if daily_limit > 0:
+                cursor.execute(
+                    '''
+                    SELECT COUNT(*)
+                    FROM upload_reservations
+                    WHERE auth_token = ? AND created_day = date('now', 'localtime')
+                    ''',
+                    (token,)
+                )
+                reserved_today = int((cursor.fetchone() or (0,))[0] or 0)
+                cursor.execute(
+                    '''
+                    SELECT COUNT(*)
+                    FROM file_storage
+                    WHERE auth_token = ? AND date(created_at) = date('now', 'localtime')
+                    ''',
+                    (token,)
+                )
+                uploaded_today = int((cursor.fetchone() or (0,))[0] or 0)
+                if uploaded_today + reserved_today >= int(daily_limit):
+                    return {'ok': False, 'reason': f'已达到每日上传限制 {daily_limit} 次', 'status': 429}
+
+            reservation_key = secrets.token_urlsafe(24)
+            cursor.execute(
+                '''
+                INSERT INTO upload_reservations (reservation_key, auth_token, source, created_day)
+                VALUES (?, ?, NULL, date('now', 'localtime'))
+                ''',
+                (reservation_key, token)
+            )
+
+            remaining_after = -1 if unlimited else max(0, upload_limit_int - upload_count - reserved_total - 1)
+            return {
+                'ok': True,
+                'reservation_key': reservation_key,
+                'token_data': token_data,
+                'remaining_uploads': remaining_after,
+            }
+
+    except sqlite3.OperationalError:
+        raise
+    except Exception as e:
+        logger.error(f"预留 Token 上传名额失败: {e}")
+        return {'ok': False, 'reason': '验证失败'}
+
+
+@db_retry()
+def reserve_guest_upload(*, source: str, daily_limit: int) -> Dict[str, Any]:
+    """为访客上传预留一个当日名额。"""
+    source = (source or '').strip()
+    if daily_limit <= 0:
+        return {'ok': True, 'reservation_key': None}
+    if not source:
+        return {'ok': False, 'reason': '缺少访客限流标识'}
+
+    try:
+        with get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            cursor = conn.cursor()
+            _cleanup_stale_reservations(cursor)
+
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM upload_reservations
+                WHERE source = ? AND created_day = date('now', 'localtime')
+                ''',
+                (source,)
+            )
+            reserved_today = int((cursor.fetchone() or (0,))[0] or 0)
+
+            cursor.execute(
+                '''
+                SELECT COUNT(*)
+                FROM file_storage
+                WHERE source = ? AND date(created_at) = date('now', 'localtime')
+                ''',
+                (source,)
+            )
+            uploaded_today = int((cursor.fetchone() or (0,))[0] or 0)
+
+            if uploaded_today + reserved_today >= int(daily_limit):
+                return {'ok': False, 'reason': f'已达到每日上传限制 {daily_limit} 次', 'status': 429}
+
+            reservation_key = secrets.token_urlsafe(24)
+            cursor.execute(
+                '''
+                INSERT INTO upload_reservations (reservation_key, auth_token, source, created_day)
+                VALUES (?, NULL, ?, date('now', 'localtime'))
+                ''',
+                (reservation_key, source)
+            )
+            return {'ok': True, 'reservation_key': reservation_key}
+
+    except sqlite3.OperationalError:
+        raise
+    except Exception as e:
+        logger.error(f"预留访客上传名额失败: {e}")
+        return {'ok': False, 'reason': '检查上传限制失败'}
+
+
+@db_retry()
+def release_upload_reservation(reservation_key: Optional[str]) -> None:
+    """释放未使用的上传预留名额。"""
+    reservation_key = (reservation_key or '').strip()
+    if not reservation_key:
+        return
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            'DELETE FROM upload_reservations WHERE reservation_key = ?',
+            (reservation_key,)
+        )
 
 
 def _verify_token_core(token: str, *, check_quota: bool = True) -> Dict[str, Any]:
@@ -163,20 +415,28 @@ def _verify_token_core(token: str, *, check_quota: bool = True) -> Dict[str, Any
 
             # 计算剩余上传次数
             upload_count = int(token_data.get('upload_count') or 0)
-            upload_limit = int(token_data.get('upload_limit') or 999999)
-            remaining_uploads = upload_limit - upload_count
+            upload_limit = token_data.get('upload_limit')
+            
+            # 无限上传：upload_limit 为 None 或 0
+            unlimited = upload_limit is None or upload_limit == 0
+            
+            # 计算剩余次数（仅在有限制时）
+            remaining_uploads = None
+            if not unlimited:
+                upload_limit_int = int(upload_limit)
+                remaining_uploads = upload_limit_int - upload_count
 
-            # 配额检查
-            if check_quota and remaining_uploads <= 0:
+            # 配额检查（仅在上传场景且有限制时检查）
+            if check_quota and not unlimited and remaining_uploads <= 0:
                 return {'valid': False, 'reason': f'已达到上传限制({upload_limit}张)'}
 
             result = {
                 'valid': True,
                 'token_data': token_data,
-                'remaining_uploads': max(0, remaining_uploads),
+                'remaining_uploads': max(0, remaining_uploads) if not unlimited else -1,  # -1 表示无限
             }
             if not check_quota:
-                result['can_upload'] = remaining_uploads > 0
+                result['can_upload'] = unlimited or remaining_uploads > 0
             return result
 
     except Exception as e:
@@ -254,7 +514,12 @@ def count_tokens_by_ip(ip_address: str) -> int:
         with get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                'SELECT COUNT(*) FROM auth_tokens WHERE ip_address = ? AND is_active = 1',
+                '''
+                SELECT COUNT(*) FROM auth_tokens
+                WHERE ip_address = ?
+                  AND is_active = 1
+                  AND NOT (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)
+                ''',
                 (ip_address,)
             )
             row = cursor.fetchone()
@@ -478,16 +743,16 @@ def admin_create_token(
     *,
     description: Optional[str] = None,
     expires_at: Any = None,
-    upload_limit: int = 100,
+    upload_limit: Optional[int] = 100,
     is_active: bool = True
 ) -> Optional[Dict[str, Any]]:
     """
     管理员创建新的 Token。
-
+ 
     Args:
         description: Token 描述
         expires_at: 过期时间（ISO8601 格式或 datetime 对象，None 表示永不过期）
-        upload_limit: 上传限制（0 表示禁止上传，正整数为限制数）
+        upload_limit: 上传限制（0 或 None 表示无限上传，正整数为限制数）
         is_active: 是否启用
 
     Returns:
@@ -497,12 +762,19 @@ def admin_create_token(
     desc_value = (str(description).strip() if description else None) or None
 
     # 验证上传限制
-    try:
-        limit_value = int(upload_limit)
-        if limit_value < 0:
-            raise ValueError("upload_limit 不能为负数")
-    except (TypeError, ValueError) as e:
-        raise ValueError(f"无效的 upload_limit: {upload_limit}") from e
+    limit_value = None
+    if upload_limit is not None:
+        try:
+            val = int(upload_limit)
+            if val < 0:
+                raise ValueError("upload_limit 不能为负数")
+            # 0 表示无限上传，转换为 None
+            if val == 0:
+                limit_value = None
+            else:
+                limit_value = val
+        except (TypeError, ValueError) as e:
+            raise ValueError(f"无效的 upload_limit: {upload_limit}") from e
 
     # 解析过期时间
     expires_value = _parse_datetime(expires_at)
@@ -652,15 +924,21 @@ def admin_update_token(
         params.append(_parse_datetime(expires_at))
 
     if upload_limit is not ...:
-        if upload_limit is None:
-            sets.append("upload_limit = ?")
-            params.append(None)
-        else:
-            val = int(upload_limit)
-            if val < 0:
-                raise ValueError("upload_limit 不能为负数")
-            sets.append("upload_limit = ?")
-            params.append(val)
+        val = None
+        if upload_limit is not None:
+            try:
+                int_val = int(upload_limit)
+                if int_val < 0:
+                    raise ValueError("upload_limit 不能为负数")
+                # 0 表示无限上传，转换为 None
+                if int_val == 0:
+                    val = None
+                else:
+                    val = int_val
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"无效的 upload_limit: {upload_limit}") from e
+        sets.append("upload_limit = ?")
+        params.append(val)
 
     if is_active is not ...:
         sets.append("is_active = ?")

@@ -657,6 +657,9 @@ def get_static_file_version(filename: str) -> str:
     Returns:
         版本号字符串
     """
+    force_refresh = os.getenv("FORCE_REFRESH", "false").lower() == "true"
+    if force_refresh:
+        return str(int(time.time()))
     return STATIC_VERSION
 
 

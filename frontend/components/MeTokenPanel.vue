@@ -55,7 +55,7 @@
             </div>
             <!-- 信息行 -->
             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-400">
-              <span>{{ item.tokenInfo?.upload_count ?? '?' }} / {{ item.tokenInfo?.upload_limit ?? '?' }} 次上传</span>
+              <span>{{ item.tokenInfo?.upload_count ?? '?' }} / {{ (item.tokenInfo?.upload_limit == null || item.tokenInfo?.upload_limit === 0) ? '∞' : item.tokenInfo?.upload_limit }} 次上传</span>
               <span v-if="item.albumName">· {{ item.albumName }}</span>
               <span v-if="item.tokenInfo?.expires_at" class="inline-flex items-center gap-0.5">
                 · <UIcon name="heroicons:clock" class="w-3 h-3" />
@@ -72,9 +72,14 @@
             <div v-if="item.tokenInfo" class="mt-2">
               <div class="h-1.5 bg-stone-100 dark:bg-neutral-700 rounded-full overflow-hidden">
                 <div
+                  v-if="getQuotaPercent(item) !== null"
                   class="h-full rounded-full transition-all duration-500"
                   :class="getQuotaColor(item)"
                   :style="{ width: `${getQuotaPercent(item)}%` }"
+                />
+                <div
+                  v-else
+                  class="h-full rounded-full bg-stone-300 dark:bg-neutral-600"
                 />
               </div>
             </div>
@@ -240,7 +245,8 @@ const formatDate = (d: string) => {
 
 const getQuotaPercent = (item: any) => {
   const count = item.tokenInfo?.upload_count ?? 0
-  const limit = item.tokenInfo?.upload_limit ?? 1
+  const limit = item.tokenInfo?.upload_limit
+  if (!limit) return null
   return Math.min(100, Math.round((count / limit) * 100))
 }
 
@@ -277,7 +283,7 @@ const removeToken = (id: string) => {
   const item = tokenStore.vaultItems.find(i => i.id === id)
   if (!item) return
   deletingItem.value = item
-  deleteWithImages.value = false
+  deleteWithImages.value = deleteStorageEnabled.value
   deleteModalOpen.value = true
 }
 

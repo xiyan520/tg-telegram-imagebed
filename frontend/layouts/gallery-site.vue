@@ -42,8 +42,17 @@
             </NuxtLink>
           </nav>
 
-          <!-- 右侧：管理按钮 + 深色模式切换 + 移动端菜单 -->
+          <!-- 右侧：返回主站 + 管理按钮 + 深色模式切换 + 移动端菜单 -->
           <div class="flex items-center gap-2">
+            <!-- 返回主站 -->
+            <NuxtLink
+              to="/"
+              class="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-lg transition-colors"
+              title="返回主站"
+            >
+              <UIcon name="heroicons:home" class="w-4 h-4" />
+              主站
+            </NuxtLink>
             <!-- 管理后台入口 -->
             <NuxtLink
               to="/gallery-site/admin"
@@ -71,6 +80,14 @@
 
         <!-- 移动端菜单 -->
         <div v-if="mobileMenuOpen" class="md:hidden mt-4 pt-4 border-t border-stone-200 dark:border-stone-700 space-y-1">
+          <NuxtLink
+            to="/"
+            class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-100 dark:hover:bg-stone-800 rounded-lg transition-colors"
+            @click="mobileMenuOpen = false"
+          >
+            <UIcon name="heroicons:home" class="w-4 h-4" />
+            返回主站
+          </NuxtLink>
           <NuxtLink
             to="/gallery-site/"
             class="block px-4 py-2.5 text-sm font-medium text-stone-600 dark:text-stone-300 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-lg transition-colors"

@@ -144,6 +144,17 @@ def _init_core_tables(cursor) -> None:
         )
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS upload_reservations (
+            reservation_key TEXT PRIMARY KEY,
+            auth_token TEXT,
+            source TEXT,
+            created_day TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (auth_token) REFERENCES auth_tokens(token) ON DELETE CASCADE
+        )
+    ''')
+
 
 def _migrate_file_storage_columns(cursor) -> None:
     """file_storage 表列迁移（增量 ALTER TABLE）"""
@@ -303,6 +314,7 @@ def _migrate_auth_tokens_columns(cursor) -> None:
     """auth_tokens 表列迁移（增量 ALTER TABLE）"""
     cursor.execute("PRAGMA table_info(auth_tokens)")
     auth_columns = [column[1] for column in cursor.fetchall()]
+    upload_limit_added = False
 
     auth_new_columns = [
         ('created_at', 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
@@ -323,6 +335,8 @@ def _migrate_auth_tokens_columns(cursor) -> None:
             logger.info(f"添加 {col_name} 列到 auth_tokens")
             cursor.execute(f'ALTER TABLE auth_tokens ADD COLUMN {col_name} {col_type}')
             auth_columns.append(col_name)
+            if col_name == 'upload_limit':
+                upload_limit_added = True
 
     # 为历史记录回填默认值，避免 NULL 导致排序/展示异常
     try:
@@ -670,56 +684,99 @@ def _init_custom_domains_table(cursor, quiet: bool = False) -> None:
         logger.debug(f"域名标准化迁移失败（可忽略）: {e}")
 
 
+def _migrate_upload_reservations_fk(cursor, conn) -> None:
+    """upload_reservations 表迁移：添加 auth_token 外键约束"""
+    cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='upload_reservations'")
+    row = cursor.fetchone()
+    if row and 'FOREIGN KEY' in (row[0] or ''):
+        return
+
+    logger.info("迁移 upload_reservations 表：添加 FK 约束")
+    conn.commit()
+    cursor.execute('PRAGMA foreign_keys = OFF')
+    try:
+        cursor.execute('ALTER TABLE upload_reservations RENAME TO upload_reservations_old')
+        cursor.execute('''
+            CREATE TABLE upload_reservations (
+                reservation_key TEXT PRIMARY KEY,
+                auth_token TEXT,
+                source TEXT,
+                created_day TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (auth_token) REFERENCES auth_tokens(token) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute('''
+            INSERT INTO upload_reservations (reservation_key, auth_token, source, created_day, created_at)
+            SELECT
+                old.reservation_key,
+                CASE WHEN tok.token IS NOT NULL THEN old.auth_token ELSE NULL END,
+                old.source,
+                old.created_day,
+                old.created_at
+            FROM upload_reservations_old AS old
+            LEFT JOIN auth_tokens AS tok
+              ON tok.token = old.auth_token
+        ''')
+        cursor.execute('DROP TABLE upload_reservations_old')
+        conn.commit()
+    finally:
+        cursor.execute('PRAGMA foreign_keys = ON')
+
+
 def _create_indexes(cursor) -> None:
-    """创建所有数据库索引"""
-    indexes = [
-        ('idx_file_storage_created', 'file_storage(created_at)'),
-        ('idx_original_filename', 'file_storage(original_filename)'),
-        ('idx_file_size', 'file_storage(file_size)'),
-        ('idx_cdn_cached', 'file_storage(cdn_cached)'),
-        ('idx_group_upload', 'file_storage(is_group_upload)'),
-        ('idx_file_storage_tg_user', 'file_storage(tg_user_id)'),
-        ('idx_auth_token', 'file_storage(auth_token)'),
-        ('idx_storage_backend', 'file_storage(storage_backend)'),
-        ('idx_storage_key', 'file_storage(storage_backend, storage_key)'),
-        ('idx_auth_tokens_expires', 'auth_tokens(expires_at)'),
-        ('idx_auth_tokens_active', 'auth_tokens(is_active)'),
-        ('idx_galleries_owner', 'galleries(owner_token)'),
-        ('idx_galleries_owner_type', 'galleries(owner_type)'),
-        ('idx_galleries_share_token', 'galleries(share_token)'),
-        ('idx_galleries_access_mode', 'galleries(access_mode)'),
-        ('idx_galleries_hide_share_all', 'galleries(hide_from_share_all)'),
-        ('idx_galleries_homepage_expose', 'galleries(homepage_expose_enabled)'),
-        ('idx_galleries_editor_pick', 'galleries(editor_pick_weight DESC, updated_at DESC)'),
-        ('idx_gallery_images_gallery', 'gallery_images(gallery_id, added_at DESC)'),
-        ('idx_share_all_token', 'share_all_links(share_token)'),
-        ('idx_gallery_token_access_gallery', 'gallery_token_access(gallery_id)'),
-        ('idx_gallery_token_access_token', 'gallery_token_access(token)'),
-        ('idx_gallery_token_access_expires', 'gallery_token_access(expires_at)'),
-        ('idx_gallery_home_sections_order', 'gallery_home_sections(display_order, id)'),
-        ('idx_gallery_home_items_section_order', 'gallery_home_section_items(section_id, pin_order, id)'),
-        ('idx_gallery_home_items_gallery', 'gallery_home_section_items(gallery_id)'),
-        ('idx_tg_login_codes_code', 'tg_login_codes(code)'),
-        ('idx_tg_login_codes_expires', 'tg_login_codes(expires_at)'),
-        ('idx_tg_sessions_expires', 'tg_sessions(expires_at)'),
-        ('idx_tg_sessions_user', 'tg_sessions(tg_user_id)'),
-        ('idx_tg_sessions_status', 'tg_sessions(status)'),
-        ('idx_tg_sessions_user_status', 'tg_sessions(tg_user_id, status, expires_at)'),
-        ('idx_tg_sessions_last_seen', 'tg_sessions(last_seen_at)'),
-        ('idx_tg_sessions_session_id', 'tg_sessions(session_id)'),
-        ('idx_tg_session_devices_token', 'tg_session_devices(session_token)'),
-        ('idx_tg_session_devices_device_id', 'tg_session_devices(device_id)'),
-        ('idx_tg_session_devices_last_seen', 'tg_session_devices(last_seen_at)'),
-        ('idx_auth_tokens_tg_user', 'auth_tokens(tg_user_id)'),
-        ('idx_custom_domains_domain', 'custom_domains(domain)'),
-        ('idx_custom_domains_type', 'custom_domains(domain_type)'),
-        ('idx_custom_domains_active', 'custom_domains(is_active)'),
-        ('idx_custom_domains_default', 'custom_domains(is_default)'),
-        ('idx_custom_domains_sort', 'custom_domains(sort_order)'),
+    """创建所有数据库索引（白名单常量，禁止运行时拼接 SQL）"""
+    index_statements = [
+        'CREATE INDEX IF NOT EXISTS idx_file_storage_created ON file_storage(created_at)',
+        'CREATE INDEX IF NOT EXISTS idx_original_filename ON file_storage(original_filename)',
+        'CREATE INDEX IF NOT EXISTS idx_file_size ON file_storage(file_size)',
+        'CREATE INDEX IF NOT EXISTS idx_cdn_cached ON file_storage(cdn_cached)',
+        'CREATE INDEX IF NOT EXISTS idx_group_upload ON file_storage(is_group_upload)',
+        'CREATE INDEX IF NOT EXISTS idx_file_storage_tg_user ON file_storage(tg_user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_auth_token ON file_storage(auth_token)',
+        'CREATE INDEX IF NOT EXISTS idx_storage_backend ON file_storage(storage_backend)',
+        'CREATE INDEX IF NOT EXISTS idx_storage_key ON file_storage(storage_backend, storage_key)',
+        'CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_auth_tokens_active ON auth_tokens(is_active)',
+        'CREATE INDEX IF NOT EXISTS idx_galleries_owner ON galleries(owner_token)',
+        'CREATE INDEX IF NOT EXISTS idx_galleries_owner_type ON galleries(owner_type)',
+        'CREATE INDEX IF NOT EXISTS idx_galleries_share_token ON galleries(share_token)',
+        'CREATE INDEX IF NOT EXISTS idx_galleries_access_mode ON galleries(access_mode)',
+        'CREATE INDEX IF NOT EXISTS idx_galleries_hide_share_all ON galleries(hide_from_share_all)',
+        'CREATE INDEX IF NOT EXISTS idx_galleries_homepage_expose ON galleries(homepage_expose_enabled)',
+        'CREATE INDEX IF NOT EXISTS idx_galleries_editor_pick ON galleries(editor_pick_weight DESC, updated_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_gallery_images_gallery ON gallery_images(gallery_id, added_at DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_share_all_token ON share_all_links(share_token)',
+        'CREATE INDEX IF NOT EXISTS idx_gallery_token_access_gallery ON gallery_token_access(gallery_id)',
+        'CREATE INDEX IF NOT EXISTS idx_gallery_token_access_token ON gallery_token_access(token)',
+        'CREATE INDEX IF NOT EXISTS idx_gallery_token_access_expires ON gallery_token_access(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_gallery_home_sections_order ON gallery_home_sections(display_order, id)',
+        'CREATE INDEX IF NOT EXISTS idx_gallery_home_items_section_order ON gallery_home_section_items(section_id, pin_order, id)',
+        'CREATE INDEX IF NOT EXISTS idx_gallery_home_items_gallery ON gallery_home_section_items(gallery_id)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_login_codes_code ON tg_login_codes(code)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_login_codes_expires ON tg_login_codes(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_sessions_expires ON tg_sessions(expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_sessions_user ON tg_sessions(tg_user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_sessions_status ON tg_sessions(status)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_sessions_user_status ON tg_sessions(tg_user_id, status, expires_at)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_sessions_last_seen ON tg_sessions(last_seen_at)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_sessions_session_id ON tg_sessions(session_id)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_session_devices_token ON tg_session_devices(session_token)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_session_devices_device_id ON tg_session_devices(device_id)',
+        'CREATE INDEX IF NOT EXISTS idx_tg_session_devices_last_seen ON tg_session_devices(last_seen_at)',
+        'CREATE INDEX IF NOT EXISTS idx_auth_tokens_tg_user ON auth_tokens(tg_user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_upload_reservations_token_day ON upload_reservations(auth_token, created_day)',
+        'CREATE INDEX IF NOT EXISTS idx_upload_reservations_source_day ON upload_reservations(source, created_day)',
+        'CREATE INDEX IF NOT EXISTS idx_upload_reservations_created_at ON upload_reservations(created_at)',
+        'CREATE INDEX IF NOT EXISTS idx_custom_domains_domain ON custom_domains(domain)',
+        'CREATE INDEX IF NOT EXISTS idx_custom_domains_type ON custom_domains(domain_type)',
+        'CREATE INDEX IF NOT EXISTS idx_custom_domains_active ON custom_domains(is_active)',
+        'CREATE INDEX IF NOT EXISTS idx_custom_domains_default ON custom_domains(is_default)',
+        'CREATE INDEX IF NOT EXISTS idx_custom_domains_sort ON custom_domains(sort_order)',
     ]
 
-    for idx_name, idx_def in indexes:
-        cursor.execute(f'CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}')
+    for sql in index_statements:
+        cursor.execute(sql)
 
 
 # ===================== 数据库初始化入口 =====================
@@ -730,6 +787,7 @@ def init_database(quiet: bool = False) -> None:
             cursor = conn.cursor()
 
             _init_core_tables(cursor)
+            _migrate_upload_reservations_fk(cursor, conn)
             _migrate_file_storage_columns(cursor)
             _init_tg_auth_tables(cursor)
             _migrate_auth_tokens_columns(cursor)

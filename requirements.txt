@@ -11,6 +11,11 @@ flask-cors==4.0.0
 aiohttp==3.9.3
 requests==2.31.0
 
+# TOTP 二次验证
+pyotp==2.9.0
+qrcode==8.2
+pillow==12.2.0
+
 # 其他依赖
 python-dotenv==1.0.0
 waitress==3.0.0

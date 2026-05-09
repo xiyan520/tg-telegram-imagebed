@@ -232,7 +232,9 @@ class TelegramBackend(StorageBackend):
     def _upload_via_bot_api(
         self,
         *,
-        file_content: bytes,
+        file_content: Optional[bytes] = None,
+        file_handle=None,
+        file_handle_path: str = '',
         filename: str,
         content_type: str,
         file_size: int,
@@ -655,6 +657,56 @@ class TelegramBackend(StorageBackend):
                 file_size=file_size,
                 caption=caption,
             )
+        except Exception as e:
+            logger.error(f"Telegram 存储上传异常: {e}")
+            return None
+
+    def put_file(
+        self,
+        *,
+        file_path: str,
+        filename: str,
+        content_type: str,
+        file_size: int,
+        caption: str,
+        source: str,
+        username: str,
+    ) -> Optional[PutResult]:
+        """上传本地文件到 Telegram（流式读取，避免大文件全部加载到内存）"""
+        if not self._bot_token or not self._chat_id:
+            logger.error("Telegram 存储后端未配置 bot_token 或 chat_id")
+            return None
+
+        try:
+            # Kurigram 大文件通道：直接传文件路径，让 Pyrogram 流式读取
+            if self._should_use_kurigram_upload(file_size):
+                try:
+                    return self._upload_via_kurigram(
+                        file_path=file_path,
+                        filename=filename,
+                        file_size=file_size,
+                        caption=caption,
+                    )
+                except Exception as e:
+                    logger.warning(f"Kurigram 上传失败，回退 Bot API: {type(e).__name__}: {e}")
+
+            # Bot API：传递文件句柄，避免大文件全部加载到内存
+            try:
+                handle = open(file_path, "rb")
+            except (FileNotFoundError, PermissionError, OSError) as exc:
+                logger.error(f"读取本地文件失败: {exc}")
+                return None
+            try:
+                return self._upload_via_bot_api(
+                    file_handle=handle,
+                    file_handle_path=file_path,
+                    filename=filename,
+                    content_type=content_type,
+                    file_size=file_size,
+                    caption=caption,
+                )
+            finally:
+                handle.close()
         except Exception as e:
             logger.error(f"Telegram 存储上传异常: {e}")
             return None

@@ -35,13 +35,14 @@
               管理后台
             </h1>
             <p class="text-gray-600 dark:text-gray-400 text-sm">
-              欢迎回来，请登录您的管理员账户
+              <template v-if="totpStep">请输入动态验证码完成二次验证</template>
+              <template v-else>欢迎回来，请登录您的管理员账户</template>
             </p>
           </div>
         </div>
 
-        <!-- 登录表单 -->
-        <UForm :state="loginForm" @submit="handleLogin" class="space-y-5">
+        <!-- 密码登录表单 -->
+        <UForm v-if="!totpStep" :state="loginForm" @submit="handleLogin" class="space-y-5">
           <!-- 用户名输入 -->
           <UFormGroup label="用户名" name="username" required>
             <UInput
@@ -126,6 +127,60 @@
           </div>
         </UForm>
 
+        <!-- TOTP 验证码输入 -->
+        <div v-else class="space-y-5">
+          <div class="text-center">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 mb-3">
+              <UIcon name="heroicons:key" class="w-8 h-8 text-white" />
+            </div>
+            <p class="text-sm text-gray-500 dark:text-gray-400">
+              请输入身份验证器中的 6 位动态验证码
+            </p>
+          </div>
+
+          <UFormGroup label="验证码" required>
+            <UInput
+              v-model="totpCode"
+              placeholder="输入 6 位验证码"
+              size="xl"
+              maxlength="6"
+              autocomplete="one-time-code"
+              class="text-center text-2xl tracking-widest"
+              @keyup.enter="handleVerifyTotp"
+            >
+              <template #leading>
+                <UIcon name="heroicons:shield-check" class="w-5 h-5 text-gray-400" />
+              </template>
+            </UInput>
+          </UFormGroup>
+
+          <UButton
+            color="primary"
+            size="xl"
+            block
+            :loading="totpLoading"
+            :disabled="totpCode.length !== 6"
+            @click="handleVerifyTotp"
+            class="shadow-lg hover:shadow-xl transition-shadow"
+          >
+            <template #leading>
+              <UIcon name="heroicons:shield-check" />
+            </template>
+            {{ totpLoading ? '验证中...' : '验证' }}
+          </UButton>
+
+          <UButton
+            color="gray"
+            variant="ghost"
+            size="sm"
+            block
+            @click="resetTotpStep"
+          >
+            <UIcon name="heroicons:arrow-left" class="w-4 h-4 mr-1" />
+            返回密码登录
+          </UButton>
+        </div>
+
         <!-- 底部链接 -->
         <div class="mt-8 pt-6 border-t border-gray-200 dark:border-gray-800">
           <div class="flex items-center justify-center gap-4 text-sm">
@@ -172,6 +227,8 @@
 </template>
 
 <script setup lang="ts">
+import type { AdminLoginTotpRequired } from '~/types/api'
+
 definePageMeta({
   layout: 'admin-login'
 })
@@ -182,22 +239,27 @@ const router = useRouter()
 
 // 状态
 const loading = ref(false)
-const authChecking = ref(true)  // 认证检查中，避免登录表单闪烁
+const authChecking = ref(true)
 const showPassword = ref(false)
 const rememberMe = ref(false)
-const lockoutTimer = ref(0)        // 锁定倒计时秒数
-const remainingAttempts = ref(-1)  // 剩余尝试次数，-1 表示未知
+const lockoutTimer = ref(0)
+const remainingAttempts = ref(-1)
 let countdownInterval: ReturnType<typeof setInterval> | null = null
 const loginForm = ref({
   username: '',
   password: ''
 })
 
-// 页面初始化：先恢复认证状态，再决定显示登录表单还是跳转
+// TOTP 状态
+const totpStep = ref(false)
+const totpCode = ref('')
+const totpLoading = ref(false)
+const totpVerificationToken = ref('')
+
+// 页面初始化
 onMounted(async () => {
-  // 检查是否需要首次设置
   try {
-    const setupRes = await $fetch<{ need_setup: boolean }>('/api/setup/status')
+    const setupRes = await $fetch<{ need_setup: boolean }>(`${useRuntimeConfig().public.apiBase}/api/setup/status`)
     if (setupRes.need_setup) {
       router.replace('/setup')
       return
@@ -206,21 +268,21 @@ onMounted(async () => {
     // 接口异常时继续正常流程
   }
 
-  // 恢复并验证后端 session
   if (import.meta.client && !authStore.isAuthenticated) {
-    await authStore.restoreAuth()
+    try {
+      await authStore.restoreAuth()
+    } catch {
+      // 恢复失败时继续展示登录表单
+    }
   }
 
-  // 已登录则直接跳转，不显示登录表单
   if (authStore.isAuthenticated) {
     router.replace('/admin/dashboard')
     return
   }
 
-  // 未登录，显示登录表单
   authChecking.value = false
 
-  // 从localStorage恢复记住的用户名
   if (import.meta.client) {
     const savedUsername = localStorage.getItem('admin_username')
     if (savedUsername) {
@@ -230,7 +292,6 @@ onMounted(async () => {
   }
 })
 
-// 启动锁定倒计时
 const startLockoutCountdown = (seconds: number) => {
   if (countdownInterval) {
     clearInterval(countdownInterval)
@@ -248,17 +309,26 @@ const startLockoutCountdown = (seconds: number) => {
   }, 1000)
 }
 
-// 登录处理
+// 登录处理（第一步：密码验证）
 const handleLogin = async () => {
   loading.value = true
   try {
-    await authStore.login(loginForm.value.username, loginForm.value.password, rememberMe.value)
+    const result = await authStore.login(loginForm.value.username, loginForm.value.password, rememberMe.value)
 
-    // 重置安全状态
+    // 检查是否需要 TOTP 二次验证
+    if (result && typeof result === 'object' && 'totp_required' in result && (result as AdminLoginTotpRequired).totp_required) {
+      totpVerificationToken.value = (result as AdminLoginTotpRequired).verification_token
+      totpStep.value = true
+      totpCode.value = ''
+      remainingAttempts.value = -1
+      lockoutTimer.value = 0
+      return
+    }
+
+    // 正常登录成功
     remainingAttempts.value = -1
     lockoutTimer.value = 0
 
-    // 如果选择记住我，保存用户名
     if (import.meta.client) {
       if (rememberMe.value) {
         localStorage.setItem('admin_username', loginForm.value.username)
@@ -268,7 +338,6 @@ const handleLogin = async () => {
     }
 
     notification.success('登录成功', '欢迎回来！')
-
     router.push('/admin/dashboard')
   } catch (error: any) {
     if (error.locked && error.retryAfter) {
@@ -285,7 +354,38 @@ const handleLogin = async () => {
   }
 }
 
-// 组件卸载时清理定时器
+// TOTP 验证码提交（第二步）
+const handleVerifyTotp = async () => {
+  if (totpCode.value.length !== 6) return
+  totpLoading.value = true
+  try {
+    await authStore.verifyTotpLogin(totpVerificationToken.value, totpCode.value)
+
+    if (import.meta.client) {
+      if (rememberMe.value) {
+        localStorage.setItem('admin_username', loginForm.value.username)
+      } else {
+        localStorage.removeItem('admin_username')
+      }
+    }
+
+    notification.success('登录成功', '欢迎回来！')
+    router.push('/admin/dashboard')
+  } catch (error: any) {
+    notification.error('验证失败', error.message || '验证码错误，请重试')
+    totpCode.value = ''
+  } finally {
+    totpLoading.value = false
+  }
+}
+
+// 返回密码登录步骤
+const resetTotpStep = () => {
+  totpStep.value = false
+  totpCode.value = ''
+  totpVerificationToken.value = ''
+}
+
 onUnmounted(() => {
   if (countdownInterval) {
     clearInterval(countdownInterval)

@@ -31,8 +31,22 @@ from .. import __version__
 from ..config import BASE_DIR, logger
 from ..database import get_system_setting, update_system_settings
 
-OFFICIAL_RELEASE_REPO = 'xiyan520/tg-telegram-imagebed'
-OFFICIAL_REPO_URL = f'https://github.com/{OFFICIAL_RELEASE_REPO}.git'
+DEFAULT_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
+
+
+def _get_allowed_release_repos() -> set:
+    """动态构建允许的更新仓库集合（默认 + 已配置）"""
+    allowed = {DEFAULT_RELEASE_REPO}
+    try:
+        from ..database import get_system_setting
+        configured = _normalize_release_repo(
+            str(get_system_setting('app_update_release_repo') or '').strip()
+        )
+        if configured:
+            allowed.add(configured)
+    except Exception:
+        pass
+    return allowed
 DEFAULT_ASSET_NAME = 'tg-imagebed-release.zip'
 DEFAULT_SHA_NAME = 'tg-imagebed-release.zip.sha256'
 
@@ -99,23 +113,23 @@ def _configured_update_source() -> str:
 
 
 def _configured_release_repo() -> str:
-    value = (get_system_setting('app_update_release_repo') or '').strip() or OFFICIAL_RELEASE_REPO
+    value = (get_system_setting('app_update_release_repo') or '').strip() or DEFAULT_RELEASE_REPO
     normalized = _normalize_release_repo(value)
-    return normalized or OFFICIAL_RELEASE_REPO
+    return normalized or DEFAULT_RELEASE_REPO
 
 
 def _configured_asset_name() -> str:
     value = (get_system_setting('app_update_release_asset_name') or '').strip() or DEFAULT_ASSET_NAME
+    if any(sep in value for sep in ('/', '\\')) or value in ('', '.', '..'):
+        raise RuntimeError(f'非法更新包文件名: {value}')
     return value
 
 
 def _configured_sha_name() -> str:
     value = (get_system_setting('app_update_release_sha_name') or '').strip() or DEFAULT_SHA_NAME
+    if any(sep in value for sep in ('/', '\\')) or value in ('', '.', '..'):
+        raise RuntimeError(f'非法校验文件名: {value}')
     return value
-
-
-def _release_repo_allowed(repo: str) -> bool:
-    return _normalize_release_repo(repo) == _normalize_release_repo(OFFICIAL_RELEASE_REPO)
 
 
 def _state_copy() -> Dict[str, Any]:
@@ -436,8 +450,7 @@ def get_update_runtime_info() -> Dict[str, Any]:
     update_source = _configured_update_source()
     pip_available = _check_pip_available()
     current_version = _current_version()
-    repo_allowed = _release_repo_allowed(release_repo)
-    release_supported = update_source == 'release' and repo_allowed
+    release_supported = update_source == 'release'
 
     # 兼容旧前端字段：Git 链路已停用
     git_available = shutil.which('git') is not None
@@ -451,11 +464,11 @@ def get_update_runtime_info() -> Dict[str, Any]:
         'repo_path': str(repo_path),
         'update_source': update_source,
         'release_repo': release_repo,
-        'release_repo_url': OFFICIAL_REPO_URL,
+        'release_repo_url': f'https://github.com/{release_repo}.git' if release_repo else '',
         'release_asset_name': asset_name,
         'release_sha_name': sha_name,
         'release_supported': release_supported,
-        'repo_allowed': repo_allowed,
+        'repo_allowed': release_repo in _get_allowed_release_repos(),
         'pip_available': pip_available,
         # 兼容旧字段
         'git_available': git_available,
@@ -463,7 +476,7 @@ def get_update_runtime_info() -> Dict[str, Any]:
         'npm_available': npm_available,
         'is_git_repo': False,
         'repo_clean': True,
-        'repo_url': OFFICIAL_REPO_URL,
+        'repo_url': f'https://github.com/{release_repo}.git' if release_repo else '',
         'branch': 'release',
     }
 
@@ -472,10 +485,12 @@ def check_for_updates() -> Dict[str, Any]:
     info = get_update_runtime_info()
     if info['update_source'] != 'release':
         raise RuntimeError('当前环境仅支持 Release 更新模式')
-    if not info['repo_allowed']:
-        raise RuntimeError('更新源未通过白名单校验，仅允许官方仓库')
 
-    release = _fetch_latest_release(info['release_repo'])
+    release_repo = info['release_repo']
+    if release_repo not in _get_allowed_release_repos():
+        raise RuntimeError(f'不允许的更新仓库: {release_repo}，仅支持官方仓库')
+
+    release = _fetch_latest_release(release_repo)
     assets = release['assets']
     asset_name = info['release_asset_name']
     sha_name = info['release_sha_name']

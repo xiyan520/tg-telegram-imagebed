@@ -6,17 +6,30 @@
 提供文件上传到 Telegram、获取文件路径等功能。
 """
 import time
+import os
 import hashlib
 from typing import Optional, Dict, Any
 
 import requests
 
 from ..config import logger
-from ..database import save_file_info, get_file_info, update_file_path_in_db
+from ..database import save_file_info, get_file_info, update_file_path_in_db, release_upload_reservation
 from ..utils import sign_file_id, get_mime_type
 from .cdn_service import add_to_cdn_monitor
 from ..storage.router import get_storage_router
 from ..bot_control import get_effective_bot_token
+
+
+def _hash_file(path: str) -> str:
+    """使用流式读取计算文件 SHA256，避免大文件整体加载到内存"""
+    sha256 = hashlib.sha256()
+    with open(path, 'rb') as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            sha256.update(chunk)
+    return sha256.hexdigest()
 
 
 def get_fresh_file_path(file_id: str) -> Optional[str]:
@@ -56,7 +69,7 @@ def get_fresh_file_path(file_id: str) -> Optional[str]:
 
 
 def process_upload(
-    file_content: bytes,
+    file_content: Optional[bytes],
     filename: str,
     content_type: str,
     username: str = 'web_user',
@@ -67,6 +80,8 @@ def process_upload(
     group_message_id: Optional[int] = None,
     upload_scene: Optional[str] = None,
     requested_backend: Optional[str] = None,
+    staged_file_path: Optional[str] = None,
+    reservation_key: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     处理文件上传的完整流程
@@ -87,7 +102,15 @@ def process_upload(
     Returns:
         包含 encrypted_id, url 等信息的字典，失败返回 None
     """
-    file_size = len(file_content)
+    if file_content is None and not staged_file_path:
+        raise ValueError("file_content 和 staged_file_path 不能同时为空")
+    if file_content is not None and staged_file_path:
+        raise ValueError("file_content 和 staged_file_path 不能同时提供")
+
+    if staged_file_path:
+        file_size = os.path.getsize(staged_file_path)
+    else:
+        file_size = len(file_content or b'')
 
     # 规范化 content_type（防止 None 或空字符串导致后端出错）
     if not content_type:
@@ -103,11 +126,15 @@ def process_upload(
         else:
             scene = "guest"
 
-    # 计算文件哈希（使用 SHA256，比 MD5 更安全）
-    file_hash = hashlib.sha256(file_content).hexdigest()
+    # 计算文件哈希
+    if staged_file_path:
+        file_hash = _hash_file(staged_file_path)
+    else:
+        file_hash = hashlib.sha256(file_content or b'').hexdigest()
 
-    # 构建说明
-    caption = f"{source} | 文件名: {filename} | 大小: {file_size} bytes | 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+    # 构建说明（清理文件名中的换行等控制字符，避免破坏 caption 格式）
+    safe_filename = (filename or '').replace('\n', ' ').replace('\r', ' ')
+    caption = f"{source} | 文件名: {safe_filename} | 大小: {file_size} bytes | 时间: {time.strftime('%Y-%m-%d %H:%M:%S')}"
 
     # 通过存储路由器选择后端并上传
     router = get_storage_router()
@@ -117,24 +144,42 @@ def process_upload(
         is_admin=(scene == "admin"),
     )
     backend = router.get_backend(backend_name)
-    put_result = backend.put_bytes(
-        file_content=file_content,
-        filename=filename,
-        content_type=content_type,
-        file_size=file_size,
-        caption=caption,
-        source=source,
-        username=username,
-    )
+    try:
+        if staged_file_path:
+            put_result = backend.put_file(
+                file_path=staged_file_path,
+                filename=filename,
+                content_type=content_type,
+                file_size=file_size,
+                caption=caption,
+                source=source,
+                username=username,
+            )
+        else:
+            put_result = backend.put_bytes(
+                file_content=file_content or b'',
+                filename=filename,
+                content_type=content_type,
+                file_size=file_size,
+                caption=caption,
+                source=source,
+                username=username,
+            )
+    except Exception:
+        if reservation_key:
+            release_upload_reservation(reservation_key)
+        raise
 
     if not put_result:
+        if reservation_key:
+            release_upload_reservation(reservation_key)
         return None
 
     # 生成签名 ID
     encrypted_id = sign_file_id(put_result.file_id, put_result.file_path)
 
     # 获取 MIME 类型
-    mime_type = get_mime_type(filename)
+    mime_type = content_type or get_mime_type(filename)
 
     # 保存文件信息
     # 从存储后端返回的 meta 中提取 TG 消息信息（Web 上传到 Telegram 频道时回填）
@@ -172,10 +217,23 @@ def process_upload(
         'storage_key': put_result.storage_key,
         'storage_meta': put_result.storage_meta,
     }
-    save_file_info(encrypted_id, file_data)
+    try:
+        save_file_info(encrypted_id, file_data, reservation_key=reservation_key)
+    except Exception:
+        logger.exception(f"保存文件信息失败，尝试回滚已存储的对象: {encrypted_id}")
+        if reservation_key:
+            release_upload_reservation(reservation_key)
+        try:
+            backend.delete(storage_key=put_result.storage_key)
+        except Exception:
+            logger.exception(f"回滚删除失败: {put_result.storage_key}")
+        return None
 
-    # 添加到 CDN 监控
-    add_to_cdn_monitor(encrypted_id, file_data['upload_time'])
+    # 添加到 CDN 监控（失败不影响主流程）
+    try:
+        add_to_cdn_monitor(encrypted_id, file_data['upload_time'])
+    except Exception:
+        logger.exception(f"CDN 监控入队失败: {encrypted_id}")
 
     logger.info(f"文件上传完成: {filename} -> {encrypted_id}")
 
@@ -249,7 +307,10 @@ def record_existing_telegram_file(
         },
     }
     save_file_info(encrypted_id, file_data)
-    add_to_cdn_monitor(encrypted_id, upload_time)
+    try:
+        add_to_cdn_monitor(encrypted_id, upload_time)
+    except Exception:
+        logger.exception(f"CDN 监控入队失败: {encrypted_id}")
 
     logger.info(f"已记录 Telegram 既有文件: {filename} -> {encrypted_id}")
 
