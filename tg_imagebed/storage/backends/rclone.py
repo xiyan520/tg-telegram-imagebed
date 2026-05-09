@@ -280,7 +280,7 @@ class RcloneBackend(StorageBackend):
         source: str,
         username: str,
     ) -> Optional[PutResult]:
-        """浠庢湰鍦版殏瀛樻枃浠朵笂浼犲埌 rclone remote"""
+        """从本地暂存文件上传到 rclone remote"""
         key = self._generate_key(filename)
         obj = self._object_path(key)
 
@@ -290,7 +290,7 @@ class RcloneBackend(StorageBackend):
                 args = self._base_cmd() + ["copyto", file_path, obj]
                 cp = self._run_capture(args=args, timeout_seconds=self._upload_timeout)
                 if cp.returncode == 0:
-                    logger.info(f"rclone 瀛樺偍涓婁紶鎴愬姛: {key}")
+                    logger.info(f"rclone 存储上传成功: {key}")
                     return PutResult(
                         file_id=key,
                         file_path=key,

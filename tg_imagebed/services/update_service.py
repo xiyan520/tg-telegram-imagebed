@@ -450,7 +450,7 @@ def get_update_runtime_info() -> Dict[str, Any]:
         'release_asset_name': asset_name,
         'release_sha_name': sha_name,
         'release_supported': release_supported,
-        'repo_allowed': True,
+        'repo_allowed': release_repo in _ALLOWED_RELEASE_REPOS,
         'pip_available': pip_available,
         # 兼容旧字段
         'git_available': git_available,

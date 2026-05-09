@@ -16,15 +16,6 @@
       </UButton>
     </div>
 
-    <div class="flex justify-end gap-2">
-      <UButton icon="heroicons:arrow-path" color="gray" variant="outline" :loading="loading || metricsLoading" @click="refreshAll">
-        刷新
-      </UButton>
-      <UButton icon="heroicons:plus" color="primary" @click="openCreateModal">
-        创建 Token
-      </UButton>
-    </div>
-
     <AdminTokensTokenStatsBar
       :loading="metricsLoading"
       :metrics="metrics"
@@ -414,14 +405,18 @@ const createToken = async (form: CreateTokenForm) => {
     createdToken.value = resp.data?.token || null
     tokenCopied.value = false
     notification.success('创建成功', 'Token 已生成，请及时复制保存')
-    
-    // 添加到 Token Vault
-    await tokenStore.addTokenToVault(resp.data?.token, {
-      albumName: form.description || '',
-      makeActive: true,
-      verify: true
-    })
-    
+
+    // 添加到 Token Vault（同步失败不影响创建结果）
+    try {
+      await tokenStore.addTokenToVault(resp.data?.token, {
+        albumName: form.description || '',
+        makeActive: true,
+        verify: true
+      })
+    } catch {
+      /* vault sync 失败不影响已创建的 Token */
+    }
+
     await refreshAll()
   } catch (error: any) {
     console.error('创建Token失败:', error)

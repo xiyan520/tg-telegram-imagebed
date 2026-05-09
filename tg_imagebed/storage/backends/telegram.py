@@ -342,6 +342,13 @@ class TelegramBackend(StorageBackend):
 
         last_error = None
         for attempt in range(_TG_UPLOAD_MAX_RETRIES):
+            # 流式上传时，文件句柄在首次 POST 后位于 EOF，重试前需回退到开头
+            if file_handle is not None:
+                try:
+                    if hasattr(file_handle, 'seek'):
+                        file_handle.seek(0)
+                except Exception:
+                    pass
             with _TG_UPLOAD_SEMAPHORE:
                 session = requests.Session()
                 session.trust_env = True
@@ -458,7 +465,8 @@ class TelegramBackend(StorageBackend):
     def _upload_via_kurigram(
         self,
         *,
-        file_content: bytes,
+        file_content: Optional[bytes] = None,
+        file_path: str = '',
         filename: str,
         file_size: int,
         caption: str,
@@ -467,13 +475,20 @@ class TelegramBackend(StorageBackend):
 
         async def task():
             app = self._build_kurigram_client()
-            payload = io.BytesIO(file_content)
-            payload.name = filename or "upload.bin"
+            if file_path:
+                # 直接传递文件路径，让 Pyrogram 流式读取，避免全部加载到内存
+                document_arg = file_path
+            elif file_content is not None:
+                payload = io.BytesIO(file_content)
+                payload.name = filename or "upload.bin"
+                document_arg = payload
+            else:
+                raise RuntimeError("Kurigram 上传缺少文件内容")
 
             async with app:
                 message = await app.send_document(
                     chat_id=self._chat_id,
-                    document=payload,
+                    document=document_arg,
                     file_name=filename or None,
                     caption=caption or "",
                 )
@@ -831,17 +846,11 @@ class TelegramBackend(StorageBackend):
             return None
 
         try:
-            # Kurigram 大文件通道需要完整内容，先走 Bot API 流式上传
+            # Kurigram 大文件通道：直接传文件路径，让 Pyrogram 流式读取
             if self._should_use_kurigram_upload(file_size):
                 try:
-                    with open(file_path, "rb") as handle:
-                        file_content = handle.read()
-                except (FileNotFoundError, PermissionError, OSError) as exc:
-                    logger.error(f"读取本地文件失败: {exc}")
-                    return None
-                try:
                     return self._upload_via_kurigram(
-                        file_content=file_content,
+                        file_path=file_path,
                         filename=filename,
                         file_size=file_size,
                         caption=caption,

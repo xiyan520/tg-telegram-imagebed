@@ -32,31 +32,6 @@
       </template>
     </AdminPageHeader>
 
-    <div class="flex justify-end gap-2">
-      <UButton
-        icon="heroicons:globe-alt"
-        :color="shareAllLink?.enabled ? 'green' : 'gray'"
-        variant="outline"
-        @click="openShareAllModal"
-      >
-        {{ shareAllLink?.enabled ? '全部分享中' : '全部分享' }}
-      </UButton>
-      <UButton
-        icon="heroicons:arrow-path"
-        color="gray"
-        variant="ghost"
-        :loading="loading"
-        @click="loadGalleries"
-      />
-      <UButton
-        icon="heroicons:plus"
-        color="primary"
-        @click="openCreateModal"
-      >
-        创建画集
-      </UButton>
-    </div>
-
     <!-- 搜索筛选栏 + 画集网格 -->
     <UCard>
       <!-- 搜索和排序 -->
@@ -135,7 +110,7 @@
           <!-- 删除按钮 -->
           <button
             @click.stop="askDelete(gallery)"
-            class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-600"
+            class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-red-600"
             title="删除画集"
           >
             <UIcon name="heroicons:trash" class="w-4 h-4" />

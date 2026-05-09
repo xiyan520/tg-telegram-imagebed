@@ -82,9 +82,6 @@ def admin_tokens_api():
                     upload_limit = default_upload_limit
             except (ValueError, TypeError):
                 upload_limit = default_upload_limit
-        elif raw_upload_limit == 0:
-            # 明确传 0，保持 0（数据库层会转换为 None）
-            upload_limit = 0
 
         created = TokenService.create_token(
             description=payload.get('description'),

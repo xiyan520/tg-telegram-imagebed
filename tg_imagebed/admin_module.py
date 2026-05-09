@@ -929,19 +929,17 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         if not verification_token or not code:
             return jsonify({'success': False, 'message': '参数不完整'}), 400
 
-        # 验证 verification_token（原子检查+标记，防止重放）
+        # 验证 verification_token（只读取，不标记 used，验证通过后再标记）
         with _totp_verify_tokens_lock:
             _cleanup_totp_verify_tokens()
             info = _totp_verify_tokens.get(verification_token)
             if not info:
                 return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
-            if info['used']:
+            if info.get('used'):
                 return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
             if time.time() - info['created_at'] > _TOTP_VERIFY_TOKEN_EXPIRE_SECONDS:
                 del _totp_verify_tokens[verification_token]
                 return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
-            # 原子标记为已使用，防止并发重放
-            info['used'] = True
             username = info['username']
             ip = info['ip']
             remember_me = info['remember_me']

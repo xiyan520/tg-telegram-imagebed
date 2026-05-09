@@ -87,7 +87,7 @@ _ACTIVE_EXPR = f"(is_active = 1 AND NOT {_EXPIRED_EXPR})"
 
 
 def _cleanup_stale_reservations(cursor, *, max_age_minutes: int = 120) -> None:
-    """娓呯悊杩囨湡鐨勪笂浼犻绾﹁褰曪紝閬垮厤寮傚父涓柇鍚庨暱鏈熷崰鐢ㄩ厤棰?"""
+    """清理过期的上传预约记录，避免异常中断后长期占用配额"""
     cursor.execute(
         """
         DELETE FROM upload_reservations
@@ -122,7 +122,7 @@ def create_auth_token(
                 INSERT INTO auth_tokens
                 (token, expires_at, upload_limit, ip_address, user_agent, description)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ''', (token, expires_at, upload_limit, ip_address, user_agent, description or '游客Token'))
+            ''', (token, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'))
 
         logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")
         return token
@@ -142,7 +142,7 @@ def create_auth_token_with_ip_limit(
     expires_days: int = 30,
     max_tokens_for_ip: int,
 ) -> Tuple[Optional[str], Optional[str]]:
-    """鍦ㄤ簨鍔′腑鍘熷瓙鍦板垱寤?Token锛岄伩鍏嶅悓涓?IP 骞跺彂瓒呰繃涓婇檺"""
+    """在事务中原子地创建 Token，避免同一 IP 并发超过上限"""
     if not ip_address:
         return create_auth_token(
             ip_address=ip_address,
@@ -177,7 +177,7 @@ def create_auth_token_with_ip_limit(
                 (token, expires_at, upload_limit, ip_address, user_agent, description)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''',
-                (token, expires_at, upload_limit, ip_address, user_agent, description or '娓稿Token')
+                (token, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'),
             )
 
         logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")

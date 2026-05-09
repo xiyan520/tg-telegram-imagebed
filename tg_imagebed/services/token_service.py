@@ -104,12 +104,13 @@ class TokenService:
                     try:
                         import json as _json
                         meta_raw = file_row.get('storage_meta')
+                        meta = {}
                         if isinstance(meta_raw, str) and meta_raw.strip():
-                            meta = _json.loads(meta_raw)
+                            parsed = _json.loads(meta_raw)
+                            if isinstance(parsed, dict):
+                                meta = parsed
                         elif isinstance(meta_raw, dict):
                             meta = meta_raw
-                        else:
-                            meta = {}
                         if not message_id:
                             message_id = meta.get('message_id')
                         if not chat_id and storage_backend:

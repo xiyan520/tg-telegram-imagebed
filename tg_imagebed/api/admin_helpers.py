@@ -70,8 +70,15 @@ def _get_allowed_origin() -> str:
             if domain:
                 all_domains.add(domain)
         for domain in all_domains:
-            if _host_matches(origin, domain):
-                return origin
+            try:
+                parsed = urlparse(origin)
+                domain_origin = f"{parsed.scheme}://{domain}"
+                if parsed.port:
+                    domain_origin += f":{parsed.port}"
+                if _origin_matches(origin, domain_origin):
+                    return origin
+            except Exception:
+                continue
     except Exception:
         pass
 

@@ -108,19 +108,19 @@ def save_file_info(
 
             auth_token = reservation_row['auth_token']
             if auth_token:
-                    cursor.execute(
-                        '''
-                        UPDATE auth_tokens
-                        SET upload_count = upload_count + 1,
-                            last_used = CURRENT_TIMESTAMP
-                        WHERE token = ?
-                        ''',
-                        (auth_token,)
-                    )
                 cursor.execute(
-                    'DELETE FROM upload_reservations WHERE reservation_key = ?',
-                    (reservation_key,)
+                    '''
+                    UPDATE auth_tokens
+                    SET upload_count = upload_count + 1,
+                        last_used = CURRENT_TIMESTAMP
+                    WHERE token = ?
+                    ''',
+                    (auth_token,)
                 )
+            cursor.execute(
+                'DELETE FROM upload_reservations WHERE reservation_key = ?',
+                (reservation_key,)
+            )
 
 
 def update_file_path_in_db(encrypted_id: str, new_file_path: str) -> None:

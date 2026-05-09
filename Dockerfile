@@ -17,8 +17,13 @@ COPY frontend/ ./
 RUN npm run generate
 
 # SPA fallback: 如果 prerender 跳过了 / 路由，用 200.html 作为入口
-RUN if [ ! -f .output/public/index.html ] && [ -f .output/public/200.html ]; then \
+RUN if [ -f .output/public/index.html ]; then \
+      :; \
+    elif [ -f .output/public/200.html ]; then \
       cp .output/public/200.html .output/public/index.html; \
+    else \
+      echo "Missing frontend entrypoint: expected .output/public/index.html or .output/public/200.html" >&2; \
+      exit 1; \
     fi
 
 # ==================== 阶段2: 构建最终镜像 ====================

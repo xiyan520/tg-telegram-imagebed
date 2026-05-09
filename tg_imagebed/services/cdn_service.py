@@ -152,13 +152,21 @@ class CloudflareCDN:
         self.headers = headers
         self._cfg_ts = now
 
-        # 同步代理设置到 Session（需要加锁，Session 非线程安全）
+        # 同步代理设置：创建新 Session 避免与请求线程竞态（Session 非线程安全）
         proxy = get_proxy_url()
+        new_session = requests.Session()
+        retry_cfg = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=(429, 500, 502, 503, 504),
+            allowed_methods=('GET', 'HEAD', 'POST'),
+            raise_on_status=False,
+        )
+        new_session.mount('https://', HTTPAdapter(max_retries=retry_cfg))
+        if proxy:
+            new_session.proxies = {'http': proxy, 'https': proxy}
         with self._session_lock:
-            if proxy:
-                self._session.proxies = {'http': proxy, 'https': proxy}
-            else:
-                self._session.proxies = {}
+            self._session = new_session
 
     def _api_post(self, path: str, payload: dict) -> Tuple[bool, str]:
         """发送 Cloudflare API POST 请求"""
@@ -166,8 +174,10 @@ class CloudflareCDN:
         if not self.api_token or not self.zone_id:
             return False, 'missing Cloudflare credentials'
 
+        with self._session_lock:
+            session = self._session
         try:
-            resp = self._session.post(
+            resp = session.post(
                 f'{self.base_url}{path}',
                 headers=self.headers,
                 json=payload,
@@ -202,7 +212,9 @@ class CloudflareCDN:
             'Range': 'bytes=0-0',
         }
         try:
-            resp = self._session.get(url, headers=headers, timeout=15, allow_redirects=False)
+            with self._session_lock:
+                session = self._session
+            resp = session.get(url, headers=headers, timeout=15, allow_redirects=False)
             cf_cache_status = resp.headers.get('CF-Cache-Status', '')
             age_raw = resp.headers.get('Age')
             age = int(age_raw) if age_raw and str(age_raw).isdigit() else None

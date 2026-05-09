@@ -62,24 +62,29 @@ export const useAuthStore = defineStore('auth', {
     async verifyTotpLogin(verificationToken: string, code: string) {
       const config = useRuntimeConfig()
 
-      const response = await $fetch<ApiResponse<AdminLoginData>>(`${config.public.apiBase}/api/admin/login/verify-totp`, {
-        method: 'POST',
-        body: { verification_token: verificationToken, code },
-        credentials: 'include'
-      })
+      try {
+        const response = await $fetch<ApiResponse<AdminLoginData>>(`${config.public.apiBase}/api/admin/login/verify-totp`, {
+          method: 'POST',
+          body: { verification_token: verificationToken, code },
+          credentials: 'include'
+        })
 
-      if (response.success && response.data) {
-        this.username = response.data.username
-        this.isAuthenticated = true
+        if (response.success && response.data) {
+          this.username = response.data.username
+          this.isAuthenticated = true
 
-        if (import.meta.client) {
-          localStorage.setItem('has_session', 'true')
-          localStorage.setItem('auth_username', this.username)
+          if (import.meta.client) {
+            localStorage.setItem('has_session', 'true')
+            localStorage.setItem('auth_username', this.username)
+          }
+
+          return response.data
+        } else {
+          throw new Error(response.message || '验证失败')
         }
-
-        return response.data
-      } else {
-        throw new Error(response.message || '验证失败')
+      } catch (error: any) {
+        const data = error?.data || error?.response?._data
+        throw new Error(data?.message || error.message || '验证失败')
       }
     },
 
