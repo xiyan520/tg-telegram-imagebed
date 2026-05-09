@@ -259,7 +259,7 @@ const totpVerificationToken = ref('')
 // 页面初始化
 onMounted(async () => {
   try {
-    const setupRes = await $fetch<{ need_setup: boolean }>('/api/setup/status')
+    const setupRes = await $fetch<{ need_setup: boolean }>(`${useRuntimeConfig().public.apiBase}/api/setup/status`)
     if (setupRes.need_setup) {
       router.replace('/setup')
       return

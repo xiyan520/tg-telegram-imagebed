@@ -104,7 +104,7 @@
         <template #header>
           <div class="flex items-center justify-between">
             <h3 class="text-lg font-semibold">添加到画集</h3>
-            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" size="sm" @click="showAddToGallery = false" />
+            <UButton icon="heroicons:x-mark" color="gray" variant="ghost" size="sm" aria-label="关闭" @click="showAddToGallery = false" />
           </div>
         </template>
         <div v-if="galleriesLoading" class="flex justify-center py-6">

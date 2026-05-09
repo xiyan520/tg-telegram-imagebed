@@ -371,13 +371,17 @@ watch(visibility, (current) => {
 
 // 页面加载时恢复游客 token 和 TG 会话
 onMounted(async () => {
-  // 并行恢复 token 和 TG 会话
-  await Promise.all([
-    tokenStore.restoreToken(),
-    tgAuthStore.checkSession(),
-    authStore.restoreAuth(),
-    loadStats(),
-  ])
+  // 并行恢复 token 和 TG 会话（失败不影响页面初始化）
+  try {
+    await Promise.all([
+      tokenStore.restoreToken(),
+      tgAuthStore.checkSession(),
+      authStore.restoreAuth(),
+      loadStats(),
+    ])
+  } catch {
+    // 会话恢复失败时继续加载页面
+  }
 
   // 加载公共设置
   await loadSettings()

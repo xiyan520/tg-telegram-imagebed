@@ -951,7 +951,7 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
     @app.route('/api/admin/login/verify-totp', methods=['POST'])
     def admin_login_verify_totp():
         """管理员登录第二步：TOTP 验证码校验"""
-        data = request.get_json()
+        data = request.get_json() or {}
         verification_token = data.get('verification_token', '')
         code = data.get('code', '').strip()
 

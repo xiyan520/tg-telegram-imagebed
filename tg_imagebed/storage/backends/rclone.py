@@ -265,7 +265,8 @@ class RcloneBackend(StorageBackend):
                 last_err = str(e)
                 logger.error(f"rclone upload exception (attempt {attempt}): {e}")
 
-            time.sleep(min(1.0 * attempt, 3.0))
+            if attempt < self._retries:
+                time.sleep(min(1.0 * attempt, 3.0))
 
         return None
 
@@ -311,7 +312,8 @@ class RcloneBackend(StorageBackend):
                 last_err = str(e)
                 logger.error(f"rclone upload exception (attempt {attempt}): {e}")
 
-            time.sleep(min(1.0 * attempt, 3.0))
+            if attempt < self._retries:
+                time.sleep(min(1.0 * attempt, 3.0))
 
         return None
 

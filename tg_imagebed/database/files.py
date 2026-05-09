@@ -120,6 +120,8 @@ def save_file_info(
                     ''',
                     (auth_token,)
                 )
+                if cursor.rowcount == 0:
+                    raise ValueError('reservation auth token not found in auth_tokens')
             cursor.execute(
                 'DELETE FROM upload_reservations WHERE reservation_key = ?',
                 (reservation_key,)

@@ -3,6 +3,7 @@
 """
 Token 统一调度层 — 级联删除 / 影响范围查询 / 批量操作
 """
+import sqlite3
 from typing import Any, Dict, List, Optional
 
 from ..config import logger
@@ -216,6 +217,8 @@ class TokenService:
             logger.info(f"TokenService {action} Token: ID={token_id}")
             return True
 
+        except sqlite3.OperationalError:
+            raise
         except Exception as e:
             logger.error(f"TokenService 级联删除 Token 失败: {e}")
             return False
