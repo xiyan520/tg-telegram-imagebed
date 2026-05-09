@@ -261,6 +261,9 @@ class RcloneBackend(StorageBackend):
 
                 last_err = (cp.stderr or b"").decode("utf-8", errors="replace")
                 logger.error(f"rclone upload failed (attempt {attempt}): {last_err}")
+                # 不可重试的 rclone 退出码（1-4, 7-8），立即返回避免无效重试
+                if cp.returncode in (1, 2, 3, 4, 7, 8):
+                    return None
             except Exception as e:
                 last_err = str(e)
                 logger.error(f"rclone upload exception (attempt {attempt}): {e}")
@@ -308,6 +311,9 @@ class RcloneBackend(StorageBackend):
 
                 last_err = (cp.stderr or b"").decode("utf-8", errors="replace")
                 logger.error(f"rclone upload failed (attempt {attempt}): {last_err}")
+                # 不可重试的 rclone 退出码（1-4, 7-8），立即返回避免无效重试
+                if cp.returncode in (1, 2, 3, 4, 7, 8):
+                    return None
             except Exception as e:
                 last_err = str(e)
                 logger.error(f"rclone upload exception (attempt {attempt}): {e}")
