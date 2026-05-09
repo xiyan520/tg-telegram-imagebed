@@ -470,38 +470,31 @@
           </div>
         </div>
 
-         <!-- CDN 配置详情 -->
-         <div v-else class="space-y-6">
-           <!-- 基础配置 -->
-           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <UFormGroup label="CDN 域名">
-               <UInput v-model="settings.cloudflare_cdn_domain" placeholder="cdn.example.com" />
-               <template #hint>
-                 <span class="text-xs text-stone-500">用于访问图片的CDN域名（例如：cdn.example.com）</span>
-               </template>
-             </UFormGroup>
+        <!-- CDN 配置详情 -->
+        <div v-else class="space-y-6">
+          <!-- 基础配置 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <UFormGroup label="Zone ID">
+              <UInput v-model="settings.cloudflare_zone_id" placeholder="Cloudflare Zone ID" />
+            </UFormGroup>
 
-             <UFormGroup label="Zone ID">
-               <UInput v-model="settings.cloudflare_zone_id" placeholder="Cloudflare Zone ID" />
-             </UFormGroup>
- 
-             <UFormGroup label="API Token">
-               <UInput
-                 v-model="settings.cloudflare_api_token"
-                 type="password"
-                 :placeholder="settings.cloudflare_api_token_set ? '已设置（留空保持不变）' : '输入 Cloudflare API Token'"
-               />
-               <template #hint>
-                 <span v-if="settings.cloudflare_api_token_set" class="text-xs text-green-600 dark:text-green-400">
-                   已配置 API Token
-                 </span>
-                 <span v-else class="text-xs text-amber-600 dark:text-amber-400">
-                   未配置 API Token
-                 </span>
-               </template>
-             </UFormGroup>
+            <UFormGroup label="API Token">
+              <UInput
+                v-model="settings.cloudflare_api_token"
+                type="password"
+                :placeholder="settings.cloudflare_api_token_set ? '已设置（留空保持不变）' : '输入 Cloudflare API Token'"
+              />
+              <template #hint>
+                <span v-if="settings.cloudflare_api_token_set" class="text-xs text-green-600 dark:text-green-400">
+                  已配置 API Token
+                </span>
+                <span v-else class="text-xs text-amber-600 dark:text-amber-400">
+                  未配置 API Token
+                </span>
+              </template>
+            </UFormGroup>
 
-             <UFormGroup label="缓存策略">
+            <UFormGroup label="缓存策略">
               <USelect
                 v-model="settings.cloudflare_cache_level"
                 :options="policyOptions.cloudflare_cache_level"
@@ -1314,22 +1307,22 @@
             </div>
             <div>
               <h3 class="text-lg font-semibold text-stone-900 dark:text-white">Release 更新配置</h3>
-              <p class="text-xs text-stone-500 dark:text-stone-400">配置 GitHub Release 仓库与资产名，使用校验文件保证完整性</p>
+              <p class="text-xs text-stone-500 dark:text-stone-400">固定官方仓库与资产名，使用校验文件保证完整性</p>
             </div>
           </div>
         </template>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <UFormGroup label="更新源">
-            <UInput v-model="settings.app_update_source" />
+          <UFormGroup label="更新源（固定）">
+            <UInput :model-value="settings.app_update_source" disabled />
           </UFormGroup>
-          <UFormGroup label="Release 仓库（owner/repo）">
-            <UInput v-model="settings.app_update_release_repo" placeholder="lostiv/tg-telegram-imagebed" />
+          <UFormGroup label="Release 仓库（固定）">
+            <UInput :model-value="settings.app_update_release_repo" disabled />
           </UFormGroup>
-          <UFormGroup label="更新包文件名">
-            <UInput v-model="settings.app_update_release_asset_name" placeholder="tg-imagebed-release.zip" />
+          <UFormGroup label="更新包文件名（固定）">
+            <UInput :model-value="settings.app_update_release_asset_name" disabled />
           </UFormGroup>
-          <UFormGroup label="校验文件名">
-            <UInput v-model="settings.app_update_release_sha_name" placeholder="tg-imagebed-release.zip.sha256" />
+          <UFormGroup label="校验文件名（固定）">
+            <UInput :model-value="settings.app_update_release_sha_name" disabled />
           </UFormGroup>
         </div>
       </UCard>
@@ -1500,11 +1493,11 @@ const settings = ref<AdminSystemSettings>({
   image_domain_restriction_enabled: false,
   // 热更新（Release Artifact）
   app_update_source: 'release',
-  app_update_release_repo: 'lostiv/tg-telegram-imagebed',
+  app_update_release_repo: 'xiyan520/tg-telegram-imagebed',
   app_update_release_asset_name: 'tg-imagebed-release.zip',
   app_update_release_sha_name: 'tg-imagebed-release.zip.sha256',
   // 兼容旧字段
-  app_update_repo_url: 'https://github.com/lostiv/tg-telegram-imagebed.git',
+  app_update_repo_url: 'https://github.com/xiyan520/tg-telegram-imagebed.git',
   app_update_branch: 'main',
   app_update_last_status: 'idle',
   app_update_last_error: '',
@@ -1574,7 +1567,7 @@ const sectionFieldGroups: Record<SettingsSectionKey, string[]> = {
     'tg_session_expire_days',
   ],
   proxy_and_tokens: ['proxy_url'],
-  about_update: ['app_update_source', 'app_update_release_repo', 'app_update_release_asset_name', 'app_update_release_sha_name', 'app_update_branch'],
+  about_update: ['app_update_source'],
 }
 
 const activeSection = ref<SettingsSectionKey>('domains')
@@ -2172,7 +2165,7 @@ const loadGallerySiteSettings = async () => {
     if (res?.success && res.data) {
       gallerySiteSettings.value.name = res.data.gallery_site_name || ''
       gallerySiteSettings.value.description = res.data.gallery_site_description || ''
-      gallerySiteSettings.value.enabled = Boolean(res.data.gallery_site_enabled)
+      gallerySiteSettings.value.enabled = String(res.data.gallery_site_enabled) !== '0'
       syncGallerySettingsSnapshot()
     }
   } catch {

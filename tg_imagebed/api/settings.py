@@ -8,7 +8,6 @@ import re
 from flask import request, jsonify, make_response
 
 from . import admin_bp, images_bp
-from .admin_helpers import _get_allowed_origin, _admin_options
 from ..config import logger, PROXY_URL
 from ..utils import add_cache_headers, clear_domain_cache, clear_domains_cache
 from ..database import (
@@ -19,18 +18,18 @@ from ..database.domains import _normalize_domain
 
 from .. import admin_module
 
-DEFAULT_UPDATE_RELEASE_REPO = 'lostiv/tg-telegram-imagebed'
-DEFAULT_UPDATE_ASSET_NAME = 'tg-imagebed-release.zip'
-DEFAULT_UPDATE_SHA_NAME = 'tg-imagebed-release.zip.sha256'
+OFFICIAL_UPDATE_REPO_URL = 'https://github.com/xiyan520/tg-telegram-imagebed.git'
+OFFICIAL_UPDATE_RELEASE_REPO = 'xiyan520/tg-telegram-imagebed'
+OFFICIAL_UPDATE_ASSET_NAME = 'tg-imagebed-release.zip'
+OFFICIAL_UPDATE_SHA_NAME = 'tg-imagebed-release.zip.sha256'
 
 
 def _set_admin_cors_headers(response):
-    """设置管理员 API 的 CORS 头（通过白名单校验，不反射任意 Origin）"""
-    allowed = _get_allowed_origin()
-    if allowed:
-        response.headers['Access-Control-Allow-Origin'] = allowed
-        response.headers['Vary'] = 'Origin'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
+    """设置管理员 API 的 CORS 头"""
+    origin = request.headers.get('Origin')
+    if origin:
+        response.headers['Access-Control-Allow-Origin'] = origin
+    response.headers['Access-Control-Allow-Credentials'] = 'true'
     return response
 
 
@@ -144,11 +143,11 @@ def _format_settings_for_response(settings: dict) -> dict:
         'image_domain_restriction_enabled': settings.get('image_domain_restriction_enabled', '0') == '1',
         # 热更新配置（Release Artifact）
         'app_update_source': settings.get('app_update_source', 'release'),
-        'app_update_release_repo': settings.get('app_update_release_repo', DEFAULT_UPDATE_RELEASE_REPO),
-        'app_update_release_asset_name': settings.get('app_update_release_asset_name', DEFAULT_UPDATE_ASSET_NAME),
-        'app_update_release_sha_name': settings.get('app_update_release_sha_name', DEFAULT_UPDATE_SHA_NAME),
-        # 兼容旧字段（始终从当前 release_repo 推导，避免历史值污染）
-        'app_update_repo_url': f'https://github.com/{settings.get("app_update_release_repo", DEFAULT_UPDATE_RELEASE_REPO)}.git',
+        'app_update_release_repo': settings.get('app_update_release_repo', OFFICIAL_UPDATE_RELEASE_REPO),
+        'app_update_release_asset_name': settings.get('app_update_release_asset_name', OFFICIAL_UPDATE_ASSET_NAME),
+        'app_update_release_sha_name': settings.get('app_update_release_sha_name', OFFICIAL_UPDATE_SHA_NAME),
+        # 兼容旧字段（只读）
+        'app_update_repo_url': settings.get('app_update_repo_url', OFFICIAL_UPDATE_REPO_URL),
         'app_update_branch': settings.get('app_update_branch', 'main'),
         'app_update_last_status': settings.get('app_update_last_status', 'idle'),
         'app_update_last_error': settings.get('app_update_last_error', ''),
@@ -193,7 +192,12 @@ def get_public_settings_api():
 def admin_system_settings():
     """管理员系统设置 API"""
     if request.method == 'OPTIONS':
-        return _admin_options('GET, PUT, OPTIONS')
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'GET, PUT, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache')
 
     try:
         if request.method == 'GET':
@@ -229,6 +233,7 @@ def admin_system_settings():
 
             settings_to_update = {}
             errors = []
+            svg_warning = ''
 
             # 游客上传策略
             if 'guest_upload_policy' in data:
@@ -626,44 +631,39 @@ def admin_system_settings():
             # 热更新配置（Release Artifact）
             if 'app_update_source' in data:
                 source = str(data.get('app_update_source') or '').strip().lower()
-                if source not in ('release', ''):
+                if source != 'release':
                     errors.append('更新源仅支持 release')
                 else:
-                    settings_to_update['app_update_source'] = source or 'release'
+                    settings_to_update['app_update_source'] = 'release'
 
             if 'app_update_release_repo' in data:
                 repo = str(data.get('app_update_release_repo') or '').strip()
-                if repo:
-                    normalized = repo
-                    if normalized.startswith('https://github.com/'):
-                        normalized = normalized[len('https://github.com/'):]
-                    if normalized.endswith('.git'):
-                        normalized = normalized[:-4]
-                    normalized = normalized.strip('/')
-                    if not normalized or '/' not in normalized or normalized.count('/') != 1:
-                        errors.append('Release 仓库格式无效，请使用 owner/repo 格式')
-                    else:
-                        settings_to_update['app_update_release_repo'] = normalized
+                if repo and repo != OFFICIAL_UPDATE_RELEASE_REPO:
+                    errors.append('Release 仓库仅允许使用官方仓库')
                 else:
-                    settings_to_update['app_update_release_repo'] = DEFAULT_UPDATE_RELEASE_REPO
+                    settings_to_update['app_update_release_repo'] = OFFICIAL_UPDATE_RELEASE_REPO
 
             if 'app_update_release_asset_name' in data:
                 asset_name = str(data.get('app_update_release_asset_name') or '').strip()
-                if not asset_name:
-                    settings_to_update['app_update_release_asset_name'] = DEFAULT_UPDATE_ASSET_NAME
-                elif any(sep in asset_name for sep in ('/', '\\')) or asset_name in ('.', '..'):
-                    errors.append('Release 资产名包含非法字符')
+                if asset_name and asset_name != OFFICIAL_UPDATE_ASSET_NAME:
+                    errors.append('Release 资产名仅允许使用官方默认值')
                 else:
-                    settings_to_update['app_update_release_asset_name'] = asset_name
+                    settings_to_update['app_update_release_asset_name'] = OFFICIAL_UPDATE_ASSET_NAME
 
             if 'app_update_release_sha_name' in data:
                 sha_name = str(data.get('app_update_release_sha_name') or '').strip()
-                if not sha_name:
-                    settings_to_update['app_update_release_sha_name'] = DEFAULT_UPDATE_SHA_NAME
-                elif any(sep in sha_name for sep in ('/', '\\')) or sha_name in ('.', '..'):
-                    errors.append('Release 校验文件名包含非法字符')
+                if sha_name and sha_name != OFFICIAL_UPDATE_SHA_NAME:
+                    errors.append('Release 校验文件名仅允许使用官方默认值')
                 else:
-                    settings_to_update['app_update_release_sha_name'] = sha_name
+                    settings_to_update['app_update_release_sha_name'] = OFFICIAL_UPDATE_SHA_NAME
+
+            # 热更新兼容配置（固定）
+            if 'app_update_repo_url' in data:
+                incoming_repo = str(data.get('app_update_repo_url') or '').strip()
+                if incoming_repo and incoming_repo != OFFICIAL_UPDATE_REPO_URL:
+                    errors.append('更新仓库仅允许使用官方仓库地址')
+                else:
+                    settings_to_update['app_update_repo_url'] = OFFICIAL_UPDATE_REPO_URL
 
             if 'app_update_branch' in data:
                 branch = str(data.get('app_update_branch') or '').strip().lower()
@@ -673,6 +673,7 @@ def admin_system_settings():
                     settings_to_update['app_update_branch'] = branch
 
             # 允许的文件后缀
+            svg_warning = ''
             if 'allowed_extensions' in data:
                 raw_exts = str(data.get('allowed_extensions') or '').strip()
                 if raw_exts:
@@ -681,9 +682,9 @@ def admin_system_settings():
                     invalid_exts = [e for e in ext_list if not re.match(r'^[a-zA-Z0-9]+$', e)]
                     if invalid_exts:
                         errors.append(f'文件后缀格式无效: {", ".join(invalid_exts)}')
-                    elif 'svg' in ext_list:
-                        errors.append('不支持 SVG 上传，存在 XSS 安全风险')
                     else:
+                        if 'svg' in ext_list:
+                            svg_warning = '已启用 SVG 上传，请注意 SVG 文件存在 XSS 安全风险'
                         # 去重、排序、小写化
                         unique_exts = sorted(set(ext_list))
                         settings_to_update['allowed_extensions'] = ','.join(unique_exts)
@@ -743,6 +744,8 @@ def admin_system_settings():
                     disabled_count = disable_all_tokens()
 
             msg = '设置已更新'
+            if svg_warning:
+                msg = f'{msg}。⚠️ {svg_warning}'
 
             response = jsonify({
                 'success': True,
@@ -765,15 +768,16 @@ def admin_system_settings():
 def admin_revoke_tokens():
     """管理员批量禁用 Token"""
     if request.method == 'OPTIONS':
-        return _admin_options('POST, OPTIONS')
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return add_cache_headers(response, 'no-cache')
 
     try:
         data = request.get_json() or {}
         revoke_type = data.get('type', 'guest')
-
-        if revoke_type not in ('guest', 'all'):
-            response = jsonify({'success': False, 'error': '无效的禁用类型，仅支持 guest 或 all'})
-            return _set_admin_cors_headers(response), 400
 
         if revoke_type == 'all':
             count = disable_all_tokens()

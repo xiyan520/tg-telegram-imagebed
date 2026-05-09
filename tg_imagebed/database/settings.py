@@ -74,7 +74,6 @@ SENSITIVE_SETTINGS = {
     'storage_config_json', 'storage_upload_policy_json',
     'cloudflare_api_token', 'telegram_bot_token', 'proxy_url',
     'domain_upload_policy_json',
-    'totp_secret',
 }
 
 # 默认系统设置
@@ -182,16 +181,13 @@ DEFAULT_SYSTEM_SETTINGS = {
     'gallery_site_enabled': '1',               # 画集站点总开关
     'gallery_site_images_per_page': '20',      # 画集站点每页图片数
     'gallery_sso_main_url': '',                # 画集 SSO 主站 URL（回调目标）
-    # TOTP 二次验证配置
-    'totp_enabled': '0',
-    'totp_secret': '',
     # 应用更新配置（Release Artifact）
     'app_update_source': 'release',            # 更新源：release
-    'app_update_release_repo': 'lostiv/tg-telegram-imagebed',
+    'app_update_release_repo': 'xiyan520/tg-telegram-imagebed',  # 固定官方仓库（owner/repo）
     'app_update_release_asset_name': 'tg-imagebed-release.zip',  # Release 主包
     'app_update_release_sha_name': 'tg-imagebed-release.zip.sha256',  # Release 校验文件
     # 兼容旧配置（保留只读）
-    'app_update_repo_url': 'https://github.com/lostiv/tg-telegram-imagebed.git',
+    'app_update_repo_url': 'https://github.com/xiyan520/tg-telegram-imagebed.git',
     'app_update_branch': 'main',
     # 最近执行记录
     'app_update_last_status': 'idle',
@@ -335,23 +331,21 @@ def get_upload_count_today(*, source: Optional[str] = None, auth_token: Optional
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            if source and auth_token is not None:
-                cursor.execute(
-                    "SELECT COUNT(*) FROM file_storage WHERE date(created_at) = date('now', 'localtime') AND source = ? AND auth_token = ?",
-                    (source, auth_token)
-                )
-            elif source:
-                cursor.execute(
-                    "SELECT COUNT(*) FROM file_storage WHERE date(created_at) = date('now', 'localtime') AND source = ?",
-                    (source,)
-                )
-            elif auth_token is not None:
-                cursor.execute(
-                    "SELECT COUNT(*) FROM file_storage WHERE date(created_at) = date('now', 'localtime') AND auth_token = ?",
-                    (auth_token,)
-                )
-            else:
-                return 0
+            conditions = ["date(created_at) = date('now', 'localtime')"]
+            params: List[Any] = []
+
+            if source:
+                conditions.append("source = ?")
+                params.append(source)
+            if auth_token is not None:
+                conditions.append("auth_token = ?")
+                params.append(auth_token)
+
+            where_clause = " AND ".join(conditions)
+            cursor.execute(
+                f"SELECT COUNT(*) FROM file_storage WHERE {where_clause}",
+                tuple(params)
+            )
             row = cursor.fetchone()
             return int(row[0]) if row else 0
     except Exception as e:
@@ -374,10 +368,6 @@ def get_public_settings() -> Dict[str, Any]:
         'tg_auth_required_for_token': settings.get('tg_auth_required_for_token', '0') == '1',
         'tg_bind_token_enabled': settings.get('tg_bind_token_enabled', '0') == '1',
         'tg_sync_delete_enabled': settings.get('tg_sync_delete_enabled', '1') == '1',
-        # 画集站点配置
-        'gallery_site_enabled': settings.get('gallery_site_enabled', '1') == '1',
-        'gallery_site_name': settings.get('gallery_site_name', '画集'),
-        'gallery_site_description': settings.get('gallery_site_description', '精选图片画集'),
         # SEO 配置
         'seo_site_name': settings.get('seo_site_name', ''),
         'seo_site_description': settings.get('seo_site_description', ''),
@@ -453,36 +443,3 @@ def disable_all_tokens() -> int:
     except Exception as e:
         logger.error(f"禁用所有 Token 失败: {e}")
         return 0
-
-
-# ===================== TOTP 二次验证 =====================
-
-def is_totp_enabled() -> bool:
-    """检查 TOTP 是否已启用"""
-    return get_system_setting('totp_enabled') == '1'
-
-
-def get_totp_secret() -> str:
-    """获取 TOTP 密钥"""
-    return get_system_setting('totp_secret') or ''
-
-
-def enable_totp(secret: str) -> None:
-    """启用 TOTP 并存储密钥（原子写入）"""
-    secret = (secret or '').strip()
-    if not secret:
-        raise ValueError("totp_secret cannot be empty")
-    if not update_system_settings({
-        'totp_secret': secret,
-        'totp_enabled': '1',
-    }):
-        raise RuntimeError("failed to enable totp")
-
-
-def disable_totp() -> None:
-    """禁用 TOTP 并清除密钥（原子写入）"""
-    if not update_system_settings({
-        'totp_secret': '',
-        'totp_enabled': '0',
-    }):
-        raise RuntimeError("failed to disable totp")

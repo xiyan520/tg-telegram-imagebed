@@ -114,7 +114,12 @@ def validate_upload_file(file) -> Tuple[Optional[tuple], Optional[ValidatedUploa
     if "." in (file.filename or "") and file.filename.rsplit(".", 1)[-1].lower() == "svg":
         return _error("暂不支持 SVG 上传", 400), None
 
-    max_size_mb = get_system_setting_int("max_file_size_mb", 100, minimum=1, maximum=1024)
+    # 检查文件大小（使用动态配置）
+    file.seek(0, 2)
+    file_size = file.tell()
+    file.seek(0)
+
+    max_size_mb = get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
     max_size_bytes = max_size_mb * 1024 * 1024
 
     tmp = tempfile.NamedTemporaryFile(prefix="tg-imagebed-upload-", suffix=".tmp", delete=False)

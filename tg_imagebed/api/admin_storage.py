@@ -19,7 +19,7 @@ from .. import admin_module
 from .upload import validate_upload_file
 
 # 敏感字段列表（需要掩码）
-_SENSITIVE_FIELDS = {'bot_token', 'api_id', 'api_hash', 'secret_key', 'access_key'}
+_SENSITIVE_FIELDS = {'bot_token', 'api_hash', 'secret_key', 'access_key'}
 _MASKED_VALUE = '__MASKED__'
 # 允许的驱动类型
 _ALLOWED_DRIVERS = {'telegram', 'local', 's3', 'rclone'}

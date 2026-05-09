@@ -12,7 +12,6 @@ import asyncio
 import io
 import os
 import queue
-import random
 import re
 import shutil
 import threading
@@ -32,46 +31,6 @@ _KURIGRAM_STREAM_CHUNK_SIZE = 1024 * 1024
 _STREAM_CHUNK_SIZE = 8192
 _KURIGRAM_CLIENT_CLASS = None
 _KURIGRAM_CLIENT_CLASS_LOCK = threading.Lock()
-
-# Telegram API 上传限流：避免并发请求触发 429 flood control
-_TG_UPLOAD_SEMAPHORE = threading.BoundedSemaphore(2)
-_TG_UPLOAD_MAX_RETRIES = 3
-_TG_UPLOAD_BASE_DELAY = 1.0
-_TG_UPLOAD_MAX_DELAY = 10.0
-
-# 上传幂等缓存：fingerprint → file_id，避免超时重试产生重复消息
-_TG_IDEMPOTENCY_CACHE: Dict[str, tuple[str, float]] = {}
-_TG_IDEMPOTENCY_CACHE_TTL = 3600  # 缓存条目最长保留 1 小时
-_TG_IDEMPOTENCY_LOCK = threading.Lock()
-
-
-def _upload_fingerprint(file_content: bytes, chat_id: int, send_as_photo: bool) -> str:
-    """计算上传请求的幂等指纹（基于内容）"""
-    import hashlib
-    h = hashlib.sha256(file_content)
-    h.update(str(chat_id).encode())
-    h.update(b"photo" if send_as_photo else b"document")
-    return h.hexdigest()
-
-
-def _upload_fingerprint_from_file(file_path: str, chat_id: int, send_as_photo: bool) -> str:
-    """计算上传请求的幂等指纹（基于文件路径+大小，用于流式上传避免全读）"""
-    import hashlib
-    h = hashlib.sha256()
-    stat = os.stat(file_path)
-    h.update(os.path.realpath(file_path).encode())
-    h.update(str(stat.st_size).encode())
-    h.update(str(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))).encode())
-    h.update(str(chat_id).encode())
-    h.update(b"photo" if send_as_photo else b"document")
-    return h.hexdigest()
-
-
-def _retry_delay(attempt: int, retry_after: Optional[float] = None) -> float:
-    if retry_after is not None and retry_after > 0:
-        return retry_after + random.uniform(0, 1)
-    delay = min(_TG_UPLOAD_BASE_DELAY * (2 ** attempt), _TG_UPLOAD_MAX_DELAY)
-    return delay * random.uniform(0.8, 1.2)
 
 
 class TelegramBackend(StorageBackend):
@@ -150,19 +109,16 @@ class TelegramBackend(StorageBackend):
             raw = f"http://{raw}"
 
         parsed = urlparse(raw)
-        if not parsed.hostname:
+        if not parsed.hostname or not parsed.port:
             return None
 
         scheme = (parsed.scheme or "").lower()
         if scheme in {"socks5", "socks5h"}:
             pyrogram_scheme = "socks5"
-            default_port = 1080
         elif scheme in {"socks4", "socks4a"}:
             pyrogram_scheme = "socks4"
-            default_port = 1080
         elif scheme in {"http", "https"}:
             pyrogram_scheme = "http"
-            default_port = 3128
         else:
             logger.warning(f"Kurigram 不支持的代理协议: {scheme}")
             return None
@@ -170,7 +126,7 @@ class TelegramBackend(StorageBackend):
         proxy: Dict[str, Any] = {
             "scheme": pyrogram_scheme,
             "hostname": parsed.hostname,
-            "port": parsed.port or default_port,
+            "port": parsed.port,
         }
         if parsed.username:
             proxy["username"] = unquote(parsed.username)
@@ -184,7 +140,7 @@ class TelegramBackend(StorageBackend):
 
         kwargs: Dict[str, Any] = {
             "name": f"tg_imagebed_{re.sub(r'[^a-zA-Z0-9_]+', '_', self.name or 'telegram')}",
-            "api_id": int(self._api_id),
+            "api_id": self._api_id,
             "api_hash": self._api_hash,
             "bot_token": self._bot_token,
             "in_memory": True,
@@ -247,10 +203,7 @@ class TelegramBackend(StorageBackend):
 
         thread = threading.Thread(target=runner, name=f"{self.name}-kurigram", daemon=True)
         thread.start()
-        thread.join(timeout=600)
-        if thread.is_alive():
-            logger.error(f"{self.name}: Kurigram 异步任务超时（600s）")
-            raise TimeoutError("Kurigram 异步任务超时")
+        thread.join()
         if "value" in error:
             raise error["value"]
         return result.get("value")
@@ -276,18 +229,6 @@ class TelegramBackend(StorageBackend):
             logger.error(f"获取 Telegram 文件路径失败: {e}")
             return None
 
-    @staticmethod
-    def _should_send_as_photo(*, content_type: str, file_size: int) -> bool:
-        """
-        仅 JPEG 图片走 sendPhoto。
-
-        Telegram 可能对 photo 做转码处理，会导致 PNG/WebP/GIF/AVIF 的
-        透明度信息丢失。为保留原始字节，非 JPEG 格式统一走 sendDocument。
-        """
-        normalized = (content_type or "").strip().lower()
-        is_jpeg = normalized in {"image/jpeg", "image/jpg", "image/pjpeg"}
-        return is_jpeg and file_size <= _BOT_API_PHOTO_LIMIT
-
     def _upload_via_bot_api(
         self,
         *,
@@ -299,204 +240,88 @@ class TelegramBackend(StorageBackend):
         file_size: int,
         caption: str,
     ) -> Optional[PutResult]:
-        """Bot API 上传，带并发限流、幂等保护和瞬态错误重试"""
-        send_as_photo = self._should_send_as_photo(content_type=content_type, file_size=file_size)
-        method = "sendPhoto" if send_as_photo else "sendDocument"
-        url = f"https://api.telegram.org/bot{self._bot_token}/{method}"
-        timeout = 60 if send_as_photo else 120
-
-        if file_handle is not None:
-            # 流式上传：直接传递文件句柄给 requests，避免全部加载到内存
-            files = (
-                {'photo': (filename, file_handle, content_type)}
-                if send_as_photo
-                else {'document': (filename, file_handle, content_type)}
+        """沿用现有 Bot API 上传逻辑"""
+        # Telegram 对 sendPhoto 有 10MB 限制，超过使用 sendDocument
+        if file_size <= _BOT_API_PHOTO_LIMIT and content_type.startswith('image/'):
+            files = {'photo': (filename, file_content, content_type)}
+            data = {'chat_id': self._chat_id, 'caption': caption or ''}
+            resp = self._session.post(
+                f"https://api.telegram.org/bot{self._bot_token}/sendPhoto",
+                files=files,
+                data=data,
+                timeout=60,
             )
-            fingerprint = _upload_fingerprint_from_file(file_handle_path, self._chat_id, send_as_photo)
-        elif file_content is not None:
-            files = (
-                {'photo': (filename, file_content, content_type)}
-                if send_as_photo
-                else {'document': (filename, file_content, content_type)}
-            )
-            fingerprint = _upload_fingerprint(file_content, self._chat_id, send_as_photo)
         else:
-            logger.error("Telegram 上传缺少文件内容")
+            files = {'document': (filename, file_content, content_type)}
+            data = {'chat_id': self._chat_id, 'caption': caption or ''}
+            resp = self._session.post(
+                f"https://api.telegram.org/bot{self._bot_token}/sendDocument",
+                files=files,
+                data=data,
+                timeout=120,
+            )
+
+        if not resp.ok:
+            logger.error(f"Telegram 上传失败: HTTP {resp.status_code}")
             return None
 
-        data = {'chat_id': self._chat_id, 'caption': caption or ''}
-        with _TG_IDEMPOTENCY_LOCK:
-            cached = _TG_IDEMPOTENCY_CACHE.get(fingerprint)
-            if cached and time.time() - cached[1] > _TG_IDEMPOTENCY_CACHE_TTL:
-                del _TG_IDEMPOTENCY_CACHE[fingerprint]
-                cached = None
-            cached_file_id = cached[0] if cached else None
-        if cached_file_id:
-            logger.info("Telegram 上传命中幂等缓存: %s", cached_file_id)
-            file_path = self._get_file_path(cached_file_id) or ''
-            return PutResult(
-                file_id=cached_file_id,
-                file_path=file_path,
-                file_size=file_size,
-                storage_backend=self.name,
-                storage_key=cached_file_id,
-                storage_meta={
-                    'file_path': file_path,
-                    'uploaded_at': int(time.time()),
-                    'upload_transport': 'bot_api',
-                    'idempotency_hit': True,
-                },
-            )
+        payload = resp.json() or {}
+        if not payload.get('ok'):
+            logger.error(f"Telegram 上传失败: {payload.get('description')}")
+            return None
 
-        last_error = None
-        for attempt in range(_TG_UPLOAD_MAX_RETRIES):
-            # 流式上传时，文件句柄在首次 POST 后位于 EOF，重试前需回退到开头
-            if file_handle is not None:
-                try:
-                    if hasattr(file_handle, 'seek'):
-                        file_handle.seek(0)
-                except Exception:
-                    pass
-            with _TG_UPLOAD_SEMAPHORE:
-                session = requests.Session()
-                session.trust_env = True
-                if self._proxy_url:
-                    proxy = self._proxy_url
-                    if "://" not in proxy:
-                        proxy = f"http://{proxy}"
-                    session.proxies = {"http": proxy, "https": proxy}
-                try:
-                    resp = session.post(url, files=files, data=data, timeout=timeout)
-                except Exception as exc:
-                    resp = None
-                    last_error = f"{type(exc).__name__}: {exc}"
-                finally:
-                    session.close()
+        result = payload.get('result') or {}
 
-            if resp is None:
-                # 网络层异常（超时/连接失败/DNS等）：先查幂等缓存，再决定是否重试
-                logger.error("Telegram 上传请求异常(attempt %d): %s", attempt + 1, last_error)
-                with _TG_IDEMPOTENCY_LOCK:
-                    cached = _TG_IDEMPOTENCY_CACHE.get(fingerprint)
-                    if cached and time.time() - cached[1] > _TG_IDEMPOTENCY_CACHE_TTL:
-                        del _TG_IDEMPOTENCY_CACHE[fingerprint]
-                        cached = None
-                if cached:
-                    cached_id = cached[0]
-                    logger.info("Telegram 上传超时但幂等缓存命中: %s", cached_id)
-                    file_path = self._get_file_path(cached_id) or ''
-                    return PutResult(
-                        file_id=cached_id,
-                        file_path=file_path,
-                        file_size=file_size,
-                        storage_backend=self.name,
-                        storage_key=cached_id,
-                        storage_meta={
-                            'file_path': file_path,
-                            'uploaded_at': int(time.time()),
-                            'upload_transport': 'bot_api',
-                            'idempotency_hit': True,
-                        },
-                    )
-                delay = _retry_delay(attempt)
-            elif resp.ok:
-                payload = resp.json() or {}
-                if payload.get('ok'):
-                    result = payload.get('result') or {}
-                    file_id = (
-                        (result.get('photo') or [{}])[-1].get('file_id')
-                        if send_as_photo
-                        else (result.get('document') or {}).get('file_id')
-                    )
-                    if file_id:
-                        # 存入幂等缓存（含时间戳），避免超时重试重复上传
-                        with _TG_IDEMPOTENCY_LOCK:
-                            _TG_IDEMPOTENCY_CACHE[fingerprint] = (file_id, time.time())
-                        file_path = self._get_file_path(file_id) or ''
-                        logger.info(
-                            "Telegram 存储上传成功(Bot API): %s (attempt %d)",
-                            file_id, attempt + 1,
-                        )
-                        return PutResult(
-                            file_id=file_id,
-                            file_path=file_path,
-                            file_size=file_size,
-                            storage_backend=self.name,
-                            storage_key=file_id,
-                            storage_meta={
-                                'file_path': file_path,
-                                'uploaded_at': int(time.time()),
-                                'message_id': result.get('message_id'),
-                                'upload_transport': 'bot_api',
-                            },
-                        )
-                    logger.error("Telegram 上传失败: 无法获取 file_id")
-                    return None
-                else:
-                    error_code = payload.get('error_code')
-                    last_error = payload.get('description', f'HTTP {resp.status_code}')
-                    logger.error("Telegram 上传失败(attempt %d): %s", attempt + 1, last_error)
-                    # 仅对 429 (rate limit) 和 5xx / 无错误码 重试
-                    if error_code and error_code < 500 and error_code != 429:
-                        return None
-                    retry_after = None
-                    if error_code == 429:
-                        params = payload.get('parameters') or {}
-                        try:
-                            retry_after = float(params.get('retry_after', 0))
-                        except (TypeError, ValueError):
-                            pass
-                    delay = _retry_delay(attempt, retry_after)
-            else:
-                last_error = f'HTTP {resp.status_code}'
-                logger.error("Telegram 上传 HTTP 错误(attempt %d): %d", attempt + 1, resp.status_code)
-                # 仅对 429 和 5xx 重试
-                if resp.status_code < 500 and resp.status_code != 429:
-                    return None
-                retry_after = None
-                if resp.status_code == 429:
-                    try:
-                        retry_after = float(resp.headers.get('Retry-After', 0))
-                    except (TypeError, ValueError):
-                        pass
-                delay = _retry_delay(attempt, retry_after)
+        if file_size <= _BOT_API_PHOTO_LIMIT and content_type.startswith('image/'):
+            photos = result.get('photo') or []
+            if not photos:
+                logger.error("Telegram 上传失败: 无法获取 photo")
+                return None
+            file_id = photos[-1].get('file_id')
+        else:
+            doc = result.get('document') or {}
+            file_id = doc.get('file_id')
 
-            logger.warning(
-                "Telegram 上传重试 %d/%d，等待 %.1fs",
-                attempt + 1, _TG_UPLOAD_MAX_RETRIES, delay,
-            )
-            time.sleep(delay)
+        if not file_id:
+            logger.error("Telegram 上传失败: 无法获取 file_id")
+            return None
 
-        logger.error("Telegram 上传最终失败: %s", last_error)
-        return None
+        file_path = self._get_file_path(file_id) or ''
+        logger.info(f"Telegram 存储上传成功(Bot API): {file_id}")
+
+        return PutResult(
+            file_id=file_id,
+            file_path=file_path,
+            file_size=file_size,
+            storage_backend=self.name,
+            storage_key=file_id,
+            storage_meta={
+                'file_path': file_path,
+                'uploaded_at': int(time.time()),
+                'message_id': result.get('message_id'),
+                'upload_transport': 'bot_api',
+            },
+        )
 
     def _upload_via_kurigram(
         self,
         *,
-        file_content: Optional[bytes] = None,
-        file_path: str = '',
+        file_content: bytes,
         filename: str,
         file_size: int,
         caption: str,
     ) -> PutResult:
-        """通过 Kurigram 走 MTProto 上传大文件（受并发限流保护）"""
+        """通过 Kurigram 走 MTProto 上传大文件"""
 
         async def task():
             app = self._build_kurigram_client()
-            if file_path:
-                # 直接传递文件路径，让 Pyrogram 流式读取，避免全部加载到内存
-                document_arg = file_path
-            elif file_content is not None:
-                payload = io.BytesIO(file_content)
-                payload.name = filename or "upload.bin"
-                document_arg = payload
-            else:
-                raise RuntimeError("Kurigram 上传缺少文件内容")
+            payload = io.BytesIO(file_content)
+            payload.name = filename or "upload.bin"
 
             async with app:
                 message = await app.send_document(
                     chat_id=self._chat_id,
-                    document=document_arg,
+                    document=payload,
                     file_name=filename or None,
                     caption=caption or "",
                 )
@@ -510,8 +335,7 @@ class TelegramBackend(StorageBackend):
                 "message_id": getattr(message, "id", None) or getattr(message, "message_id", None),
             }
 
-        with _TG_UPLOAD_SEMAPHORE:
-            upload_data = self._run_async_task(task)
+        upload_data = self._run_async_task(task)
         file_id = str(upload_data.get("file_id") or "").strip()
         if not file_id:
             raise RuntimeError("Kurigram 未返回有效 file_id")

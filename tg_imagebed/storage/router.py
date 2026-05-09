@@ -74,13 +74,7 @@ class StorageRouter:
         if driver == "telegram":
             effective_token, _ = get_effective_bot_token()
             bot_token = str(cfg2.get("bot_token") or effective_token or "")
-            raw_chat_id = cfg2.get("chat_id")
-            try:
-                chat_id = int(raw_chat_id) if raw_chat_id is not None else 0
-            except (ValueError, TypeError):
-                chat_id = 0
-            if chat_id <= 0:
-                logger.warning(f"Telegram 后端 '{name}' 缺少有效的 chat_id，上传将失败")
+            chat_id = int(cfg2.get("chat_id") or 0)
             api_id = str(cfg2.get("api_id") or "")
             api_hash = str(cfg2.get("api_hash") or "")
             proxy_url = str(cfg2.get("proxy_url") or get_proxy_url() or "").strip() or None

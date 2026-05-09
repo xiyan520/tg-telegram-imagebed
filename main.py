@@ -19,6 +19,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import RequestEntityTooLarge
 
 # 导入配置
 from tg_imagebed.config import (
@@ -75,6 +76,21 @@ except (OSError, AttributeError):
 def create_app() -> Flask:
     """创建并配置 Flask 应用"""
     app = Flask(__name__, static_folder=None)
+
+    def _get_max_upload_mb() -> int:
+        """动态读取当前上传大小限制"""
+        try:
+            from tg_imagebed.database import get_system_setting_int
+            return get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
+        except Exception:
+            return 100
+
+    def _apply_request_limit() -> int:
+        """将数据库中的上传限制同步到 Flask 请求体限制"""
+        max_mb = _get_max_upload_mb()
+        # 额外留 2MB 余量给表单字段和 multipart 边界
+        app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
+        return max_mb
 
     # 应用 ProxyFix 中间件
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -178,45 +194,17 @@ def create_app() -> Flask:
     app.secret_key = SECRET_KEY
 
     # 设置 Flask 请求体大小上限（防止超大请求耗尽内存）
-    def _get_max_upload_mb() -> int:
-        """动态读取当前上传大小限制"""
-        try:
-            return get_system_setting_int('max_file_size_mb', 100, minimum=1, maximum=1024)
-        except Exception:
-            return _request_limit_cache.get('max_mb', 100)
-
-    # 缓存上传限制，避免每次请求都查DB（1秒TTL）
-    _request_limit_cache = {'ts': 0.0, 'max_mb': 100}
-
-    def _get_max_upload_mb_cached() -> int:
-        now = time.time()
-        if now - _request_limit_cache['ts'] < 1.0:
-            return _request_limit_cache['max_mb']
-        max_mb = _get_max_upload_mb()
-        _request_limit_cache['ts'] = now
-        _request_limit_cache['max_mb'] = max_mb
-        return max_mb
-
-    def _apply_request_limit() -> int:
-        """将数据库中的上传限制同步到 Flask 请求体限制。
-
-        Flask 3.0 不支持 request.max_content_length（该特性 3.1+ 才支持），
-        只能通过 app.config 设置全局值。竞态风险通过 1 秒缓存 TTL 和
-        相邻请求限制差异微小（< 1 MB）来缓解。
-        """
-        max_mb = _get_max_upload_mb_cached()
-        app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
-        return max_mb
-
     _apply_request_limit()
 
     @app.before_request
-    def refresh_request_size_limit():
+    def _refresh_request_limit():
         """
-        仅上传类请求刷新上传大小限制，避免普通 GET/HEAD 请求产生不必要的 DB 查询。
+        每次请求前同步上传限制。
+
+        不然管理员在后台把 max_file_size_mb 调大以后，当前进程还是抱着启动时
+        的旧值不撒手，上传直接 413，纯属自己给自己下绊子。
         """
-        if request.method in ('POST', 'PUT', 'PATCH'):
-            _apply_request_limit()
+        _apply_request_limit()
 
     @app.errorhandler(RequestEntityTooLarge)
     def handle_request_entity_too_large(error):
@@ -224,7 +212,7 @@ def create_app() -> Flask:
         max_mb = _get_max_upload_mb()
         response = jsonify({
             'success': False,
-            'error': f'文件大小超过当前 {max_mb}MB 上传限制，请在管理后台调高"最大文件大小（MB）"后重试'
+            'error': f'文件大小超过当前 {max_mb}MB 上传限制，请在管理后台调高“最大文件大小（MB）”后重试'
         })
         return add_cache_headers(response, 'no-cache'), 413
 
