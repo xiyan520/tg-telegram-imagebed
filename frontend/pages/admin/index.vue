@@ -269,7 +269,11 @@ onMounted(async () => {
   }
 
   if (import.meta.client && !authStore.isAuthenticated) {
-    await authStore.restoreAuth()
+    try {
+      await authStore.restoreAuth()
+    } catch {
+      // 恢复失败时继续展示登录表单
+    }
   }
 
   if (authStore.isAuthenticated) {

@@ -2082,22 +2082,53 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             return jsonify({'success': False, 'message': '请输入密码和验证码'}), 400
 
         username = session.get('admin_username', 'admin')
+        ip = _get_client_ip(request)
+        account_ip_key = (username, ip)
+
+        # 检查账号+IP 级别限流
+        with _totp_verify_tokens_lock:
+            _cleanup_totp_verify_tokens()
+            rate_info = _totp_account_ip_attempts.get(account_ip_key)
+            if rate_info and rate_info['attempts'] >= _TOTP_MAX_FAILED_PER_ACCOUNT_IP:
+                return jsonify({
+                    'success': False,
+                    'message': '验证尝试次数过多，请稍后再试',
+                }), 429
 
         # 验证密码
         if not verify_admin_password(username, password):
-            ip = _get_client_ip(request)
             _log_security_event('login_failed', ip, username, detail='totp_disable_wrong_password')
+            with _totp_verify_tokens_lock:
+                entry = _totp_account_ip_attempts.get(account_ip_key)
+                if entry:
+                    entry['attempts'] += 1
+                else:
+                    _totp_account_ip_attempts[account_ip_key] = {
+                        'attempts': 1,
+                        'first_attempt': time.time(),
+                    }
             return jsonify({'success': False, 'message': '密码错误'}), 401
 
         # 验证 TOTP 码
         totp_secret = get_totp_secret()
         if not _verify_totp_code(totp_secret, code):
+            with _totp_verify_tokens_lock:
+                entry = _totp_account_ip_attempts.get(account_ip_key)
+                if entry:
+                    entry['attempts'] += 1
+                else:
+                    _totp_account_ip_attempts[account_ip_key] = {
+                        'attempts': 1,
+                        'first_attempt': time.time(),
+                    }
             return jsonify({'success': False, 'message': '验证码错误'}), 401
 
         # 禁用 TOTP
         disable_totp()
 
-        ip = _get_client_ip(request)
+        # 成功后清除限流计数
+        with _totp_verify_tokens_lock:
+            _totp_account_ip_attempts.pop(account_ip_key, None)
         _log_security_event('password_changed', ip, username, detail='totp_disabled')
         logger.info(f"TOTP 二次验证已禁用: {username}")
 

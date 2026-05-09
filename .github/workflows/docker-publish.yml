@@ -174,7 +174,7 @@ jobs:
           provenance: false
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-amd64
-            ${{ env.IMAGE_NAME }}:latest-amd64
+            ${{ needs.prepare.outputs.is_tag_push != 'true' && format('{0}:latest-amd64', env.IMAGE_NAME) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -212,7 +212,7 @@ jobs:
           provenance: false
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.tag }}-arm64
-            ${{ env.IMAGE_NAME }}:latest-arm64
+            ${{ needs.prepare.outputs.is_tag_push != 'true' && format('{0}:latest-arm64', env.IMAGE_NAME) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -241,10 +241,12 @@ jobs:
             "${{ env.IMAGE_NAME }}:${TAG}-arm64"
           docker manifest push "${{ env.IMAGE_NAME }}:${TAG}"
 
-          docker manifest create "${{ env.IMAGE_NAME }}:latest" \
-            "${{ env.IMAGE_NAME }}:latest-amd64" \
-            "${{ env.IMAGE_NAME }}:latest-arm64"
-          docker manifest push "${{ env.IMAGE_NAME }}:latest"
+          if [ "${{ needs.prepare.outputs.is_tag_push }}" != "true" ]; then
+            docker manifest create "${{ env.IMAGE_NAME }}:latest" \
+              "${{ env.IMAGE_NAME }}:latest-amd64" \
+              "${{ env.IMAGE_NAME }}:latest-arm64"
+            docker manifest push "${{ env.IMAGE_NAME }}:latest"
+          fi
 
   release:
     needs: [prepare, build-amd64, build-arm64, merge-manifest, finalize]

@@ -104,6 +104,8 @@ def process_upload(
     """
     if file_content is None and not staged_file_path:
         raise ValueError("file_content 和 staged_file_path 不能同时为空")
+    if file_content is not None and staged_file_path:
+        raise ValueError("file_content 和 staged_file_path 不能同时提供")
 
     if staged_file_path:
         file_size = os.path.getsize(staged_file_path)
@@ -227,8 +229,11 @@ def process_upload(
             logger.exception(f"回滚删除失败: {put_result.storage_key}")
         return None
 
-    # 添加到 CDN 监控
-    add_to_cdn_monitor(encrypted_id, file_data['upload_time'])
+    # 添加到 CDN 监控（失败不影响主流程）
+    try:
+        add_to_cdn_monitor(encrypted_id, file_data['upload_time'])
+    except Exception:
+        logger.exception(f"CDN 监控入队失败: {encrypted_id}")
 
     logger.info(f"文件上传完成: {filename} -> {encrypted_id}")
 

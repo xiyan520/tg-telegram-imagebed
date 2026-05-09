@@ -144,13 +144,22 @@ def create_auth_token_with_ip_limit(
 ) -> Tuple[Optional[str], Optional[str]]:
     """在事务中原子地创建 Token，避免同一 IP 并发超过上限"""
     if not ip_address:
-        return create_auth_token(
-            ip_address=ip_address,
-            user_agent=user_agent,
-            description=description,
-            upload_limit=upload_limit,
-            expires_days=expires_days,
-        ), None
+        # 无 IP 时无需配额检查，但保持 db_retry 保护
+        try:
+            token = generate_auth_token()
+            expires_at = datetime.now() + timedelta(days=expires_days)
+            with get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    INSERT INTO auth_tokens
+                    (token, expires_at, upload_limit, ip_address, user_agent, description)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (token, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'))
+            logger.info(f"创建新的auth_token: {token[:20]}... (限制: {upload_limit}张, 有效期: {expires_days}天)")
+            return token, None
+        except Exception as e:
+            logger.error(f"创建auth_token失败: {e}")
+            return None, 'db_error'
 
     try:
         token = generate_auth_token()

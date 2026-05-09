@@ -247,7 +247,10 @@ class TelegramBackend(StorageBackend):
 
         thread = threading.Thread(target=runner, name=f"{self.name}-kurigram", daemon=True)
         thread.start()
-        thread.join()
+        thread.join(timeout=30)
+        if thread.is_alive():
+            logger.error(f"{self.name}: Kurigram 异步任务超时（30s）")
+            raise TimeoutError("Kurigram 异步任务超时")
         if "value" in error:
             raise error["value"]
         return result.get("value")

@@ -147,9 +147,8 @@ def _format_settings_for_response(settings: dict) -> dict:
         'app_update_release_repo': settings.get('app_update_release_repo', DEFAULT_UPDATE_RELEASE_REPO),
         'app_update_release_asset_name': settings.get('app_update_release_asset_name', DEFAULT_UPDATE_ASSET_NAME),
         'app_update_release_sha_name': settings.get('app_update_release_sha_name', DEFAULT_UPDATE_SHA_NAME),
-        # 兼容旧字段（从实际配置的 release_repo 推导，而不是硬编码默认值）
-        'app_update_repo_url': settings.get('app_update_repo_url',
-            f'https://github.com/{settings.get("app_update_release_repo", DEFAULT_UPDATE_RELEASE_REPO)}.git'),
+        # 兼容旧字段（始终从当前 release_repo 推导，避免历史值污染）
+        'app_update_repo_url': f'https://github.com/{settings.get("app_update_release_repo", DEFAULT_UPDATE_RELEASE_REPO)}.git',
         'app_update_branch': settings.get('app_update_branch', 'main'),
         'app_update_last_status': settings.get('app_update_last_status', 'idle'),
         'app_update_last_error': settings.get('app_update_last_error', ''),

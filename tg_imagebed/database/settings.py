@@ -335,21 +335,23 @@ def get_upload_count_today(*, source: Optional[str] = None, auth_token: Optional
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            conditions = ["date(created_at) = date('now', 'localtime')"]
-            params: List[Any] = []
-
-            if source:
-                conditions.append("source = ?")
-                params.append(source)
-            if auth_token is not None:
-                conditions.append("auth_token = ?")
-                params.append(auth_token)
-
-            where_clause = " AND ".join(conditions)
-            cursor.execute(
-                f"SELECT COUNT(*) FROM file_storage WHERE {where_clause}",
-                tuple(params)
-            )
+            if source and auth_token is not None:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM file_storage WHERE date(created_at) = date('now', 'localtime') AND source = ? AND auth_token = ?",
+                    (source, auth_token)
+                )
+            elif source:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM file_storage WHERE date(created_at) = date('now', 'localtime') AND source = ?",
+                    (source,)
+                )
+            elif auth_token is not None:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM file_storage WHERE date(created_at) = date('now', 'localtime') AND auth_token = ?",
+                    (auth_token,)
+                )
+            else:
+                return 0
             row = cursor.fetchone()
             return int(row[0]) if row else 0
     except Exception as e:

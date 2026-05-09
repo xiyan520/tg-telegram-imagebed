@@ -166,6 +166,8 @@ def admin_token_detail_api(token_id: int):
 
         if 'upload_limit' in payload:
             raw_limit = payload['upload_limit']
+            if isinstance(raw_limit, bool):
+                return _admin_json({'success': False, 'error': 'upload_limit 必须是非负整数，不能为布尔值'}, 400)
             if raw_limit is None or raw_limit == '' or str(raw_limit).strip().lower() == 'nan':
                 update_kwargs['upload_limit'] = None
             else:
