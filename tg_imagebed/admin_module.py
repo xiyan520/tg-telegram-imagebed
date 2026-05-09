@@ -1011,6 +1011,10 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             _totp_verify_tokens.pop(verification_token, None)
         _record_login_success(ip)
 
+        # TOTP 登录成功，清空该账号+IP 的失败计数
+        with _totp_verify_tokens_lock:
+            _totp_account_ip_attempts.pop((username, ip), None)
+
         # 设置 session
         session['admin_logged_in'] = True
         session['admin_username'] = username

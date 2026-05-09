@@ -224,7 +224,7 @@ def process_upload(
         if reservation_key:
             release_upload_reservation(reservation_key)
         try:
-            backend.delete(put_result.storage_key)
+            backend.delete(storage_key=put_result.storage_key)
         except Exception:
             logger.exception(f"回滚删除失败: {put_result.storage_key}")
         return None
