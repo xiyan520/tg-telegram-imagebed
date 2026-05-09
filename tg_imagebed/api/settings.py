@@ -651,17 +651,21 @@ def admin_system_settings():
 
             if 'app_update_release_asset_name' in data:
                 asset_name = str(data.get('app_update_release_asset_name') or '').strip()
-                if asset_name and (asset_name.startswith('/') or '..' in asset_name):
+                if not asset_name:
+                    settings_to_update['app_update_release_asset_name'] = DEFAULT_UPDATE_ASSET_NAME
+                elif any(sep in asset_name for sep in ('/', '\\')) or asset_name in ('.', '..'):
                     errors.append('Release 资产名包含非法字符')
                 else:
-                    settings_to_update['app_update_release_asset_name'] = asset_name or DEFAULT_UPDATE_ASSET_NAME
+                    settings_to_update['app_update_release_asset_name'] = asset_name
 
             if 'app_update_release_sha_name' in data:
                 sha_name = str(data.get('app_update_release_sha_name') or '').strip()
-                if sha_name and (sha_name.startswith('/') or '..' in sha_name):
+                if not sha_name:
+                    settings_to_update['app_update_release_sha_name'] = DEFAULT_UPDATE_SHA_NAME
+                elif any(sep in sha_name for sep in ('/', '\\')) or sha_name in ('.', '..'):
                     errors.append('Release 校验文件名包含非法字符')
                 else:
-                    settings_to_update['app_update_release_sha_name'] = sha_name or DEFAULT_UPDATE_SHA_NAME
+                    settings_to_update['app_update_release_sha_name'] = sha_name
 
             if 'app_update_branch' in data:
                 branch = str(data.get('app_update_branch') or '').strip().lower()

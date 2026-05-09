@@ -3,7 +3,7 @@
 """TG 认证数据访问层"""
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 
 from ..config import logger
 from .connection import get_connection, db_retry
@@ -513,6 +513,32 @@ def get_user_tokens(tg_user_id: int) -> List[Dict]:
 
 
 @db_retry()
+def bind_token_to_user_with_limit(token: str, tg_user_id: int, max_tokens: int) -> Tuple[bool, Optional[str]]:
+    """原子操作：检查配额 + 绑定已有 Token 到 TG 用户"""
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',
+                (tg_user_id,)
+            )
+            count = int(cursor.fetchone()[0])
+            if count >= max_tokens:
+                return False, 'token_limit'
+
+            cursor.execute(
+                'UPDATE auth_tokens SET tg_user_id = ? WHERE token = ? AND tg_user_id IS NULL',
+                (tg_user_id, token)
+            )
+            if cursor.rowcount == 0:
+                return False, 'token_already_bound'
+            return True, None
+    except Exception as e:
+        logger.error(f"bind_token_to_user_with_limit 失败: {e}")
+        return False, str(e)
+
+
+@db_retry()
 def bind_token_to_user(token: str, tg_user_id: int) -> bool:
     """将 Token 绑定到 TG 用户"""
     try:
@@ -542,6 +568,46 @@ def unbind_token_from_user(token: str, tg_user_id: int) -> bool:
     except Exception as e:
         logger.error(f"unbind_token_from_user 失败: {e}")
         return False
+
+
+@db_retry()
+def create_and_bind_tg_token(
+    tg_user_id: int,
+    max_tokens: int,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    description: Optional[str] = None,
+    upload_limit: int = 100,
+    expires_days: int = 30,
+) -> Tuple[Optional[str], Optional[str]]:
+    """原子操作：检查配额 → 创建 Token → 绑定 TG 用户，全部在同一事务内"""
+    try:
+        token = secrets.token_hex(32)
+        token = f"guest_{token}"
+        expires_at = datetime.now() + timedelta(days=expires_days)
+
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f'SELECT COUNT(*) FROM auth_tokens WHERE tg_user_id = ? AND {_ACTIVE_TOKEN_WHERE}',
+                (tg_user_id,)
+            )
+            count = int(cursor.fetchone()[0])
+            if count >= max_tokens:
+                return None, 'token_limit'
+
+            cursor.execute('''
+                INSERT INTO auth_tokens
+                (token, tg_user_id, expires_at, upload_limit, ip_address, user_agent, description)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (token, tg_user_id, expires_at, upload_limit, ip_address, user_agent, description or 'Guest Token'))
+
+        logger.info(f"创建并绑定 TG Token: {token[:20]}... (tg_user_id={tg_user_id})")
+        return token, None
+
+    except Exception as e:
+        logger.error(f"create_and_bind_tg_token 失败: {e}")
+        return None, str(e)
 
 
 # ===================== 默认上传 Token 管理 =====================

@@ -567,7 +567,6 @@ const cancelTotpSetup = () => {
   totpSetupStarted.value = false
   totpManualSecret.value = ''
   totpVerifyCode.value = ''
-  authStore.totpSetupData = null
 }
 
 const confirmTotpSetup = async () => {

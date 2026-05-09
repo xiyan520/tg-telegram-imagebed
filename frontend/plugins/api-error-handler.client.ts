@@ -4,6 +4,8 @@
  * 不覆盖 globalThis.fetch，避免污染全局环境
  */
 export default defineNuxtPlugin((nuxtApp) => {
+  const authStore = useAuthStore(nuxtApp.$pinia)
+
   // 通过 $fetch.create() 创建带拦截器的实例，处理管理后台 API 的 401
   const apiFetch = $fetch.create({
     onResponseError({ request, response }) {
@@ -11,7 +13,7 @@ export default defineNuxtPlugin((nuxtApp) => {
         // 仅拦截管理后台 API 的 401
         const url = typeof request === 'string' ? request : (request as Request).url
         if (url.includes('/api/admin/')) {
-          useAuthStore().handleUnauthorized()
+          authStore.handleUnauthorized()
         }
       }
     }
@@ -20,7 +22,7 @@ export default defineNuxtPlugin((nuxtApp) => {
   // 拦截 Vue 组件内未捕获的错误
   nuxtApp.hook('vue:error', (error: any) => {
     if (error?.statusCode === 401 || error?.status === 401) {
-      useAuthStore().handleUnauthorized()
+      authStore.handleUnauthorized()
     }
   })
 

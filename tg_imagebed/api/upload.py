@@ -107,9 +107,6 @@ def validate_upload_file(file) -> Tuple[Optional[tuple], Optional[ValidatedUploa
         ext = file.filename.rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else ""
         return _error(f"不支持的文件格式: .{ext}", 400), None
 
-    if content_type and not content_type.startswith("image/"):
-        return _error("只允许上传图片文件", 400), None
-
     # SVG 可嵌入 <script>，直接作为图片 serving 存在 XSS 风险。
     # 在实现 XML 清洗 + 安全 serving 策略前一律拒绝。
     if content_type == "image/svg+xml":

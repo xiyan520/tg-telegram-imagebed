@@ -410,7 +410,7 @@ const createToken = async (form: CreateTokenForm) => {
     try {
       await tokenStore.addTokenToVault(resp.data?.token, {
         albumName: form.description || '',
-        makeActive: true,
+        makeActive: false,
         verify: true
       })
     } catch {

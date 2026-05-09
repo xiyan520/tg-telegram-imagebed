@@ -72,27 +72,34 @@ class UploadLimitTests(unittest.TestCase):
 
     def test_guest_token_ip_limit_is_atomic(self):
         results = []
+        errors = []
         lock = threading.Lock()
         barrier = threading.Barrier(8)
 
         def worker():
-            barrier.wait()
-            result = create_auth_token_with_ip_limit(
-                ip_address="10.0.0.1",
-                user_agent="parallel-test",
-                description="parallel",
-                upload_limit=3,
-                expires_days=7,
-                max_tokens_for_ip=1,
-            )
-            with lock:
-                results.append(result)
+            try:
+                barrier.wait()
+                result = create_auth_token_with_ip_limit(
+                    ip_address="10.0.0.1",
+                    user_agent="parallel-test",
+                    description="parallel",
+                    upload_limit=3,
+                    expires_days=7,
+                    max_tokens_for_ip=1,
+                )
+                with lock:
+                    results.append(result)
+            except Exception as exc:
+                with lock:
+                    errors.append(exc)
 
         threads = [threading.Thread(target=worker) for _ in range(8)]
         for thread in threads:
             thread.start()
         for thread in threads:
             thread.join()
+
+        self.assertEqual(errors, [])
 
         successes = [token for token, reason in results if token]
         reasons = [reason for token, reason in results if not token]

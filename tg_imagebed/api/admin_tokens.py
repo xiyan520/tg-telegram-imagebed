@@ -76,13 +76,14 @@ def admin_tokens_api():
             upload_limit = 0
         else:
             try:
-                val = int(raw_upload_limit)
-                if val >= 0:
-                    upload_limit = val
-                else:
-                    upload_limit = default_upload_limit
+                if isinstance(raw_upload_limit, bool):
+                    raise ValueError
+                val = int(str(raw_upload_limit).strip())
+                if val < 0:
+                    return _admin_json({'success': False, 'error': 'upload_limit 不能为负数'}, 400)
+                upload_limit = val
             except (ValueError, TypeError):
-                upload_limit = default_upload_limit
+                return _admin_json({'success': False, 'error': 'upload_limit 必须是非负整数'}, 400)
 
         created = TokenService.create_token(
             description=payload.get('description'),

@@ -16,8 +16,9 @@ from ..database import (
     verify_auth_token, verify_auth_token_access, get_token_info,
     update_token_description, is_token_generation_allowed, is_token_upload_allowed,
     get_system_setting_int,
-    create_auth_token, get_token_uploads,
-    get_system_setting, verify_tg_session, get_user_token_count, bind_token_to_user, unbind_token_from_user,
+    get_token_uploads,
+    get_system_setting, verify_tg_session, create_and_bind_tg_token,
+    bind_token_to_user, unbind_token_from_user, bind_token_to_user_with_limit,
     create_auth_token_with_ip_limit, reserve_token_upload, release_upload_reservation,
 )
 from ..database.connection import get_connection
@@ -43,6 +44,7 @@ def generate_token():
         user_agent = request.headers.get('User-Agent', '')
 
         tg_user_id = None
+        max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
         if get_system_setting('tg_auth_required_for_token') == '1':
             tg_session_token = request.cookies.get('tg_session', '')
             session_info = verify_tg_session(tg_session_token)
@@ -53,12 +55,6 @@ def generate_token():
                 }), 'no-cache'), 401
 
             tg_user_id = session_info['tg_user_id']
-            max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
-            if get_user_token_count(tg_user_id) >= max_tokens:
-                return add_cache_headers(jsonify({
-                    'success': False,
-                    'error': f'Token limit reached ({max_tokens})',
-                }), 'no-cache'), 403
         else:
             if not is_token_generation_allowed():
                 return add_cache_headers(jsonify({
@@ -72,12 +68,6 @@ def generate_token():
                     session_info = verify_tg_session(tg_session_token)
                     if session_info:
                         tg_user_id = session_info['tg_user_id']
-                        max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
-                        if get_user_token_count(tg_user_id) >= max_tokens:
-                            return add_cache_headers(jsonify({
-                                'success': False,
-                                'error': f'Token limit reached ({max_tokens})',
-                            }), 'no-cache'), 403
 
         data = request.get_json(silent=True) or {}
         max_upload_limit = get_system_setting_int('guest_token_max_upload_limit', 1000, minimum=1, maximum=1000000)
@@ -107,13 +97,20 @@ def generate_token():
 
         create_reason = None
         if tg_user_id:
-            token = create_auth_token(
+            token, create_reason = create_and_bind_tg_token(
+                tg_user_id=tg_user_id,
+                max_tokens=max_tokens,
                 ip_address=ip_address,
                 user_agent=user_agent,
                 description=description,
                 upload_limit=upload_limit,
                 expires_days=expires_days,
             )
+            if create_reason == 'token_limit':
+                return add_cache_headers(jsonify({
+                    'success': False,
+                    'error': f'Token limit reached ({max_tokens})',
+                }), 'no-cache'), 403
         else:
             max_guest_tokens = get_system_setting_int('max_guest_tokens_per_ip', 3, minimum=1, maximum=100)
             token, create_reason = create_auth_token_with_ip_limit(
@@ -132,9 +129,6 @@ def generate_token():
 
         if not token:
             return add_cache_headers(jsonify({'success': False, 'error': 'Failed to create token'}), 'no-cache'), 500
-
-        if tg_user_id:
-            bind_token_to_user(token, tg_user_id)
 
         token_info = get_token_info(token)
         return add_cache_headers(jsonify({
@@ -238,12 +232,9 @@ def upload_with_token():
     if file.filename == '':
         return add_cache_headers(jsonify({'success': False, 'error': 'Missing file'}), 'no-cache'), 400
 
-    err, validated = validate_upload_file(file)
-    if err:
-        return err
-
     daily_limit = get_system_setting_int('daily_upload_limit', 0, minimum=0, maximum=1000000)
     reservation_key = None
+    validated = None
 
     try:
         reservation = reserve_token_upload(token, daily_limit=daily_limit)
@@ -255,6 +246,12 @@ def upload_with_token():
 
         reservation_key = reservation.get('reservation_key')
         remaining = reservation.get('remaining_uploads', 0)
+
+        err, validated = validate_upload_file(file)
+        if err:
+            if reservation_key:
+                release_upload_reservation(reservation_key)
+            return err
 
         result = process_upload(
             file_content=None,
@@ -441,13 +438,23 @@ def bind_token_to_tg():
             'success': False, 'error': '该 Token 已被其他用户绑定'
         }), 'no-cache'), 409
 
-    # 未绑定时检查当前用户 Token 数量上限
+    # 未绑定时检查当前用户 Token 数量上限（原子操作）
     if not existing_tg_user_id:
         max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
-        if get_user_token_count(current_tg_user_id) >= max_tokens:
+        ok, reason = bind_token_to_user_with_limit(token, current_tg_user_id, max_tokens)
+        if not ok:
+            if reason == 'token_limit':
+                return add_cache_headers(jsonify({
+                    'success': False, 'error': f'已达到 Token 上限（{max_tokens}个）'
+                }), 'no-cache'), 403
+            if reason == 'token_already_bound':
+                return add_cache_headers(jsonify({
+                    'success': False, 'error': 'Token 已被绑定'
+                }), 'no-cache'), 409
             return add_cache_headers(jsonify({
-                'success': False, 'error': f'已达到 Token 上限（{max_tokens}个）'
-            }), 'no-cache'), 403
+                'success': False, 'error': '绑定失败'
+            }), 'no-cache'), 500
+        return add_cache_headers(jsonify({'success': True, 'message': '绑定成功'}), 'no-cache')
 
     bind_token_to_user(token, current_tg_user_id)
     return add_cache_headers(jsonify({'success': True, 'message': '绑定成功'}), 'no-cache')

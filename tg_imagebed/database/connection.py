@@ -341,8 +341,7 @@ def _migrate_auth_tokens_columns(cursor) -> None:
     try:
         cursor.execute("UPDATE auth_tokens SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
         cursor.execute("UPDATE auth_tokens SET upload_count = 0 WHERE upload_count IS NULL")
-        if upload_limit_added:
-            cursor.execute("UPDATE auth_tokens SET upload_limit = 100 WHERE upload_limit IS NULL")
+        cursor.execute("UPDATE auth_tokens SET upload_limit = 100 WHERE upload_limit IS NULL")
         cursor.execute("UPDATE auth_tokens SET is_active = 1 WHERE is_active IS NULL")
     except Exception as e:
         logger.debug(f"回填 auth_tokens 字段失败（可忽略）: {e}")

@@ -8,7 +8,6 @@ export const useAuthStore = defineStore('auth', {
     isChecking: false,
     // TOTP 相关状态
     totpEnabled: false,
-    totpSetupData: null as TotpSetupData | null,
   }),
 
   actions: {
@@ -111,9 +110,6 @@ export const useAuthStore = defineStore('auth', {
           method: 'POST',
           credentials: 'include'
         })
-        if (response.success && response.data) {
-          this.totpSetupData = response.data
-        }
         return response
       } catch (error: any) {
         if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
@@ -132,7 +128,6 @@ export const useAuthStore = defineStore('auth', {
         })
         if (response.success) {
           this.totpEnabled = true
-          this.totpSetupData = null
         }
         return response
       } catch (error: any) {
@@ -176,7 +171,6 @@ export const useAuthStore = defineStore('auth', {
       this.username = ''
       this.isAuthenticated = false
       this.totpEnabled = false
-      this.totpSetupData = null
 
       if (import.meta.client) {
         localStorage.removeItem('has_session')
@@ -257,7 +251,6 @@ export const useAuthStore = defineStore('auth', {
       this.username = ''
       this.isAuthenticated = false
       this.totpEnabled = false
-      this.totpSetupData = null
 
       if (import.meta.client) {
         localStorage.removeItem('has_session')

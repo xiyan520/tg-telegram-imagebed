@@ -58,8 +58,10 @@ def _upload_fingerprint_from_file(file_path: str, chat_id: int, send_as_photo: b
     """计算上传请求的幂等指纹（基于文件路径+大小，用于流式上传避免全读）"""
     import hashlib
     h = hashlib.sha256()
-    h.update(file_path.encode())
-    h.update(str(os.path.getsize(file_path)).encode())
+    stat = os.stat(file_path)
+    h.update(os.path.realpath(file_path).encode())
+    h.update(str(stat.st_size).encode())
+    h.update(str(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))).encode())
     h.update(str(chat_id).encode())
     h.update(b"photo" if send_as_photo else b"document")
     return h.hexdigest()

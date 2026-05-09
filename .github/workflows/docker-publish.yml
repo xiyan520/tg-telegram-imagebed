@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -55,6 +56,7 @@ jobs:
             echo "is_tag_push=true" >> "$GITHUB_OUTPUT"
             echo "version=${version}" >> "$GITHUB_OUTPUT"
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+            echo "${version}" > VERSION
             exit 0
           fi
 
@@ -146,16 +148,15 @@ jobs:
           zip -r "dist/${RELEASE_ASSET_NAME}" VERSION main.py requirements.txt tg_imagebed frontend/.output/public
           sha256sum "dist/${RELEASE_ASSET_NAME}" > "dist/${RELEASE_SHA_NAME}"
 
-      - name: Publish GitHub Release
+      - name: Upload release artifact
         if: steps.version.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
-          files: |
+          name: release-assets
+          path: |
             dist/tg-imagebed-release.zip
             dist/tg-imagebed-release.zip.sha256
+          retention-days: 1
 
   build-amd64:
     needs: prepare
@@ -262,3 +263,26 @@ jobs:
             "${{ env.IMAGE_NAME }}:latest-amd64" \
             "${{ env.IMAGE_NAME }}:latest-arm64"
           docker manifest push "${{ env.IMAGE_NAME }}:latest"
+
+  release:
+    needs: [prepare, build-amd64, build-arm64, merge-manifest]
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: Release ${{ needs.prepare.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            tg-imagebed-release.zip
+            tg-imagebed-release.zip.sha256
