@@ -624,7 +624,7 @@ def create_and_bind_tg_token(
     try:
         token = secrets.token_hex(32)
         token = f"guest_{token}"
-        expires_at = datetime.now() + timedelta(days=expires_days)
+        expires_at = datetime.utcnow() + timedelta(days=expires_days)
 
         with get_connection() as conn:
             conn.execute('BEGIN IMMEDIATE')

@@ -104,11 +104,15 @@ class SmokeRouteTests(unittest.TestCase):
         init_system_settings()
 
         import main as app_main
+        self.main_db_patch = patch.object(app_main, "DATABASE_PATH", self.db_path)
+        self.main_db_patch.start()
         self.app = app_main.create_app()
         self.app.testing = True
         self.client = self.app.test_client()
 
     def tearDown(self):
+        if hasattr(self, "main_db_patch"):
+            self.main_db_patch.stop()
         for patcher in reversed(self.patches):
             patcher.stop()
         self.temp_dir.cleanup()

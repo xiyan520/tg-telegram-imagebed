@@ -1,10 +1,20 @@
 <template>
   <UCard>
     <template #header>
-      <div class="flex items-center justify-between">
-        <div>
-          <h3 class="font-semibold text-stone-900 dark:text-white">我的上传</h3>
-          <p class="text-xs text-stone-400 dark:text-stone-500">共 {{ total }} 张图片</p>
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <UButton
+            icon="heroicons:arrow-left"
+            color="gray"
+            variant="ghost"
+            size="sm"
+            aria-label="返回列表"
+            @click="emit('navigate', 'list')"
+          />
+          <div>
+            <h3 class="font-semibold text-stone-900 dark:text-white">我的上传</h3>
+            <p class="text-xs text-stone-400 dark:text-stone-500">共 {{ total }} 张图片</p>
+          </div>
         </div>
       </div>
     </template>

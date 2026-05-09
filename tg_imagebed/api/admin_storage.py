@@ -235,6 +235,9 @@ def admin_upload():
         )
     except ValueError as e:
         return _admin_json({'success': False, 'error': str(e)}, 400)
+    except Exception as e:
+        logger.exception(f"管理员上传失败: {e}")
+        return _admin_json({'success': False, 'error': 'Upload failed'}, 500)
     finally:
         if validated:
             validated.cleanup()

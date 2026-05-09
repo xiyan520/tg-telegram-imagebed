@@ -277,6 +277,8 @@ onMounted(async () => {
         pruneBoundTokensIfSessionLost()
       }
     }
+  } catch (e: any) {
+    toast.error(e?.message || '登录状态初始化失败')
   } finally {
     authBootstrapDone.value = true
   }

@@ -446,8 +446,8 @@ const validateStep = (): boolean => {
           stepError.value = '启用 Kurigram 大文件上传时必须填写 API ID'
           return false
         }
-        if (!/^\d+$/.test(form.api_id.trim())) {
-          stepError.value = 'API ID 必须是纯数字'
+        if (!/^\d+$/.test(form.api_id.trim()) && !/^env:[A-Za-z_][A-Za-z0-9_]*$/.test(form.api_id.trim())) {
+          stepError.value = 'API ID 必须是纯数字或 env:变量名 格式'
           return false
         }
         if (!form.api_hash.trim() && !maskedState.value.api_hash) {
@@ -521,8 +521,10 @@ const submit = () => {
 
   const form = clonePlain(localForm.value)
   if (maskedState.value.bot_token && !form.bot_token.trim()) form.bot_token = '__MASKED__'
-  if (maskedState.value.api_hash && !form.api_hash.trim()) {
-    if (form.api_id.trim() || maskedState.value.api_hash) form.api_hash = '__MASKED__'
+  if (maskedState.value.api_hash) {
+    if (!form.api_hash.trim()) {
+      form.api_hash = '__MASKED__'
+    }
   }
   if (maskedState.value.access_key && !form.access_key.trim()) form.access_key = '__MASKED__'
   if (maskedState.value.secret_key && !form.secret_key.trim()) form.secret_key = '__MASKED__'

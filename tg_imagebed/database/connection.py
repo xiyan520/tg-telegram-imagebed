@@ -708,8 +708,15 @@ def _migrate_upload_reservations_fk(cursor, conn) -> None:
         ''')
         cursor.execute('''
             INSERT INTO upload_reservations (reservation_key, auth_token, source, created_day, created_at)
-            SELECT reservation_key, auth_token, source, created_day, created_at
-            FROM upload_reservations_old
+            SELECT
+                old.reservation_key,
+                CASE WHEN tok.token IS NOT NULL THEN old.auth_token ELSE NULL END,
+                old.source,
+                old.created_day,
+                old.created_at
+            FROM upload_reservations_old AS old
+            LEFT JOIN auth_tokens AS tok
+              ON tok.token = old.auth_token
         ''')
         cursor.execute('DROP TABLE upload_reservations_old')
         conn.commit()

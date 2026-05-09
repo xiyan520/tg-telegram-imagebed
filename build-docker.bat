@@ -34,10 +34,9 @@ if defined GIT_BASH (
     echo.
     call "%GIT_BASH%" -lc "docker version >/dev/null 2>&1"
     if errorlevel 1 (
-        echo [ERROR] Docker is not available in Git Bash. Start Docker Desktop first.
-        goto :fail
-    )
-    if /I "%DOCKER_LAUNCHER_DRY_RUN%"=="1" (
+        echo [WARN] Docker is not available in Git Bash, trying WSL...
+    ) else (
+        if /I "%DOCKER_LAUNCHER_DRY_RUN%"=="1" (
         echo [DRY-RUN] Skipped actual execution
         goto :success
     )
@@ -47,6 +46,7 @@ if defined GIT_BASH (
     popd
     if not "!RUN_EXIT!"=="0" goto :runner_fail
     goto :success
+    )
 )
 
 where.exe wsl.exe >nul 2>&1

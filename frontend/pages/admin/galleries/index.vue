@@ -111,7 +111,8 @@
           <button
             @click.stop="askDelete(gallery)"
             :disabled="deletingGalleryId !== null"
-            class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-red-600 disabled:opacity-0 disabled:cursor-not-allowed"
+            aria-label="删除画集"
+            class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-red-600 disabled:opacity-0 disabled:cursor-not-allowed"
             title="删除画集"
           >
             <UIcon name="heroicons:trash" class="w-4 h-4" />

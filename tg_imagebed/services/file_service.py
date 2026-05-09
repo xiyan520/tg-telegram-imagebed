@@ -142,28 +142,35 @@ def process_upload(
         is_admin=(scene == "admin"),
     )
     backend = router.get_backend(backend_name)
-    if staged_file_path:
-        put_result = backend.put_file(
-            file_path=staged_file_path,
-            filename=filename,
-            content_type=content_type,
-            file_size=file_size,
-            caption=caption,
-            source=source,
-            username=username,
-        )
-    else:
-        put_result = backend.put_bytes(
-            file_content=file_content or b'',
-            filename=filename,
-            content_type=content_type,
-            file_size=file_size,
-            caption=caption,
-            source=source,
-            username=username,
-        )
+    try:
+        if staged_file_path:
+            put_result = backend.put_file(
+                file_path=staged_file_path,
+                filename=filename,
+                content_type=content_type,
+                file_size=file_size,
+                caption=caption,
+                source=source,
+                username=username,
+            )
+        else:
+            put_result = backend.put_bytes(
+                file_content=file_content or b'',
+                filename=filename,
+                content_type=content_type,
+                file_size=file_size,
+                caption=caption,
+                source=source,
+                username=username,
+            )
+    except Exception:
+        if reservation_key:
+            release_upload_reservation(reservation_key)
+        raise
 
     if not put_result:
+        if reservation_key:
+            release_upload_reservation(reservation_key)
         return None
 
     # 生成签名 ID

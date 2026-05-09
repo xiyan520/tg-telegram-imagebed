@@ -39,7 +39,9 @@ def _get_allowed_release_repos() -> set:
     allowed = {DEFAULT_RELEASE_REPO}
     try:
         from ..database import get_system_setting
-        configured = str(get_system_setting('app_update_release_repo') or '').strip()
+        configured = _normalize_release_repo(
+            str(get_system_setting('app_update_release_repo') or '').strip()
+        )
         if configured:
             allowed.add(configured)
     except Exception:
@@ -466,7 +468,7 @@ def get_update_runtime_info() -> Dict[str, Any]:
         'release_asset_name': asset_name,
         'release_sha_name': sha_name,
         'release_supported': release_supported,
-        'repo_allowed': release_repo in _ALLOWED_RELEASE_REPOS,
+        'repo_allowed': release_repo in _get_allowed_release_repos(),
         'pip_available': pip_available,
         # 兼容旧字段
         'git_available': git_available,

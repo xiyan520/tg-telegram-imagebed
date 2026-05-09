@@ -973,6 +973,12 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             ip = info['ip']
             remember_me = info['remember_me']
 
+        current_ip = _get_client_ip(request)
+        if current_ip != ip:
+            with _totp_verify_tokens_lock:
+                _totp_verify_tokens.pop(verification_token, None)
+            return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
+
         # 验证 TOTP 码（在锁外执行，避免阻塞其他请求）
         from .database.settings import get_totp_secret
         totp_secret = get_totp_secret()

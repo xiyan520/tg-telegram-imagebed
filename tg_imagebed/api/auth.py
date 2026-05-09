@@ -272,7 +272,11 @@ def upload_with_token():
         base_url = get_image_domain(request, scene='token')
         permanent_url = f"{base_url}/image/{result['encrypted_id']}"
 
-        logger.info(f"Token upload complete: {file.filename} -> {result['encrypted_id']}, remaining={remaining}")
+        logger.info(
+            "Token upload complete: encrypted_id=%s remaining=%s",
+            result['encrypted_id'],
+            remaining,
+        )
         return add_cache_headers(jsonify({
             'success': True,
             'data': {
