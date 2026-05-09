@@ -1,0 +1,332 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# ──────────────────────────────────────────────
+# CodeRabbit 配置 — Telegram 云图床 Pro
+# 文档：https://docs.coderabbit.ai/guides/configure-coderabbit
+# ──────────────────────────────────────────────
+
+language: "zh-CN"
+
+tone_instructions: >
+  请用简洁专业的中文回复，重点关注代码质量、安全性和性能优化。
+  后端 Flask + SQLite，前端 Nuxt 3 SPA (Vue 3 + Nuxt UI + Pinia)。
+  注意暗色/亮色双主题兼容（.dark 类名），以及移动端响应式布局。
+
+early_access: true
+enable_free_tier: true
+
+# ──────────────────────────────────────────────
+# 审查设置
+# ──────────────────────────────────────────────
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+  high_level_summary_in_walkthrough: true
+  changed_files_summary: true
+
+  sequence_diagrams: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_prs: true
+
+  suggested_labels: true
+  auto_apply_labels: true
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+
+  review_status: true
+  commit_status: true
+  fail_commit_status: false
+
+  collapse_walkthrough: true
+  review_details: true
+
+  poem: false
+  in_progress_fortune: false
+
+  enable_prompt_for_ai_agents: true
+
+  # ── 标签规则 ──
+  labeling_instructions:
+    - label: "frontend"
+      instructions: "当 PR 包含 frontend/ 目录下的文件变更时应用此标签"
+    - label: "backend"
+      instructions: "当 PR 包含 tg_imagebed/ 或 main.py 目录下的文件变更时应用此标签"
+    - label: "docs"
+      instructions: "当 PR 仅包含 README.md、CLAUDE.md 或 .md 文件变更时应用此标签"
+    - label: "styles"
+      instructions: "当 PR 主要修改 SCSS/CSS 文件或 UI 组件外观时应用此标签"
+    - label: "bug"
+      instructions: "当 PR 标题或描述包含 fix/bugfix/修复 关键词时应用此标签"
+    - label: "feature"
+      instructions: "当 PR 标题或描述包含 feat/feature/新增 关键词时应用此标签"
+    - label: "storage"
+      instructions: "当 PR 包含 tg_imagebed/storage/ 目录下的文件变更时应用此标签"
+
+  # ── 文件过滤 ──
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/__pycache__/**"
+    - "!**/*.pyc"
+    - "!.venv/**"
+    - "!frontend/.nuxt/**"
+    - "!frontend/.output/**"
+    - "!data/**"
+    - "!**/package-lock.json"
+    - "!*.log"
+
+  # ── 路径级审查指令 ──
+  path_instructions:
+    - path: "frontend/components/**"
+      instructions: >
+        Vue 3 组件目录（Composition API + TypeScript）。审查时请关注：
+        1. 是否同时兼容暗色（.dark 类名）和亮色主题
+        2. 响应式布局是否完整（Nuxt UI 断点系统）
+        3. Props/Emits 类型定义是否完整
+        4. 组件是否保持单一职责
+        5. 无障碍访问（aria 标签、键盘导航）
+
+    - path: "frontend/pages/**"
+      instructions: >
+        Nuxt 3 页面级组件。审查时请关注：
+        1. 数据加载和错误处理是否完善
+        2. SEO 相关（页面标题、meta 标签，注意 ssr: false 下 CSR 限制）
+        3. definePageMeta 中间件和布局配置是否正确
+        4. 认证状态检查和路由守卫
+
+    - path: "frontend/stores/**"
+      instructions: >
+        Pinia 状态管理。审查时请关注：
+        1. localStorage 持久化是否安全（避免存储敏感信息如密码）
+        2. 状态恢复时机和竞态条件
+        3. 多 Token 管理逻辑（Token Vault）的正确性
+        4. 认证状态变更时的清理和同步
+
+    - path: "frontend/composables/**"
+      instructions: >
+        VueUse 组合式函数。审查时请关注：
+        1. API 调用的错误处理和类型安全
+        2. 上传进度、灯箱状态等 UI 状态管理
+        3. 与 Pinia store 的协作是否合理
+
+    - path: "frontend/layouts/**"
+      instructions: >
+        Nuxt 布局组件（default/admin/admin-login）。审查时请关注：
+        1. 导航栏的认证优先级（TG/Token > Admin Session）
+        2. 管理后台侧边栏折叠状态
+        3. 暗色/亮色主题切换
+
+    - path: "main.py"
+      instructions: >
+        Flask 应用入口（≈230行）。审查时请关注：
+        1. 多线程安全性（Waitress 4线程 + Bot线程）
+        2. before_request 钩子的性能影响
+        3. CORS 分层策略是否正确
+        4. MAX_CONTENT_LENGTH 的竞态风险（Flask 3.0 不支持 request.max_content_length）
+
+    - path: "tg_imagebed/api/**"
+      instructions: >
+        Flask Blueprint 路由层。审查时请关注：
+        1. 认证装饰器是否正确使用（@login_required vs verify_auth_token）
+        2. SQL 注入防护（参数化查询）
+        3. 文件上传的魔数校验和类型白名单
+        4. SVG XSS 风险（应拒绝 SVG 上传）
+        5. CORS 响应头安全性（Vary: Origin，不反射任意 Origin）
+        6. JSON 响应格式统一：{ success: bool, data/error: ... }
+
+    - path: "tg_imagebed/database/**"
+      instructions: >
+        SQLite 数据访问层（WAL 模式，db_retry 装饰器）。审查时请关注：
+        1. 全部使用 `?` 参数化查询，禁止字符串拼接
+        2. sqlite3.OperationalError 必须 re-raise（否则 db_retry 装饰器不生效）
+        3. 外键约束和 CASCADE 删除是否正确
+        4. 数据库迁移的兼容性（PRAGMA table_info + ALTER TABLE）
+
+    - path: "tg_imagebed/services/**"
+      instructions: >
+        业务服务层。审查时请关注：
+        1. 线程安全性（requests.Session 非线程安全，需加锁）
+        2. 文件上传的补偿删除（数据库失败时清理存储对象）
+        3. CDN 服务的队列调度和错误重试
+        4. Token 级联删除的完整性
+
+    - path: "tg_imagebed/storage/**"
+      instructions: >
+        多存储后端（策略模式 + StorageRouter）。审查时请关注：
+        1. 新后端是否正确实现 StorageBackend 抽象接口
+        2. 代理配置的 URL 解析（协议、端口默认值）
+        3. Telegram Bot API 速率限制和重试
+        4. 场景路由（guest/token/group/admin）的配置解析
+
+    - path: "tg_imagebed/bot/**"
+      instructions: >
+        Telegram Bot 模块（独立线程，轮询模式）。审查时请关注：
+        1. media_group 的 debounce 合并逻辑
+        2. 指数退避重试策略（5s → 120s）
+        3. 409 冲突检测和热重启支持
+        4. Bot Token 热更新的线程安全性
+
+    - path: "tg_imagebed/admin_module.py"
+      instructions: >
+        管理员认证模块。审查时请关注：
+        1. TOTP 二次验证的安全性（secret 缺失时 fail-closed）
+        2. Session Cookie 的安全属性（HttpOnly/SameSite）
+        3. 防暴力破解（账户+IP 双重限流）
+        4. 密码哈希使用 werkzeug pbkdf2:sha256
+
+    - path: "Dockerfile"
+      instructions: >
+        多阶段 Docker 构建（node:20-alpine → python:3.11-slim）。审查时请关注：
+        1. 构建阶段是否缓存了依赖层
+        2. 最终镜像体积（避免携带构建工具链）
+        3. 非 root 用户运行
+
+    - path: "frontend/nuxt.config.ts"
+      instructions: >
+        Nuxt 配置。审查时请关注：
+        1. ssr: false 下 routeRules 和 prerender 路由是否匹配
+        2. runtimeConfig 的环境变量默认值
+        3. 新增模块的兼容性
+
+  # ── 自动审查 ──
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+    drafts: false
+    ignore_title_keywords:
+      - "WIP"
+      - "DO NOT MERGE"
+      - "wip"
+    base_branches: []
+
+  # ── Anti-Slop 检测 ──
+  slop_detection:
+    enabled: true
+
+  # ── Finishing Touches ──
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: true
+
+  # ── Pre-merge 检查 ──
+  pre_merge_checks:
+    title:
+      mode: "warning"
+      requirements: >
+        PR 标题应遵循 Conventional Commits 格式：
+        type(scope): description
+        类型包括：feat, fix, docs, style, refactor, perf, test, chore
+    description:
+      mode: "warning"
+    docstrings:
+      mode: "off"
+
+  # ── 工具配置 ──
+  tools:
+    # Python 后端
+    ruff:
+      enabled: true
+
+    # Shell 脚本
+    shellcheck:
+      enabled: true
+
+    # Dockerfile
+    hadolint:
+      enabled: true
+
+    # Markdown 文档
+    markdownlint:
+      enabled: true
+
+    # YAML 配置
+    yamllint:
+      enabled: true
+
+    # GitHub Actions
+    actionlint:
+      enabled: true
+
+    # AST 语义分析
+    ast-grep:
+      essential_rules: true
+
+    # 安全扫描
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+
+    # GitHub 集成
+    github-checks:
+      enabled: true
+      timeout_ms: 120000
+
+    # 关闭不相关的语言/框架工具
+    biome:
+      enabled: false
+    eslint:
+      enabled: false
+    flake8:
+      enabled: false
+    phpstan:
+      enabled: false
+    phpmd:
+      enabled: false
+    phpcs:
+      enabled: false
+    golangci-lint:
+      enabled: false
+    swiftlint:
+      enabled: false
+    checkov:
+      enabled: false
+    tflint:
+      enabled: false
+    detekt:
+      enabled: false
+    rubocop:
+      enabled: false
+    buf:
+      enabled: false
+    regal:
+      enabled: false
+    pmd:
+      enabled: false
+    clang:
+      enabled: false
+    cppcheck:
+      enabled: false
+    fortitudeLint:
+      enabled: false
+
+# ──────────────────────────────────────────────
+# 聊天设置
+# ──────────────────────────────────────────────
+chat:
+  auto_reply: true
+
+# ──────────────────────────────────────────────
+# 知识库
+# ──────────────────────────────────────────────
+knowledge_base:
+  learnings:
+    scope: "auto"
+  issues:
+    scope: "auto"
+  jira:
+    project_keys: []
+  linear:
+    team_keys: []
+  pull_requests:
+    scope: "auto"
