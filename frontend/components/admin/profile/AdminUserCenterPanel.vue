@@ -937,6 +937,13 @@ watch(activeTab, (tab) => {
   }
 })
 
+watch(totpDisableModalOpen, (open) => {
+  if (!open) {
+    totpDisablePassword.value = ''
+    totpDisableCode.value = ''
+  }
+})
+
 onUnmounted(() => {
   stopHeartbeat()
 })

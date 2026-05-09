@@ -89,9 +89,15 @@ _totp_verify_tokens_lock = threading.Lock()
 _TOTP_VERIFY_TOKEN_EXPIRE_SECONDS = 60  # 验证 token 有效期 60 秒
 _TOTP_MAX_ATTEMPTS = 3  # 单个 token 最多 TOTP 验证尝试次数
 
+# 按 (username, ip) 限流，防止通过反复登录重置 per-token 预算
+# 格式: {(username, ip): {'attempts': int, 'first_attempt': float}}
+_TOTP_RATE_LIMIT_WINDOW = 300  # 5 分钟窗口
+_TOTP_MAX_FAILED_PER_ACCOUNT_IP = 10  # 窗口内最多累计失败次数
+_totp_account_ip_attempts: dict[tuple, dict] = {}
+
 
 def _cleanup_totp_verify_tokens():
-    """清理过期的 TOTP 验证 token（调用方须持有锁）"""
+    """清理过期的 TOTP 验证 token 和按账号/IP 的尝试记录（调用方须持有锁）"""
     now = time.time()
     expired = [
         t for t, info in _totp_verify_tokens.items()
@@ -99,6 +105,13 @@ def _cleanup_totp_verify_tokens():
     ]
     for t in expired:
         del _totp_verify_tokens[t]
+
+    stale_keys = [
+        k for k, v in _totp_account_ip_attempts.items()
+        if now - v['first_attempt'] > _TOTP_RATE_LIMIT_WINDOW
+    ]
+    for k in stale_keys:
+        del _totp_account_ip_attempts[k]
 
 
 def _generate_totp_secret() -> str:
@@ -848,9 +861,18 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             # 检查是否启用了 TOTP 二次验证
             from .database.settings import is_totp_enabled, get_totp_secret
             if is_totp_enabled() and get_totp_secret():
-                # TOTP 已启用，生成临时验证 token，不直接设置 session
+                # TOTP 已启用，检查账号/IP 级别限流
                 with _totp_verify_tokens_lock:
                     _cleanup_totp_verify_tokens()
+                    account_ip_key = (username, ip)
+                    rate_info = _totp_account_ip_attempts.get(account_ip_key)
+                    if rate_info and rate_info['attempts'] >= _TOTP_MAX_FAILED_PER_ACCOUNT_IP:
+                        logger.warning(f"TOTP 尝试次数已达上限，拒绝签发新 token: {username}, IP={ip}")
+                        return jsonify({
+                            'success': False,
+                            'message': '验证尝试次数过多，请稍后再试',
+                        }), 429
+                    # 生成临时验证 token
                     verification_token = secrets.token_urlsafe(32)
                     _totp_verify_tokens[verification_token] = {
                         'created_at': time.time(),
@@ -955,6 +977,15 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
                     tok['attempts'] = tok.get('attempts', 0) + 1
                     if tok['attempts'] >= _TOTP_MAX_ATTEMPTS:
                         del _totp_verify_tokens[verification_token]
+                account_ip_key = (username, ip)
+                entry = _totp_account_ip_attempts.get(account_ip_key)
+                if entry:
+                    entry['attempts'] += 1
+                else:
+                    _totp_account_ip_attempts[account_ip_key] = {
+                        'attempts': 1,
+                        'first_attempt': time.time(),
+                    }
             logger.warning(f"TOTP 验证失败: {username}")
             return jsonify({'success': False, 'message': '验证码错误'}), 401
 

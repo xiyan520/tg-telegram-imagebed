@@ -414,7 +414,10 @@ const copyShareAllUrl = async () => {
   }
 }
 
+const deletingGalleryId = ref<number | null>(null)
+
 const askDelete = (gallery: Gallery) => {
+  if (deletingGalleryId.value === gallery.id) return
   if (!confirm(`确定要删除画集"${gallery.name}"吗？\n\n此操作将删除画集本身，但不会删除画集中的图片。`)) {
     return
   }
@@ -422,12 +425,16 @@ const askDelete = (gallery: Gallery) => {
 }
 
 const handleDelete = async (id: number) => {
+  if (deletingGalleryId.value === id) return
+  deletingGalleryId.value = id
   try {
     await galleryApi.deleteGallery(id)
     notification.success('删除成功', '画集已删除')
     await loadGalleries()
   } catch (error: any) {
     notification.error('删除失败', error.message || '无法删除画集')
+  } finally {
+    deletingGalleryId.value = null
   }
 }
 

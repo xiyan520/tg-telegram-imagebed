@@ -68,14 +68,15 @@ def admin_tokens_api():
             from datetime import datetime, timedelta
             expires_at = (datetime.now() + timedelta(days=default_expires_days)).strftime('%Y-%m-%d %H:%M:%S')
 
-        # 处理 upload_limit：空字符串、NaN、undefined/null 使用 0（无限上传）
-        # 明确输入 0 也表示无限上传，其他数值使用用户指定的值
+        # 处理 upload_limit：缺失字段使用系统默认值，明确发送的无效值使用 0（无限上传）
         raw_upload_limit = payload.get('upload_limit')
-        upload_limit = 0
-        if raw_upload_limit is not None and raw_upload_limit != '' and str(raw_upload_limit).lower() != 'nan':
+        if 'upload_limit' not in payload:
+            upload_limit = default_upload_limit
+        elif raw_upload_limit is None or str(raw_upload_limit).strip() == '' or str(raw_upload_limit).strip().lower() == 'nan':
+            upload_limit = 0
+        else:
             try:
                 val = int(raw_upload_limit)
-                # 0 表示无限，其他有效值直接使用，负数使用默认值
                 if val >= 0:
                     upload_limit = val
                 else:

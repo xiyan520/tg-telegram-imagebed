@@ -97,6 +97,7 @@ def _admin_json(data, status=200, cache='no-cache'):
     if allowed:
         resp.headers['Access-Control-Allow-Origin'] = allowed
         resp.headers['Access-Control-Allow-Credentials'] = 'true'
+        resp.headers['Vary'] = 'Origin'
     return add_cache_headers(resp, cache), status
 
 
@@ -107,6 +108,7 @@ def _admin_options(methods: str):
     if allowed:
         response.headers['Access-Control-Allow-Origin'] = allowed
         response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Vary'] = 'Origin'
     response.headers['Access-Control-Allow-Methods'] = methods
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return add_cache_headers(response, 'no-cache')

@@ -148,16 +148,19 @@ class TelegramBackend(StorageBackend):
             raw = f"http://{raw}"
 
         parsed = urlparse(raw)
-        if not parsed.hostname or not parsed.port:
+        if not parsed.hostname:
             return None
 
         scheme = (parsed.scheme or "").lower()
         if scheme in {"socks5", "socks5h"}:
             pyrogram_scheme = "socks5"
+            default_port = 1080
         elif scheme in {"socks4", "socks4a"}:
             pyrogram_scheme = "socks4"
+            default_port = 1080
         elif scheme in {"http", "https"}:
             pyrogram_scheme = "http"
+            default_port = 3128
         else:
             logger.warning(f"Kurigram 不支持的代理协议: {scheme}")
             return None
@@ -165,7 +168,7 @@ class TelegramBackend(StorageBackend):
         proxy: Dict[str, Any] = {
             "scheme": pyrogram_scheme,
             "hostname": parsed.hostname,
-            "port": parsed.port,
+            "port": parsed.port or default_port,
         }
         if parsed.username:
             proxy["username"] = unquote(parsed.username)

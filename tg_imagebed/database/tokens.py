@@ -284,6 +284,8 @@ def reserve_token_upload(token: str, *, daily_limit: int = 0) -> Dict[str, Any]:
                 'remaining_uploads': remaining_after,
             }
 
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"预留 Token 上传名额失败: {e}")
         return {'ok': False, 'reason': '验证失败'}
@@ -293,8 +295,10 @@ def reserve_token_upload(token: str, *, daily_limit: int = 0) -> Dict[str, Any]:
 def reserve_guest_upload(*, source: str, daily_limit: int) -> Dict[str, Any]:
     """为访客上传预留一个当日名额。"""
     source = (source or '').strip()
-    if not source or daily_limit <= 0:
+    if daily_limit <= 0:
         return {'ok': True, 'reservation_key': None}
+    if not source:
+        return {'ok': False, 'reason': '缺少访客限流标识'}
 
     try:
         with get_connection() as conn:
@@ -335,6 +339,8 @@ def reserve_guest_upload(*, source: str, daily_limit: int) -> Dict[str, Any]:
             )
             return {'ok': True, 'reservation_key': reservation_key}
 
+    except sqlite3.OperationalError:
+        raise
     except Exception as e:
         logger.error(f"预留访客上传名额失败: {e}")
         return {'ok': False, 'reason': '检查上传限制失败'}

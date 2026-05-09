@@ -8,7 +8,7 @@ import re
 from flask import request, jsonify, make_response
 
 from . import admin_bp, images_bp
-from .admin_helpers import _get_allowed_origin
+from .admin_helpers import _get_allowed_origin, _admin_options
 from ..config import logger, PROXY_URL
 from ..utils import add_cache_headers, clear_domain_cache, clear_domains_cache
 from ..database import (
@@ -194,12 +194,7 @@ def get_public_settings_api():
 def admin_system_settings():
     """管理员系统设置 API"""
     if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Methods'] = 'GET, PUT, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        return add_cache_headers(response, 'no-cache')
+        return _admin_options('GET, PUT, OPTIONS')
 
     try:
         if request.method == 'GET':
@@ -771,12 +766,7 @@ def admin_system_settings():
 def admin_revoke_tokens():
     """管理员批量禁用 Token"""
     if request.method == 'OPTIONS':
-        response = make_response()
-        response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        return add_cache_headers(response, 'no-cache')
+        return _admin_options('POST, OPTIONS')
 
     try:
         data = request.get_json() or {}

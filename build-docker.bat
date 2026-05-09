@@ -18,12 +18,6 @@ if not exist "%SCRIPT_SH%" (
     goto :fail
 )
 
-docker version >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] Docker is not available. Start Docker Desktop first.
-    goto :fail
-)
-
 set "GIT_BASH="
 for %%I in (
     "%ProgramFiles%\Git\bin\bash.exe"
@@ -38,6 +32,11 @@ if defined GIT_BASH (
     echo [INFO] Using Git Bash
     echo [INFO] Bash: "%GIT_BASH%"
     echo.
+    call "%GIT_BASH%" -lc "docker version >/dev/null 2>&1"
+    if errorlevel 1 (
+        echo [ERROR] Docker is not available in Git Bash. Start Docker Desktop first.
+        goto :fail
+    )
     if /I "%DOCKER_LAUNCHER_DRY_RUN%"=="1" (
         echo [DRY-RUN] Skipped actual execution
         goto :success
@@ -60,6 +59,11 @@ if not errorlevel 1 (
     echo [INFO] Using WSL
     echo [INFO] WSL dir: "%WSL_DIR%"
     echo.
+    wsl.exe docker version >nul 2>&1
+    if errorlevel 1 (
+        echo [ERROR] Docker is not available in WSL. Start Docker Desktop first.
+        goto :fail
+    )
     if /I "%DOCKER_LAUNCHER_DRY_RUN%"=="1" (
         echo [DRY-RUN] Skipped actual execution
         goto :success

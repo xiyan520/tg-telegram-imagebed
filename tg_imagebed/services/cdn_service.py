@@ -166,7 +166,10 @@ class CloudflareCDN:
         if proxy:
             new_session.proxies = {'http': proxy, 'https': proxy}
         with self._session_lock:
+            old_session = self._session
             self._session = new_session
+        if old_session is not None:
+            old_session.close()
 
     def _api_post(self, path: str, payload: dict) -> Tuple[bool, str]:
         """发送 Cloudflare API POST 请求"""
