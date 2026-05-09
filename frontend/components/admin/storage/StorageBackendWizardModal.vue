@@ -522,8 +522,7 @@ const submit = () => {
   const form = clonePlain(localForm.value)
   if (maskedState.value.bot_token && !form.bot_token.trim()) form.bot_token = '__MASKED__'
   if (maskedState.value.api_hash && !form.api_hash.trim()) {
-    const hasMtprotoIntent = Boolean(form.api_id.trim() || form.api_hash.trim())
-    if (hasMtprotoIntent) form.api_hash = '__MASKED__'
+    if (form.api_id.trim() || maskedState.value.api_hash) form.api_hash = '__MASKED__'
   }
   if (maskedState.value.access_key && !form.access_key.trim()) form.access_key = '__MASKED__'
   if (maskedState.value.secret_key && !form.secret_key.trim()) form.secret_key = '__MASKED__'

@@ -258,6 +258,9 @@ watch(() => tokenStore.hasToken, (has) => {
 watch(() => tgAuth.isLoggedIn, (loggedIn) => {
   if (!loggedIn) {
     pruneBoundTokensIfSessionLost()
+    if (authBootstrapDone.value && !tokenStore.hasToken) {
+      navigateTo('/')
+    }
   }
 })
 

@@ -72,9 +72,14 @@
             <div v-if="item.tokenInfo" class="mt-2">
               <div class="h-1.5 bg-stone-100 dark:bg-neutral-700 rounded-full overflow-hidden">
                 <div
+                  v-if="getQuotaPercent(item) !== null"
                   class="h-full rounded-full transition-all duration-500"
                   :class="getQuotaColor(item)"
                   :style="{ width: `${getQuotaPercent(item)}%` }"
+                />
+                <div
+                  v-else
+                  class="h-full rounded-full bg-stone-300 dark:bg-neutral-600"
                 />
               </div>
             </div>
@@ -241,7 +246,7 @@ const formatDate = (d: string) => {
 const getQuotaPercent = (item: any) => {
   const count = item.tokenInfo?.upload_count ?? 0
   const limit = item.tokenInfo?.upload_limit
-  if (!limit) return 0
+  if (!limit) return null
   return Math.min(100, Math.round((count / limit) * 100))
 }
 

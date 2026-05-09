@@ -406,16 +406,7 @@ const createToken = async (form: CreateTokenForm) => {
     tokenCopied.value = false
     notification.success('创建成功', 'Token 已生成，请及时复制保存')
 
-    // 添加到 Token Vault（同步失败不影响创建结果）
-    try {
-      await tokenStore.addTokenToVault(resp.data?.token, {
-        albumName: form.description || '',
-        makeActive: false,
-        verify: true
-      })
-    } catch {
-      /* vault sync 失败不影响已创建的 Token */
-    }
+    // 管理后台不自动保存 Token 到本地 Vault（避免在共享设备上泄露凭据）
 
     await refreshAll()
   } catch (error: any) {
