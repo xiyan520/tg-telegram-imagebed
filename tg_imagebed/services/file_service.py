@@ -307,7 +307,10 @@ def record_existing_telegram_file(
         },
     }
     save_file_info(encrypted_id, file_data)
-    add_to_cdn_monitor(encrypted_id, upload_time)
+    try:
+        add_to_cdn_monitor(encrypted_id, upload_time)
+    except Exception:
+        logger.exception(f"CDN 监控入队失败: {encrypted_id}")
 
     logger.info(f"已记录 Telegram 既有文件: {filename} -> {encrypted_id}")
 
