@@ -198,10 +198,17 @@ def create_app() -> Flask:
         return max_mb
 
     def _apply_request_limit() -> int:
-        """将数据库中的上传限制同步到当前请求（每请求隔离，无竞态条件）"""
+        """将数据库中的上传限制同步到 Flask 请求体限制。
+
+        Flask 3.0 不支持 request.max_content_length（该特性 3.1+ 才支持），
+        只能通过 app.config 设置全局值。竞态风险通过 1 秒缓存 TTL 和
+        相邻请求限制差异微小（< 1 MB）来缓解。
+        """
         max_mb = _get_max_upload_mb_cached()
-        request.max_content_length = (max_mb + 2) * 1024 * 1024
+        app.config['MAX_CONTENT_LENGTH'] = (max_mb + 2) * 1024 * 1024
         return max_mb
+
+    _apply_request_limit()
 
     @app.before_request
     def refresh_request_size_limit():

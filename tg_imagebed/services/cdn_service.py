@@ -168,8 +168,8 @@ class CloudflareCDN:
         with self._session_lock:
             old_session = self._session
             self._session = new_session
-        if old_session is not None:
-            old_session.close()
+            if old_session is not None:
+                old_session.close()
 
     def _api_post(self, path: str, payload: dict) -> Tuple[bool, str]:
         """发送 Cloudflare API POST 请求"""
@@ -179,15 +179,15 @@ class CloudflareCDN:
 
         with self._session_lock:
             session = self._session
-        try:
-            resp = session.post(
-                f'{self.base_url}{path}',
-                headers=self.headers,
-                json=payload,
-                timeout=20,
-            )
-        except Exception as e:
-            return False, str(e)
+            try:
+                resp = session.post(
+                    f'{self.base_url}{path}',
+                    headers=self.headers,
+                    json=payload,
+                    timeout=20,
+                )
+            except Exception as e:
+                return False, str(e)
 
         try:
             data = resp.json()
@@ -217,7 +217,7 @@ class CloudflareCDN:
         try:
             with self._session_lock:
                 session = self._session
-            resp = session.get(url, headers=headers, timeout=15, allow_redirects=False)
+                resp = session.get(url, headers=headers, timeout=15, allow_redirects=False)
             cf_cache_status = resp.headers.get('CF-Cache-Status', '')
             age_raw = resp.headers.get('Age')
             age = int(age_raw) if age_raw and str(age_raw).isdigit() else None

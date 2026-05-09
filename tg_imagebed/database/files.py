@@ -107,6 +107,9 @@ def save_file_info(
                 raise ValueError('upload reservation is missing or already consumed')
 
             auth_token = reservation_row['auth_token']
+            file_auth_token = file_info.get('auth_token') or None
+            if file_auth_token != auth_token:
+                raise ValueError('reservation auth token does not match file auth token')
             if auth_token:
                 cursor.execute(
                     '''

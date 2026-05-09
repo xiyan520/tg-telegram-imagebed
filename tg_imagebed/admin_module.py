@@ -860,8 +860,15 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
         if verify_admin_password(username, password):
             # 检查是否启用了 TOTP 二次验证
             from .database.settings import is_totp_enabled, get_totp_secret
-            if is_totp_enabled() and get_totp_secret():
-                # TOTP 已启用，检查账号/IP 级别限流
+            if is_totp_enabled():
+                totp_secret = get_totp_secret()
+                if not totp_secret:
+                    logger.error(f"TOTP 已启用但 secret 缺失，拒绝登录: {username}")
+                    return jsonify({
+                        'success': False,
+                        'message': '系统配置错误，请联系管理员',
+                    }), 500
+                # TOTP 已启用且 secret 有效，检查账号/IP 级别限流
                 with _totp_verify_tokens_lock:
                     _cleanup_totp_verify_tokens()
                     account_ip_key = (username, ip)
@@ -989,8 +996,12 @@ def register_admin_routes(app, DATABASE_PATH, get_all_files_count, get_total_siz
             logger.warning(f"TOTP 验证失败: {username}")
             return jsonify({'success': False, 'message': '验证码错误'}), 401
 
-        # TOTP 验证成功，清除 token 并记录登录成功
+        # TOTP 验证成功，原子消费 token 防止并发重放
         with _totp_verify_tokens_lock:
+            tok = _totp_verify_tokens.get(verification_token)
+            if not tok or tok.get('used'):
+                return jsonify({'success': False, 'message': '验证会话已过期，请重新登录'}), 401
+            tok['used'] = True
             _totp_verify_tokens.pop(verification_token, None)
         _record_login_success(ip)
 

@@ -106,11 +106,15 @@ def _configured_release_repo() -> str:
 
 def _configured_asset_name() -> str:
     value = (get_system_setting('app_update_release_asset_name') or '').strip() or DEFAULT_ASSET_NAME
+    if any(sep in value for sep in ('/', '\\')) or value in ('', '.', '..'):
+        raise RuntimeError(f'非法更新包文件名: {value}')
     return value
 
 
 def _configured_sha_name() -> str:
     value = (get_system_setting('app_update_release_sha_name') or '').strip() or DEFAULT_SHA_NAME
+    if any(sep in value for sep in ('/', '\\')) or value in ('', '.', '..'):
+        raise RuntimeError(f'非法校验文件名: {value}')
     return value
 
 

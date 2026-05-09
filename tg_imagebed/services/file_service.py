@@ -208,7 +208,15 @@ def process_upload(
         'storage_key': put_result.storage_key,
         'storage_meta': put_result.storage_meta,
     }
-    save_file_info(encrypted_id, file_data, reservation_key=reservation_key)
+    try:
+        save_file_info(encrypted_id, file_data, reservation_key=reservation_key)
+    except Exception:
+        logger.exception(f"保存文件信息失败，尝试回滚已存储的对象: {encrypted_id}")
+        try:
+            backend.delete(put_result.storage_key)
+        except Exception:
+            logger.exception(f"回滚删除失败: {put_result.storage_key}")
+        return None
 
     # 添加到 CDN 监控
     add_to_cdn_monitor(encrypted_id, file_data['upload_time'])

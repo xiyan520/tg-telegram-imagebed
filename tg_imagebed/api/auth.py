@@ -72,6 +72,12 @@ def generate_token():
                     session_info = verify_tg_session(tg_session_token)
                     if session_info:
                         tg_user_id = session_info['tg_user_id']
+                        max_tokens = get_system_setting_int('tg_max_tokens_per_user', 5, minimum=1)
+                        if get_user_token_count(tg_user_id) >= max_tokens:
+                            return add_cache_headers(jsonify({
+                                'success': False,
+                                'error': f'Token limit reached ({max_tokens})',
+                            }), 'no-cache'), 403
 
         data = request.get_json(silent=True) or {}
         max_upload_limit = get_system_setting_int('guest_token_max_upload_limit', 1000, minimum=1, maximum=1000000)

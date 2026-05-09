@@ -247,8 +247,10 @@ watch(navItems, (items) => {
   }
 })
 
+const authBootstrapDone = ref(false)
+
 watch(() => tokenStore.hasToken, (has) => {
-  if (!has && !tgAuth.isLoggedIn) {
+  if (authBootstrapDone.value && !has && !tgAuth.isLoggedIn) {
     navigateTo('/')
   }
 })
@@ -271,6 +273,7 @@ onMounted(async () => {
       pruneBoundTokensIfSessionLost()
     }
   }
+  authBootstrapDone.value = true
   if (!tokenStore.hasToken && !tgAuth.isLoggedIn) {
     navigateTo('/')
   }

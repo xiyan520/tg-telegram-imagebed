@@ -34,7 +34,6 @@ export const useAuthStore = defineStore('auth', {
 
           if (import.meta.client) {
             localStorage.setItem('has_session', 'true')
-            localStorage.setItem('auth_username', this.username)
           }
 
           return response.data
@@ -75,7 +74,6 @@ export const useAuthStore = defineStore('auth', {
 
           if (import.meta.client) {
             localStorage.setItem('has_session', 'true')
-            localStorage.setItem('auth_username', this.username)
           }
 
           return response.data
@@ -91,55 +89,75 @@ export const useAuthStore = defineStore('auth', {
     // 获取 TOTP 状态
     async fetchTotpStatus() {
       const config = useRuntimeConfig()
-      const response = await $fetch<ApiResponse<TotpStatusData>>(`${config.public.apiBase}/api/admin/totp/status`, {
-        credentials: 'include'
-      })
-      if (response.success && response.data) {
-        this.totpEnabled = response.data.enabled
+      try {
+        const response = await $fetch<ApiResponse<TotpStatusData>>(`${config.public.apiBase}/api/admin/totp/status`, {
+          credentials: 'include'
+        })
+        if (response.success && response.data) {
+          this.totpEnabled = response.data.enabled
+        }
+        return response
+      } catch (error: any) {
+        if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
+        throw error
       }
-      return response
     },
 
     // 开始 TOTP 设置
     async startTotpSetup() {
       const config = useRuntimeConfig()
-      const response = await $fetch<ApiResponse<TotpSetupData>>(`${config.public.apiBase}/api/admin/totp/setup`, {
-        method: 'POST',
-        credentials: 'include'
-      })
-      if (response.success && response.data) {
-        this.totpSetupData = response.data
+      try {
+        const response = await $fetch<ApiResponse<TotpSetupData>>(`${config.public.apiBase}/api/admin/totp/setup`, {
+          method: 'POST',
+          credentials: 'include'
+        })
+        if (response.success && response.data) {
+          this.totpSetupData = response.data
+        }
+        return response
+      } catch (error: any) {
+        if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
+        throw error
       }
-      return response
     },
 
     // 验证并启用 TOTP
     async verifyAndEnableTotp(code: string) {
       const config = useRuntimeConfig()
-      const response = await $fetch<ApiResponse<{}>>(`${config.public.apiBase}/api/admin/totp/verify`, {
-        method: 'POST',
-        body: { code },
-        credentials: 'include'
-      })
-      if (response.success) {
-        this.totpEnabled = true
-        this.totpSetupData = null
+      try {
+        const response = await $fetch<ApiResponse<{}>>(`${config.public.apiBase}/api/admin/totp/verify`, {
+          method: 'POST',
+          body: { code },
+          credentials: 'include'
+        })
+        if (response.success) {
+          this.totpEnabled = true
+          this.totpSetupData = null
+        }
+        return response
+      } catch (error: any) {
+        if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
+        throw error
       }
-      return response
     },
 
     // 禁用 TOTP
     async disableTotp(password: string, code: string) {
       const config = useRuntimeConfig()
-      const response = await $fetch<ApiResponse<{}>>(`${config.public.apiBase}/api/admin/totp/disable`, {
-        method: 'POST',
-        body: { password, code },
-        credentials: 'include'
-      })
-      if (response.success) {
-        this.totpEnabled = false
+      try {
+        const response = await $fetch<ApiResponse<{}>>(`${config.public.apiBase}/api/admin/totp/disable`, {
+          method: 'POST',
+          body: { password, code },
+          credentials: 'include'
+        })
+        if (response.success) {
+          this.totpEnabled = false
+        }
+        return response
+      } catch (error: any) {
+        if (error?.response?.status === 401) { this.handleUnauthorized(); return { success: false, error: 'Unauthorized' } as any }
+        throw error
       }
-      return response
     },
 
     // 登出
@@ -195,15 +213,10 @@ export const useAuthStore = defineStore('auth', {
       if (!import.meta.client) return
 
       const hasSession = localStorage.getItem('has_session')
-      const username = localStorage.getItem('auth_username')
 
       if (!hasSession) {
         this.clearAuth()
         return
-      }
-
-      if (username) {
-        this.username = username
       }
 
       const isValid = await this.checkAuth()

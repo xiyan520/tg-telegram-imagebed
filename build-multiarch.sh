@@ -2,6 +2,7 @@
 # 多架构构建和推送脚本
 
 set -e
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
 # 配置
 IMAGE_NAME="lost4/tg-telegram-imagebed"

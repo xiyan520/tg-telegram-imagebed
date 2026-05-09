@@ -110,7 +110,8 @@
           <!-- 删除按钮 -->
           <button
             @click.stop="askDelete(gallery)"
-            class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-red-600"
+            :disabled="deletingGalleryId !== null"
+            class="absolute top-2 right-2 z-10 w-8 h-8 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 transition-opacity hover:bg-red-600 disabled:opacity-0 disabled:cursor-not-allowed"
             title="删除画集"
           >
             <UIcon name="heroicons:trash" class="w-4 h-4" />
@@ -417,7 +418,7 @@ const copyShareAllUrl = async () => {
 const deletingGalleryId = ref<number | null>(null)
 
 const askDelete = (gallery: Gallery) => {
-  if (deletingGalleryId.value === gallery.id) return
+  if (deletingGalleryId.value !== null) return
   if (!confirm(`确定要删除画集"${gallery.name}"吗？\n\n此操作将删除画集本身，但不会删除画集中的图片。`)) {
     return
   }
@@ -425,7 +426,7 @@ const askDelete = (gallery: Gallery) => {
 }
 
 const handleDelete = async (id: number) => {
-  if (deletingGalleryId.value === id) return
+  if (deletingGalleryId.value !== null) return
   deletingGalleryId.value = id
   try {
     await galleryApi.deleteGallery(id)

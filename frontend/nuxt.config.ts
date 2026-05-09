@@ -50,7 +50,7 @@ export default defineNuxtConfig({
   nitro: {
     preset: 'static',
     prerender: {
-      routes: ['/200.html', '/404.html']
+      routes: ['/', '/200.html', '/404.html']
     }
   },
 

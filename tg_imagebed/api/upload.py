@@ -110,8 +110,12 @@ def validate_upload_file(file) -> Tuple[Optional[tuple], Optional[ValidatedUploa
     if content_type and not content_type.startswith("image/"):
         return _error("只允许上传图片文件", 400), None
 
-    is_svg = (content_type == "image/svg+xml" or
-              file.filename.rsplit(".", 1)[-1].lower() == "svg" if "." in (file.filename or "") else False)
+    # SVG 可嵌入 <script>，直接作为图片 serving 存在 XSS 风险。
+    # 在实现 XML 清洗 + 安全 serving 策略前一律拒绝。
+    if content_type == "image/svg+xml":
+        return _error("暂不支持 SVG 上传", 400), None
+    if "." in (file.filename or "") and file.filename.rsplit(".", 1)[-1].lower() == "svg":
+        return _error("暂不支持 SVG 上传", 400), None
 
     max_size_mb = get_system_setting_int("max_file_size_mb", 100, minimum=1, maximum=1024)
     max_size_bytes = max_size_mb * 1024 * 1024
@@ -146,14 +150,11 @@ def validate_upload_file(file) -> Tuple[Optional[tuple], Optional[ValidatedUploa
         if not tmp.closed:
             tmp.close()
 
-    if is_svg:
-        detected_mime = "image/svg+xml"
-    else:
-        detected_mime = validate_image_magic(bytes(header))
-        if not detected_mime:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            return _error("无效的图片文件格式", 400), None
+    detected_mime = validate_image_magic(bytes(header))
+    if not detected_mime:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        return _error("无效的图片文件格式", 400), None
 
     return None, ValidatedUpload(
         temp_path=tmp_path,
